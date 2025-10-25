@@ -25,3 +25,6 @@ jobs:
       uses: peter-evans/create-pull-request@v4
       with:
         title: Automatic Update
+        branch: create-pull-request/patch
+        commit-message: "chore: automatic update"
+        delete-branch: true
