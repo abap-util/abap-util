@@ -45,14 +45,16 @@ CLASS zabaputil_cl_util_log IMPLEMENTATION.
 
   METHOD add.
 
-    DATA(lt_msg) = zabaputil_cl_util=>msg_get_t( val ).
+    DATA lt_msg TYPE zabaputil_cl_util=>ty_t_msg.
+    lt_msg = zabaputil_cl_util=>msg_get_t( val ).
     INSERT LINES OF lt_msg INTO TABLE mt_log.
 
   ENDMETHOD.
 
   METHOD bal_read.
 
-    DATA(lt_msg) = zabaputil_cl_util=>bal_read(
+    DATA lt_msg TYPE zabaputil_cl_util=>ty_t_msg.
+    lt_msg = zabaputil_cl_util=>bal_read(
          object    = object
          subobject = subobject
          id        = id ).

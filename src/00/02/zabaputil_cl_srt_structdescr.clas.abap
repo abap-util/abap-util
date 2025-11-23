@@ -76,8 +76,10 @@ CLASS zabaputil_cl_srt_structdescr IMPLEMENTATION.
 
       TRY.
           component_rtti-type       ?= <component>-type->get_rtti( ).
-        CATCH cx_root INTO DATA(x).
-          DATA(lv_method) = 'GET_BY_KIND'.
+          DATA x TYPE REF TO cx_root.
+        CATCH cx_root INTO x.
+          DATA lv_method TYPE c LENGTH 11.
+          lv_method = 'GET_BY_KIND'.
           CALL METHOD cl_abap_elemdescr=>(lv_method)
             EXPORTING
               p_type_kind = <component>-type->type_kind
