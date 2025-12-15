@@ -46,14 +46,16 @@ CLASS zabaputil_cx_util_error IMPLEMENTATION.
     IF ms_error-x_root IS NOT INITIAL.
       result = ms_error-x_root->get_text( ).
 
-      DATA(error) = abap_true.
+      DATA error LIKE abap_true.
+      error = abap_true.
     ELSEIF ms_error-text IS NOT INITIAL.
       result = ms_error-text.
       error = abap_true.
     ENDIF.
 
     IF previous IS BOUND.
-      DATA(lo_x) = previous.
+      DATA lo_x LIKE previous.
+      lo_x = previous.
       WHILE lo_x IS BOUND.
         result = result && CL_ABAP_CHAR_UTILITIES=>NEWLINE && lo_x->get_text( ).
         lo_x = previous->previous.
@@ -61,7 +63,13 @@ CLASS zabaputil_cx_util_error IMPLEMENTATION.
     ENDIF.
 
 
-    result = COND #( WHEN error = abap_true AND result IS INITIAL THEN `UNKNOWN_ERROR` ELSE result ).
+    DATA temp1 TYPE string.
+    IF error = abap_true AND result IS INITIAL.
+      temp1 = `UNKNOWN_ERROR`.
+    ELSE.
+      temp1 = result.
+    ENDIF.
+    result = temp1.
 
   ENDMETHOD.
 ENDCLASS.

@@ -14,7 +14,8 @@ CLASS ltcl_unit_test IMPLEMENTATION.
         RAISE EXCEPTION TYPE zabaputil_cx_util_error
           EXPORTING val = `this is an error text`.
 
-      CATCH zabaputil_cx_util_error INTO DATA(lx).
+        DATA lx TYPE REF TO zabaputil_cx_util_error.
+      CATCH zabaputil_cx_util_error INTO lx.
         cl_abap_unit_assert=>assert_equals( exp = `this is an error text`
                                             act = lx->get_text( ) ).
     ENDTRY.

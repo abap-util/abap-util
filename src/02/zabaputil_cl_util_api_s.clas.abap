@@ -131,15 +131,20 @@ CLASS zabaputil_cl_util_api_s IMPLEMENTATION.
   METHOD context_get_user_tech.
     TRY.
 
-        DATA(lv_result) = VALUE string( ).
-        DATA(lv_class) = 'CL_ABAP_CONTEXT_INFO'.
+        DATA temp1 TYPE string.
+        CLEAR temp1.
+        DATA lv_result LIKE temp1.
+        lv_result = temp1.
+        DATA lv_class TYPE c LENGTH 20.
+        lv_class = 'CL_ABAP_CONTEXT_INFO'.
         CALL METHOD (lv_class)=>('GET_USER_BUSINESS_PARTNER_ID')
           RECEIVING
             rv_business_partner_id = lv_result.
 
         result = lv_result.
 
-      CATCH cx_root INTO DATA(x).
+        DATA x TYPE REF TO cx_root.
+      CATCH cx_root INTO x.
         RAISE EXCEPTION TYPE zabaputil_cx_util_error
           EXPORTING
             previous = x.
@@ -486,8 +491,10 @@ CLASS zabaputil_cl_util_api_s IMPLEMENTATION.
         ENDLOOP.
         result = temp3.
 
-      CATCH cx_root INTO DATA(x).
-        DATA(lv_dummy) = x->get_text( ).
+        DATA x TYPE REF TO cx_root.
+      CATCH cx_root INTO x.
+        DATA lv_dummy TYPE string.
+        lv_dummy = x->get_text( ).
     ENDTRY.
 
   ENDMETHOD.
@@ -593,8 +600,10 @@ CLASS zabaputil_cl_util_api_s IMPLEMENTATION.
               RECEIVING
                 rs_long_field_label = result-long.
 
-          CATCH cx_root INTO DATA(x).
-            DATA(error) = x->get_text( ).
+            DATA x TYPE REF TO cx_root.
+          CATCH cx_root INTO x.
+            DATA error TYPE string.
+            error = x->get_text( ).
         ENDTRY.
     ENDTRY.
 
@@ -712,8 +721,10 @@ CLASS zabaputil_cl_util_api_s IMPLEMENTATION.
           RECEIVING
             rv_short_description = result.
 
-      CATCH cx_root INTO DATA(x).
-        DATA(lv_dummy) = x->get_text( ).
+        DATA x TYPE REF TO cx_root.
+      CATCH cx_root INTO x.
+        DATA lv_dummy TYPE string.
+        lv_dummy = x->get_text( ).
     ENDTRY.
 
   ENDMETHOD.
@@ -723,23 +734,25 @@ CLASS zabaputil_cl_util_api_s IMPLEMENTATION.
     DATA ddtext TYPE c LENGTH 60.
 
     IF langu IS NOT SUPPLIED.
-      DATA(lan) = sy-langu.
+      DATA lan LIKE sy-langu.
+      lan = sy-langu.
     ELSE.
       lan = langu.
     ENDIF.
 
-    IF context_check_abap_cloud( ).
+    IF context_check_abap_cloud( ) IS NOT INITIAL.
 
       ddtext = tabname.
 
     ELSE.
 
-      DATA(lv_tabname) = `dd02t`.
+      DATA lv_tabname TYPE string.
+      lv_tabname = `dd02t`.
       SELECT SINGLE ddtext
-        FROM (lv_tabname)
-        WHERE tabname    = @tabname
-          AND ddlanguage = @lan
-        INTO @ddtext.
+        FROM (lv_tabname) INTO ddtext
+        WHERE tabname    = tabname
+          AND ddlanguage = lan
+        .
 
     ENDIF.
 
