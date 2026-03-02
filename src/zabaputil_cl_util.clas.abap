@@ -81,11 +81,38 @@ CLASS zabaputil_cl_util DEFINITION
       END OF ty_s_msg,
       ty_t_msg TYPE STANDARD TABLE OF ty_s_msg WITH EMPTY KEY.
 
+    TYPES:
+      BEGIN OF ty_s_msg_box,
+        text    TYPE string,
+        type    TYPE string,
+        title   TYPE string,
+        details TYPE string,
+        skip    TYPE abap_bool,
+      END OF ty_s_msg_box.
+
     CLASS-METHODS ui5_get_msg_type
       IMPORTING
         val           TYPE clike
       RETURNING
         VALUE(result) TYPE string.
+
+    CLASS-METHODS msg_get_title
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS msg_box_format
+      IMPORTING
+        val           TYPE any
+      RETURNING
+        VALUE(result) TYPE ty_s_msg_box.
+
+    CLASS-METHODS rtti_check_serializable
+      IMPORTING
+        val           TYPE REF TO object
+      RETURNING
+        VALUE(result) TYPE abap_bool.
 
     CLASS-METHODS msg_get_t
       IMPORTING
@@ -260,8 +287,7 @@ CLASS zabaputil_cl_util DEFINITION
 
     CLASS-METHODS x_raise
       IMPORTING
-        v TYPE clike DEFAULT `CX_SY_SUBRC`
-          PREFERRED PARAMETER v.
+        v TYPE clike DEFAULT `CX_SY_SUBRC`.
 
     CLASS-METHODS json_stringify
       IMPORTING
@@ -495,9 +521,122 @@ CLASS zabaputil_cl_util DEFINITION
       RETURNING
         VALUE(result) TYPE abap_bool.
 
+    CLASS-METHODS c_contains
+      IMPORTING
+        val           TYPE clike
+        sub           TYPE clike
+      RETURNING
+        VALUE(result) TYPE abap_bool.
+
+    CLASS-METHODS c_starts_with
+      IMPORTING
+        val           TYPE clike
+        prefix        TYPE clike
+      RETURNING
+        VALUE(result) TYPE abap_bool.
+
+    CLASS-METHODS c_ends_with
+      IMPORTING
+        val           TYPE clike
+        suffix        TYPE clike
+      RETURNING
+        VALUE(result) TYPE abap_bool.
+
+    CLASS-METHODS c_split
+      IMPORTING
+        val           TYPE clike
+        sep           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string_table.
+
+    CLASS-METHODS c_join
+      IMPORTING
+        tab           TYPE string_table
+        sep           TYPE clike DEFAULT ``
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS rtti_check_table
+      IMPORTING
+        val           TYPE any
+      RETURNING
+        VALUE(result) TYPE abap_bool.
+
+    CLASS-METHODS rtti_check_structure
+      IMPORTING
+        val           TYPE any
+      RETURNING
+        VALUE(result) TYPE abap_bool.
+
+    CLASS-METHODS rtti_check_numeric
+      IMPORTING
+        val           TYPE any
+      RETURNING
+        VALUE(result) TYPE abap_bool.
+
+    CLASS-METHODS time_add_seconds
+      IMPORTING
+        !time         TYPE timestampl
+        !seconds      TYPE i
+      RETURNING
+        VALUE(result) TYPE timestampl.
+
+    CLASS-METHODS time_get_stampl_by_date_time
+      IMPORTING
+        !date         TYPE d
+        !time         TYPE t
+      RETURNING
+        VALUE(result) TYPE timestampl.
+
+    CLASS-METHODS time_diff_seconds
+      IMPORTING
+        !time_from    TYPE timestampl
+        !time_to      TYPE timestampl
+      RETURNING
+        VALUE(result) TYPE i.
+
+    CLASS-METHODS conv_string_to_date
+      IMPORTING
+        val           TYPE clike
+        format        TYPE clike DEFAULT `YYYY-MM-DD`
+      RETURNING
+        VALUE(result) TYPE d.
+
+    CLASS-METHODS conv_date_to_string
+      IMPORTING
+        val           TYPE d
+        format        TYPE clike DEFAULT `YYYY-MM-DD`
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS app_get_url
+      IMPORTING
+        VALUE(classname) TYPE clike
+        !origin          TYPE clike
+        !pathname        TYPE clike
+        !search          TYPE clike
+        !hash            TYPE clike OPTIONAL
+      RETURNING
+        VALUE(result)    TYPE string.
+
+    CLASS-METHODS app_get_url_source_code
+      IMPORTING
+        !classname    TYPE clike
+        !origin       TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
   PROTECTED SECTION.
 
   PRIVATE SECTION.
+
+    TYPES:
+      BEGIN OF ty_s_bool_cache,
+        absolute_name TYPE string,
+        is_bool       TYPE abap_bool,
+      END OF ty_s_bool_cache.
+
+    CLASS-DATA mt_bool_cache TYPE HASHED TABLE OF ty_s_bool_cache WITH UNIQUE KEY absolute_name.
 
 ENDCLASS.
 
@@ -520,8 +659,19 @@ CLASS zabaputil_cl_util IMPLEMENTATION.
   METHOD boolean_check_by_data.
 
     TRY.
-        DATA(lv_type_name) = rtti_get_type_name( val ).
-        result = boolean_check_by_name( lv_type_name ).
+        DATA(lo_descr) = cl_abap_elemdescr=>describe_by_data( val ).
+        DATA(lv_abs_name) = CONV string( lo_descr->absolute_name ).
+
+        IF line_exists( mt_bool_cache[ absolute_name = lv_abs_name ] ).
+          result = mt_bool_cache[ absolute_name = lv_abs_name ]-is_bool.
+          RETURN.
+        ENDIF.
+
+        DATA(lo_ele) = CAST cl_abap_elemdescr( lo_descr ).
+        result = boolean_check_by_name( lo_ele->get_relative_name( ) ).
+
+        INSERT VALUE #( absolute_name = lv_abs_name is_bool = result ) INTO TABLE mt_bool_cache.
+
       CATCH cx_root INTO DATA(x).
         DATA(lv_error) = x->get_text( ).
     ENDTRY.
@@ -692,16 +842,16 @@ CLASS zabaputil_cl_util IMPLEMENTATION.
 
       WHEN `*`.
         IF lv_value+lv_length(1) = `*`.
-          SHIFT lv_value RIGHT DELETING TRAILING `*`.
-          SHIFT lv_value LEFT DELETING LEADING `*`.
+          lv_value = substring( val = lv_value off = 1 len = lv_length - 1 ).
           result = VALUE #( sign   = `I`
                             option = `CP`
                             low    = lv_value ).
         ENDIF.
 
       WHEN OTHERS.
-        IF lv_value CP `...`.
+        IF lv_value CS `...`.
           SPLIT lv_value AT `...` INTO result-low result-high.
+          result-sign   = `I`.
           result-option = `BT`.
         ELSE.
           result = VALUE #( sign   = `I`
@@ -817,21 +967,24 @@ CLASS zabaputil_cl_util IMPLEMENTATION.
   METHOD itab_get_csv_by_itab.
 
     FIELD-SYMBOLS <tab> TYPE table.
+    DATA lt_lines TYPE string_table.
+    DATA lv_line TYPE string.
 
     ASSIGN val TO <tab>.
     DATA(tab) = CAST cl_abap_tabledescr( cl_abap_typedescr=>describe_by_data( <tab> ) ).
 
     DATA(struc) = CAST cl_abap_structdescr( tab->get_table_line_type( ) ).
 
+    CLEAR lv_line.
     LOOP AT struc->get_components( ) REFERENCE INTO DATA(lr_comp).
-      result = |{ result }{ lr_comp->name };|.
+      lv_line = |{ lv_line }{ lr_comp->name };|.
     ENDLOOP.
-
-    result = result && cl_abap_char_utilities=>cr_lf.
+    INSERT lv_line INTO TABLE lt_lines.
 
     DATA lr_row TYPE REF TO data.
     LOOP AT <tab> REFERENCE INTO lr_row.
 
+      CLEAR lv_line.
       DATA(lv_index) = 1.
       DO.
         ASSIGN lr_row->* TO FIELD-SYMBOL(<row>).
@@ -840,10 +993,12 @@ CLASS zabaputil_cl_util IMPLEMENTATION.
           EXIT.
         ENDIF.
         lv_index = lv_index + 1.
-        result = |{ result }{ <field> };|.
+        lv_line = |{ lv_line }{ <field> };|.
       ENDDO.
-      result = result && cl_abap_char_utilities=>cr_lf.
+      INSERT lv_line INTO TABLE lt_lines.
     ENDLOOP.
+
+    result = concat_lines_of( table = lt_lines sep = cl_abap_char_utilities=>cr_lf ).
 
   ENDMETHOD.
 
@@ -1021,13 +1176,11 @@ CLASS zabaputil_cl_util IMPLEMENTATION.
         DATA(incl_comps) = rtti_get_t_attri_by_include( lr_comp->type ).
 
         LOOP AT incl_comps REFERENCE INTO DATA(lr_incl_comp).
-          lr_incl_comp->name = lr_incl_comp->name.
           APPEND lr_incl_comp->* TO result.
         ENDLOOP.
 
       ELSE.
 
-        lr_comp->name = lr_comp->name.
         APPEND lr_comp->* TO result.
 
       ENDIF.
@@ -1047,27 +1200,30 @@ CLASS zabaputil_cl_util IMPLEMENTATION.
 
   METHOD rtti_get_t_attri_by_any.
 
+    DATA lo_struct TYPE REF TO cl_abap_structdescr.
+    DATA lo_type   TYPE REF TO cl_abap_typedescr.
+
     TRY.
-        DATA(lo_type) = cl_abap_typedescr=>describe_by_data( val ).
-        DATA(lo_struct) = CAST cl_abap_structdescr( lo_type ).
+        lo_type = cl_abap_typedescr=>describe_by_data( val ).
+        IF lo_type->kind = cl_abap_typedescr=>kind_ref.
+          lo_type = cl_abap_typedescr=>describe_by_data_ref( val ).
+        ENDIF.
       CATCH cx_root.
         TRY.
-            DATA(lo_tab) = CAST cl_abap_tabledescr( lo_type ).
-            lo_struct = CAST cl_abap_structdescr( lo_tab->get_table_line_type( ) ).
+            lo_type = cl_abap_typedescr=>describe_by_data_ref( val ).
           CATCH cx_root.
-            TRY.
-                DATA(lo_ref) = cl_abap_typedescr=>describe_by_data_ref( val ).
-                lo_struct = CAST cl_abap_structdescr( lo_ref ).
-              CATCH cx_root.
-                TRY.
-                    lo_tab = CAST cl_abap_tabledescr( lo_ref ).
-                    lo_struct = CAST cl_abap_structdescr( lo_tab->get_table_line_type( ) ).
-                  CATCH cx_root.
-                    lo_struct ?= cl_abap_structdescr=>describe_by_name( val ).
-                ENDTRY.
-            ENDTRY.
+            lo_type = cl_abap_structdescr=>describe_by_name( val ).
         ENDTRY.
     ENDTRY.
+
+    CASE lo_type->kind.
+      WHEN cl_abap_typedescr=>kind_struct.
+        lo_struct = CAST #( lo_type ).
+      WHEN cl_abap_typedescr=>kind_table.
+        lo_struct = CAST #( CAST cl_abap_tabledescr( lo_type )->get_table_line_type( ) ).
+      WHEN OTHERS.
+        lo_struct ?= lo_type.
+    ENDCASE.
 
     DATA(comps) = lo_struct->get_components( ).
 
@@ -1495,17 +1651,8 @@ CLASS zabaputil_cl_util IMPLEMENTATION.
     FIELD-SYMBOLS <row_out> TYPE any.
 
     LOOP AT val ASSIGNING <row_in>.
-
-      IF lines( tab ) = 0.
-        DATA(lv_lines) = 1.
-      ELSE.
-        lv_lines = lines( tab ).
-      ENDIF.
-
-      INSERT INITIAL LINE INTO tab ASSIGNING <row_out> INDEX lv_lines.
-      CLEAR: <row_out>.
+      APPEND INITIAL LINE TO tab ASSIGNING <row_out>.
       MOVE-CORRESPONDING <row_in> TO <row_out>.
-
     ENDLOOP.
 
   ENDMETHOD.
@@ -1539,10 +1686,38 @@ CLASS zabaputil_cl_util IMPLEMENTATION.
 
   METHOD itab_filter_by_t_range.
 
+    DATA ref TYPE REF TO data.
+
+    LOOP AT tab REFERENCE INTO ref.
+      LOOP AT val INTO DATA(ls_filter).
+
+        IF ls_filter-t_range IS INITIAL.
+          CONTINUE.
+        ENDIF.
+
+        ASSIGN ref->(ls_filter-name) TO FIELD-SYMBOL(<field>).
+        IF sy-subrc <> 0.
+          CONTINUE.
+        ENDIF.
+        IF <field> NOT IN ls_filter-t_range.
+          DELETE tab.
+          EXIT.
+        ENDIF.
+
+      ENDLOOP.
+    ENDLOOP.
+
   ENDMETHOD.
 
 
   METHOD filter_get_data_by_multi.
+
+    LOOP AT val INTO DATA(ls_filter).
+      IF lines( ls_filter-t_range ) > 0
+        OR lines( ls_filter-t_token ) > 0.
+        INSERT ls_filter INTO TABLE result.
+      ENDIF.
+    ENDLOOP.
 
   ENDMETHOD.
 
@@ -1671,6 +1846,272 @@ CLASS zabaputil_cl_util IMPLEMENTATION.
       v3         = v3
       v4         = v4 ).
     result = msg_get( ls_msg ).
+
+  ENDMETHOD.
+
+
+  METHOD c_contains.
+
+    result = xsdbool( CONV string( val ) CS sub ).
+
+  ENDMETHOD.
+
+
+  METHOD c_starts_with.
+
+    DATA(lv_val) = CONV string( val ).
+    DATA(lv_prefix) = CONV string( prefix ).
+    DATA(lv_len) = strlen( lv_prefix ).
+
+    IF strlen( lv_val ) < lv_len.
+      result = abap_false.
+      RETURN.
+    ENDIF.
+
+    result = xsdbool( lv_val(lv_len) = lv_prefix ).
+
+  ENDMETHOD.
+
+
+  METHOD c_ends_with.
+
+    DATA(lv_val) = CONV string( val ).
+    DATA(lv_suffix) = CONV string( suffix ).
+    DATA(lv_len_suffix) = strlen( lv_suffix ).
+    DATA(lv_len_val) = strlen( lv_val ).
+
+    IF lv_len_val < lv_len_suffix.
+      result = abap_false.
+      RETURN.
+    ENDIF.
+
+    DATA(lv_off) = lv_len_val - lv_len_suffix.
+    result = xsdbool( lv_val+lv_off(lv_len_suffix) = lv_suffix ).
+
+  ENDMETHOD.
+
+
+  METHOD c_split.
+
+    SPLIT val AT sep INTO TABLE result.
+
+  ENDMETHOD.
+
+
+  METHOD c_join.
+
+    LOOP AT tab INTO DATA(lv_line).
+      IF sy-tabix > 1.
+        result = result && sep.
+      ENDIF.
+      result = result && lv_line.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD rtti_check_table.
+
+    DATA(lv_type_kind) = cl_abap_datadescr=>get_data_type_kind( val ).
+    result = xsdbool( lv_type_kind = cl_abap_typedescr=>typekind_table ).
+
+  ENDMETHOD.
+
+
+  METHOD rtti_check_structure.
+
+    TRY.
+        DATA(lo_type) = cl_abap_typedescr=>describe_by_data( val ).
+        result = xsdbool( lo_type->kind = cl_abap_typedescr=>kind_struct ).
+      CATCH cx_root.
+        result = abap_false.
+    ENDTRY.
+
+  ENDMETHOD.
+
+
+  METHOD rtti_check_numeric.
+
+    DATA(lv_type_kind) = cl_abap_datadescr=>get_data_type_kind( val ).
+    CASE lv_type_kind.
+      WHEN cl_abap_typedescr=>typekind_int
+          OR cl_abap_typedescr=>typekind_int1
+          OR cl_abap_typedescr=>typekind_int2
+          OR cl_abap_typedescr=>typekind_packed
+          OR cl_abap_typedescr=>typekind_float
+          OR cl_abap_typedescr=>typekind_decfloat
+          OR cl_abap_typedescr=>typekind_decfloat16
+          OR cl_abap_typedescr=>typekind_decfloat34
+          OR cl_abap_typedescr=>typekind_num.
+        result = abap_true.
+    ENDCASE.
+
+  ENDMETHOD.
+
+
+  METHOD time_add_seconds.
+
+    result = cl_abap_tstmp=>add( tstmp = time
+                                 secs  = seconds ).
+
+  ENDMETHOD.
+
+
+  METHOD time_get_stampl_by_date_time.
+
+    DATA(ls_sy) = zabaputil_cl_util=>context_get_sy( ).
+    CONVERT DATE date TIME time INTO TIME STAMP result TIME ZONE ls_sy-zonlo.
+
+  ENDMETHOD.
+
+
+  METHOD time_diff_seconds.
+
+    DATA(lv_diff) = cl_abap_tstmp=>subtract( tstmp1 = time_to
+                                              tstmp2 = time_from ).
+    result = lv_diff.
+
+  ENDMETHOD.
+
+
+  METHOD conv_string_to_date.
+
+    DATA(lv_val) = CONV string( val ).
+    DATA(lv_fmt) = CONV string( format ).
+    DATA(lv_yyyy_off) = find( val = lv_fmt sub = `YYYY` ).
+    DATA(lv_mm_off)   = find( val = lv_fmt sub = `MM` ).
+    DATA(lv_dd_off)   = find( val = lv_fmt sub = `DD` ).
+
+    DATA(lv_clean) = ``.
+    DATA(lv_i) = 0.
+    WHILE lv_i < strlen( lv_val ).
+      DATA(lv_c) = lv_val+lv_i(1).
+      IF lv_c >= `0` AND lv_c <= `9`.
+        lv_clean = lv_clean && lv_c.
+      ENDIF.
+      lv_i = lv_i + 1.
+    ENDWHILE.
+
+    DATA(lv_fmt_clean) = ``.
+    lv_i = 0.
+    WHILE lv_i < strlen( lv_fmt ).
+      lv_c = lv_fmt+lv_i(1).
+      IF lv_c = `Y` OR lv_c = `M` OR lv_c = `D`.
+        lv_fmt_clean = lv_fmt_clean && lv_c.
+      ENDIF.
+      lv_i = lv_i + 1.
+    ENDWHILE.
+
+    DATA(lv_year)  = ``.
+    DATA(lv_month) = ``.
+    DATA(lv_day)   = ``.
+
+    DATA(lv_pos) = 0.
+    lv_i = 0.
+    WHILE lv_i < strlen( lv_fmt_clean ).
+      lv_c = lv_fmt_clean+lv_i(1).
+      CASE lv_c.
+        WHEN `Y`.
+          lv_year = lv_year && lv_clean+lv_pos(1).
+        WHEN `M`.
+          lv_month = lv_month && lv_clean+lv_pos(1).
+        WHEN `D`.
+          lv_day = lv_day && lv_clean+lv_pos(1).
+      ENDCASE.
+      lv_pos = lv_pos + 1.
+      lv_i = lv_i + 1.
+    ENDWHILE.
+
+    result = lv_year && lv_month && lv_day.
+
+  ENDMETHOD.
+
+
+  METHOD conv_date_to_string.
+
+    DATA(lv_fmt) = CONV string( format ).
+    DATA(lv_date) = CONV string( val ).
+
+    DATA(lv_year)  = lv_date(4).
+    DATA(lv_month) = lv_date+4(2).
+    DATA(lv_day)   = lv_date+6(2).
+
+    result = lv_fmt.
+    REPLACE `YYYY` IN result WITH lv_year.
+    REPLACE `MM`   IN result WITH lv_month.
+    REPLACE `DD`   IN result WITH lv_day.
+
+  ENDMETHOD.
+
+
+  METHOD msg_get_title.
+
+    result = SWITCH #( val
+                       WHEN `E` THEN `Error`
+                       WHEN `S` THEN `Success`
+                       WHEN `W` THEN `Warning`
+                       ELSE `Information` ).
+
+  ENDMETHOD.
+
+
+  METHOD msg_box_format.
+
+    DATA(lt_msg) = msg_get_t( val ).
+
+    IF lines( lt_msg ) = 1.
+      result-text  = lt_msg[ 1 ]-text.
+      result-type  = to_lower( ui5_get_msg_type( lt_msg[ 1 ]-type ) ).
+      result-title = msg_get_title( lt_msg[ 1 ]-type ).
+
+    ELSEIF lines( lt_msg ) > 1.
+      result-text = | { lines( lt_msg ) } Messages found: |.
+      DATA lt_detail_items TYPE string_table.
+      LOOP AT lt_msg REFERENCE INTO DATA(lr_msg).
+        INSERT |<li>{ lr_msg->text }</li>| INTO TABLE lt_detail_items.
+      ENDLOOP.
+      result-details = `<ul>` && concat_lines_of( lt_detail_items ) && `</ul>`.
+      result-title   = msg_get_title( lt_msg[ 1 ]-type ).
+      result-type    = ui5_get_msg_type( lt_msg[ 1 ]-type ).
+
+    ELSE.
+      result-skip = abap_true.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD rtti_check_serializable.
+
+    IF val IS NOT BOUND.
+      result = abap_true.
+      RETURN.
+    ENDIF.
+    TRY.
+        DATA(lo_dummy) = CAST if_serializable_object( val ) ##NEEDED.
+        result = abap_true.
+      CATCH cx_root.
+        result = abap_false.
+    ENDTRY.
+
+  ENDMETHOD.
+
+
+  METHOD app_get_url.
+
+    DATA(lt_param) = url_param_get_tab( search ).
+    DELETE lt_param WHERE n = `app_start`.
+    INSERT VALUE #( n = `app_start`
+                    v = to_lower( classname ) ) INTO TABLE lt_param.
+
+    result = |{ origin }{ pathname }?| && url_param_create_url( lt_param ) && hash.
+
+  ENDMETHOD.
+
+
+  METHOD app_get_url_source_code.
+
+    result = |{ origin }/sap/bc/adt/oo/classes/{ classname }/source/main|.
 
   ENDMETHOD.
 ENDCLASS.
