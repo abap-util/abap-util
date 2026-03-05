@@ -190,7 +190,7 @@ lo_log->add( 'Step 2 completed' ).
 
 DATA(lv_csv_log)  = lo_log->to_csv( ).   " Export as CSV
 DATA(lv_xlsx_log) = lo_log->to_xlsx( ).   " Export as XLSX
-DATA(lt_messages)  = lo_log->to_msg( ).   " Get as message table
+DATA(lt_messages) = lo_log->to_msg( ).   " Get as message table
 ```
 
 #### Contribution & Support
