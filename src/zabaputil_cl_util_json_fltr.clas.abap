@@ -18,7 +18,7 @@ CLASS zabaputil_cl_util_json_fltr IMPLEMENTATION.
 
   METHOD create_no_empty_values.
 
-    result = NEW zabaputil_cl_util_json_fltr( ).
+    CREATE OBJECT result TYPE zabaputil_cl_util_json_fltr.
 
   ENDMETHOD.
 
@@ -32,15 +32,23 @@ CLASS zabaputil_cl_util_json_fltr IMPLEMENTATION.
 
         CASE is_node-type.
           WHEN zabaputil_if_ajson_types=>node_type-boolean.
-            rv_keep = xsdbool( is_node-value <> `false` ).
+            DATA temp1 TYPE xsdboolean.
+            temp1 = boolc( is_node-value <> `false` ).
+            rv_keep = temp1.
           WHEN zabaputil_if_ajson_types=>node_type-number.
-            rv_keep = xsdbool( is_node-value <> `0` ).
+            DATA temp2 TYPE xsdboolean.
+            temp2 = boolc( is_node-value <> `0` ).
+            rv_keep = temp2.
           WHEN zabaputil_if_ajson_types=>node_type-string.
-            rv_keep = xsdbool( is_node-value <> `` ).
+            DATA temp3 TYPE xsdboolean.
+            temp3 = boolc( is_node-value <> `` ).
+            rv_keep = temp3.
         ENDCASE.
 
       WHEN zabaputil_if_ajson_filter=>visit_type-close.
-        rv_keep = xsdbool( is_node-children <> 0 ).
+        DATA temp4 TYPE xsdboolean.
+        temp4 = boolc( is_node-children <> 0 ).
+        rv_keep = temp4.
 
     ENDCASE.
 

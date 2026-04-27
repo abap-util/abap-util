@@ -86,7 +86,8 @@ CLASS zabaputil_cl_util_log IMPLEMENTATION.
 
   METHOD add.
 
-    DATA(lt_msg) = zabaputil_cl_util=>msg_get_t( val ).
+    DATA lt_msg TYPE zabaputil_cl_util=>ty_t_msg.
+    lt_msg = zabaputil_cl_util=>msg_get_t( val ).
     INSERT LINES OF lt_msg INTO TABLE mt_log.
     result = me.
 
@@ -94,28 +95,44 @@ CLASS zabaputil_cl_util_log IMPLEMENTATION.
 
   METHOD info.
 
-    INSERT VALUE #( type = `I` text = val ) INTO TABLE mt_log.
+    DATA temp1 TYPE zabaputil_cl_util=>ty_s_msg.
+    CLEAR temp1.
+    temp1-type = `I`.
+    temp1-text = val.
+    INSERT temp1 INTO TABLE mt_log.
     result = me.
 
   ENDMETHOD.
 
   METHOD error.
 
-    INSERT VALUE #( type = `E` text = val ) INTO TABLE mt_log.
+    DATA temp2 TYPE zabaputil_cl_util=>ty_s_msg.
+    CLEAR temp2.
+    temp2-type = `E`.
+    temp2-text = val.
+    INSERT temp2 INTO TABLE mt_log.
     result = me.
 
   ENDMETHOD.
 
   METHOD warning.
 
-    INSERT VALUE #( type = `W` text = val ) INTO TABLE mt_log.
+    DATA temp3 TYPE zabaputil_cl_util=>ty_s_msg.
+    CLEAR temp3.
+    temp3-type = `W`.
+    temp3-text = val.
+    INSERT temp3 INTO TABLE mt_log.
     result = me.
 
   ENDMETHOD.
 
   METHOD success.
 
-    INSERT VALUE #( type = `S` text = val ) INTO TABLE mt_log.
+    DATA temp4 TYPE zabaputil_cl_util=>ty_s_msg.
+    CLEAR temp4.
+    temp4-type = `S`.
+    temp4-text = val.
+    INSERT temp4 INTO TABLE mt_log.
     result = me.
 
   ENDMETHOD.
@@ -129,7 +146,12 @@ CLASS zabaputil_cl_util_log IMPLEMENTATION.
 
   METHOD has_error.
 
-    result = xsdbool( line_exists( mt_log[ type = `E` ] ) ).
+    DATA temp5 LIKE sy-subrc.
+    READ TABLE mt_log WITH KEY type = `E` TRANSPORTING NO FIELDS.
+    temp5 = sy-subrc.
+    DATA temp1 TYPE xsdboolean.
+    temp1 = boolc( temp5 = 0 ).
+    result = temp1.
 
   ENDMETHOD.
 
@@ -141,7 +163,8 @@ CLASS zabaputil_cl_util_log IMPLEMENTATION.
 
   METHOD bal_read.
 
-    DATA(lt_msg) = zabaputil_cl_util=>bal_read(
+    DATA lt_msg TYPE zabaputil_cl_util=>ty_t_msg.
+    lt_msg = zabaputil_cl_util=>bal_read(
          object    = object
          subobject = subobject
          id        = id ).
@@ -179,7 +202,8 @@ CLASS zabaputil_cl_util_log IMPLEMENTATION.
 
   METHOD to_string.
 
-    LOOP AT mt_log INTO DATA(ls_msg).
+    DATA ls_msg LIKE LINE OF mt_log.
+    LOOP AT mt_log INTO ls_msg.
       IF result IS NOT INITIAL.
         result = |{ result }\n|.
       ENDIF.

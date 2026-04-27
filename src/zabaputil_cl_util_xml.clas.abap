@@ -89,7 +89,7 @@ CLASS zabaputil_cl_util_xml DEFINITION
     DATA mo_root   TYPE REF TO zabaputil_cl_util_xml.
     DATA mo_previous TYPE REF TO zabaputil_cl_util_xml.
     DATA mo_parent TYPE REF TO zabaputil_cl_util_xml.
-    DATA mt_child  TYPE STANDARD TABLE OF REF TO zabaputil_cl_util_xml WITH EMPTY KEY.
+    DATA mt_child  TYPE STANDARD TABLE OF REF TO zabaputil_cl_util_xml WITH DEFAULT KEY.
 
     METHODS xml_get_parts
       CHANGING
@@ -114,7 +114,7 @@ CLASS zabaputil_cl_util_xml IMPLEMENTATION.
 
   METHOD factory.
 
-    result = NEW #( ).
+    CREATE OBJECT result.
 
     result->mo_root   = result.
     result->mo_parent = result.
@@ -123,12 +123,17 @@ CLASS zabaputil_cl_util_xml IMPLEMENTATION.
 
   METHOD __.
 
-    DATA(lo_child) = NEW zabaputil_cl_util_xml( ).
+    DATA lo_child TYPE REF TO zabaputil_cl_util_xml.
+    CREATE OBJECT lo_child TYPE zabaputil_cl_util_xml.
     lo_child->mv_name   = n.
     lo_child->mv_ns     = ns.
     lo_child->mt_prop   = p.
     IF a IS NOT INITIAL.
-      INSERT VALUE #( n = a v = v ) INTO TABLE lo_child->mt_prop.
+      DATA temp1 TYPE zabaputil_cl_util=>ty_s_name_value.
+      CLEAR temp1.
+      temp1-n = a.
+      temp1-v = v.
+      INSERT temp1 INTO TABLE lo_child->mt_prop.
     ENDIF.
     lo_child->mo_parent = me.
     lo_child->mo_root   = mo_root.
@@ -179,7 +184,11 @@ CLASS zabaputil_cl_util_xml IMPLEMENTATION.
 
   METHOD p.
 
-    INSERT VALUE #( n = n v = v ) INTO TABLE mt_prop.
+    DATA temp2 TYPE zabaputil_cl_util=>ty_s_name_value.
+    CLEAR temp2.
+    temp2-n = n.
+    temp2-v = v.
+    INSERT temp2 INTO TABLE mt_prop.
     result = me.
 
   ENDMETHOD.
@@ -237,65 +246,126 @@ CLASS zabaputil_cl_util_xml IMPLEMENTATION.
   METHOD xml_get_parts.
 
     IF mv_name IS INITIAL.
-      LOOP AT mt_child INTO DATA(lr_root).
-        CAST zabaputil_cl_util_xml( lr_root )->xml_get_parts( CHANGING ct_parts = ct_parts ).
+      DATA lr_root LIKE LINE OF mt_child.
+      LOOP AT mt_child INTO lr_root.
+        DATA temp3 TYPE REF TO zabaputil_cl_util_xml.
+        temp3 ?= lr_root.
+        temp3->xml_get_parts( CHANGING ct_parts = ct_parts ).
       ENDLOOP.
       RETURN.
     ENDIF.
 
-    DATA(lv_tmp2) = COND #( WHEN mv_ns <> `` THEN |{ mv_ns }:| ).
-    DATA(lv_tmp3) = REDUCE string( INIT val = `` FOR row IN mt_prop WHERE ( v <> `` ) "#EC CI_SORTSEQ
-                          NEXT val = |{ val } { row-n }="{ escape( val    = COND string( WHEN row-v = abap_true
-                                                                                         THEN `true`
-                                                                                         ELSE row-v )
-                                                                   format = cl_abap_format=>e_xml_attr ) }"| ).
+    DATA temp4 TYPE string.
+    IF mv_ns <> ``.
+      temp4 = |{ mv_ns }:|.
+    ELSE.
+      CLEAR temp4.
+    ENDIF.
+    DATA lv_tmp2 LIKE temp4.
+    lv_tmp2 = temp4.
+    DATA temp5 TYPE string.
+    DATA val TYPE string.
+    val = ``.
+    DATA row LIKE LINE OF mt_prop.
+    LOOP AT mt_prop INTO row WHERE v <> ``.
+      DATA temp1 TYPE string.
+      IF row-v = abap_true.
+        temp1 = `true`.
+      ELSE.
+        temp1 = row-v.
+      ENDIF.
+      val = |{ val } { row-n }="{ escape( val = temp1 format = cl_abap_format=>e_xml_attr ) }"|.
+    ENDLOOP.
+    temp5 = val.
+    DATA lv_tmp3 LIKE temp5.
+    lv_tmp3 = temp5.
 
     IF mt_child IS INITIAL.
-      APPEND | <{ lv_tmp2 }{ mv_name }{ lv_tmp3 }/>| TO ct_parts.
+      DATA temp6 LIKE LINE OF ct_parts.
+      temp6 = | <{ lv_tmp2 }{ mv_name }{ lv_tmp3 }/>|.
+      APPEND temp6 TO ct_parts.
       RETURN.
     ENDIF.
 
-    APPEND | <{ lv_tmp2 }{ mv_name }{ lv_tmp3 }>| TO ct_parts.
+    DATA temp7 LIKE LINE OF ct_parts.
+    temp7 = | <{ lv_tmp2 }{ mv_name }{ lv_tmp3 }>|.
+    APPEND temp7 TO ct_parts.
 
-    LOOP AT mt_child INTO DATA(lr_child).
-      CAST zabaputil_cl_util_xml( lr_child )->xml_get_parts( CHANGING ct_parts = ct_parts ).
+    DATA lr_child LIKE LINE OF mt_child.
+    LOOP AT mt_child INTO lr_child.
+      DATA temp8 TYPE REF TO zabaputil_cl_util_xml.
+      temp8 ?= lr_child.
+      temp8->xml_get_parts( CHANGING ct_parts = ct_parts ).
     ENDLOOP.
 
-    APPEND |</{ lv_tmp2 }{ mv_name }>| TO ct_parts.
+    DATA temp9 LIKE LINE OF ct_parts.
+    temp9 = |</{ lv_tmp2 }{ mv_name }>|.
+    APPEND temp9 TO ct_parts.
 
   ENDMETHOD.
 
   METHOD xml_get_parts_indent.
 
     IF mv_name IS INITIAL.
-      LOOP AT mt_child INTO DATA(lr_root).
-        CAST zabaputil_cl_util_xml( lr_root )->xml_get_parts_indent( EXPORTING iv_depth = iv_depth
+      DATA lr_root LIKE LINE OF mt_child.
+      LOOP AT mt_child INTO lr_root.
+        DATA temp10 TYPE REF TO zabaputil_cl_util_xml.
+        temp10 ?= lr_root.
+        temp10->xml_get_parts_indent( EXPORTING iv_depth = iv_depth
                                                                   CHANGING ct_parts = ct_parts ).
       ENDLOOP.
       RETURN.
     ENDIF.
 
-    DATA(lv_pad)  = repeat( val = ` ` occ = iv_depth * 2 ).
-    DATA(lv_ns)   = COND #( WHEN mv_ns <> `` THEN |{ mv_ns }:| ).
-    DATA(lv_attr) = REDUCE string( INIT val = `` FOR row IN mt_prop WHERE ( v <> `` ) "#EC CI_SORTSEQ
-                          NEXT val = |{ val } { row-n }="{ escape( val    = COND string( WHEN row-v = abap_true
-                                                                                         THEN `true`
-                                                                                         ELSE row-v )
-                                                                   format = cl_abap_format=>e_xml_attr ) }"| ).
+    DATA lv_pad TYPE string.
+    lv_pad  = repeat( val = ` ` occ = iv_depth * 2 ).
+    DATA temp11 TYPE string.
+    IF mv_ns <> ``.
+      temp11 = |{ mv_ns }:|.
+    ELSE.
+      CLEAR temp11.
+    ENDIF.
+    DATA lv_ns LIKE temp11.
+    lv_ns = temp11.
+    DATA temp12 TYPE string.
+    DATA val TYPE string.
+    val = ``.
+    DATA row LIKE LINE OF mt_prop.
+    LOOP AT mt_prop INTO row WHERE v <> ``.
+      DATA temp2 TYPE string.
+      IF row-v = abap_true.
+        temp2 = `true`.
+      ELSE.
+        temp2 = row-v.
+      ENDIF.
+      val = |{ val } { row-n }="{ escape( val = temp2 format = cl_abap_format=>e_xml_attr ) }"|.
+    ENDLOOP.
+    temp12 = val.
+    DATA lv_attr LIKE temp12.
+    lv_attr = temp12.
 
     IF mt_child IS INITIAL.
-      APPEND |{ lv_pad }<{ lv_ns }{ mv_name }{ lv_attr }/>| TO ct_parts.
+      DATA temp13 LIKE LINE OF ct_parts.
+      temp13 = |{ lv_pad }<{ lv_ns }{ mv_name }{ lv_attr }/>|.
+      APPEND temp13 TO ct_parts.
       RETURN.
     ENDIF.
 
-    APPEND |{ lv_pad }<{ lv_ns }{ mv_name }{ lv_attr }>| TO ct_parts.
+    DATA temp14 LIKE LINE OF ct_parts.
+    temp14 = |{ lv_pad }<{ lv_ns }{ mv_name }{ lv_attr }>|.
+    APPEND temp14 TO ct_parts.
 
-    LOOP AT mt_child INTO DATA(lr_child).
-      CAST zabaputil_cl_util_xml( lr_child )->xml_get_parts_indent( EXPORTING iv_depth = iv_depth + 1
+    DATA lr_child LIKE LINE OF mt_child.
+    LOOP AT mt_child INTO lr_child.
+      DATA temp15 TYPE REF TO zabaputil_cl_util_xml.
+      temp15 ?= lr_child.
+      temp15->xml_get_parts_indent( EXPORTING iv_depth = iv_depth + 1
                                                                  CHANGING ct_parts = ct_parts ).
     ENDLOOP.
 
-    APPEND |{ lv_pad }</{ lv_ns }{ mv_name }>| TO ct_parts.
+    DATA temp16 LIKE LINE OF ct_parts.
+    temp16 = |{ lv_pad }</{ lv_ns }{ mv_name }>|.
+    APPEND temp16 TO ct_parts.
 
   ENDMETHOD.
 

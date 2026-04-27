@@ -35,23 +35,35 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
 
   METHOD msg_get_text.
 
-    DATA(lt_msg) = msg_get( val ).
+    DATA lt_msg TYPE zabaputil_cl_util=>ty_t_msg.
+    lt_msg = msg_get( val ).
     IF lt_msg IS NOT INITIAL.
-      result = lt_msg[ 1 ]-text.
+      DATA temp1 LIKE LINE OF lt_msg.
+      DATA temp2 LIKE sy-tabix.
+      temp2 = sy-tabix.
+      READ TABLE lt_msg INDEX 1 INTO temp1.
+      sy-tabix = temp2.
+      IF sy-subrc <> 0.
+        ASSERT 1 = 0.
+      ENDIF.
+      result = temp1-text.
     ENDIF.
 
   ENDMETHOD.
 
   METHOD msg_get.
 
-    DATA(lv_kind) = zabaputil_cl_util=>rtti_get_type_kind( val ).
+    DATA lv_kind TYPE string.
+    lv_kind = zabaputil_cl_util=>rtti_get_type_kind( val ).
     CASE lv_kind.
 
       WHEN cl_abap_datadescr=>typekind_table.
         FIELD-SYMBOLS <tab> TYPE ANY TABLE.
         ASSIGN val TO <tab>.
-        LOOP AT <tab> ASSIGNING FIELD-SYMBOL(<row>).
-          DATA(lt_tab) = msg_get( <row> ).
+        FIELD-SYMBOLS <row> TYPE ANY.
+        LOOP AT <tab> ASSIGNING <row>.
+          DATA lt_tab TYPE zabaputil_cl_util=>ty_t_msg.
+          lt_tab = msg_get( <row> ).
           INSERT LINES OF lt_tab INTO TABLE result.
         ENDLOOP.
 
@@ -61,11 +73,18 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
           RETURN.
         ENDIF.
 
-        DATA(lt_attri) = zabaputil_cl_util=>rtti_get_t_attri_by_any( val ).
+        DATA lt_attri TYPE abap_component_tab.
+        lt_attri = zabaputil_cl_util=>rtti_get_t_attri_by_any( val ).
 
-        DATA(ls_result) = VALUE zabaputil_cl_util=>ty_s_msg( ).
-        LOOP AT lt_attri REFERENCE INTO DATA(ls_attri).
-          ASSIGN COMPONENT ls_attri->name OF STRUCTURE val TO FIELD-SYMBOL(<comp>).
+        DATA temp3 TYPE zabaputil_cl_util=>ty_s_msg.
+        CLEAR temp3.
+        DATA ls_result LIKE temp3.
+        ls_result = temp3.
+        DATA temp4 LIKE LINE OF lt_attri.
+        DATA ls_attri LIKE REF TO temp4.
+        LOOP AT lt_attri REFERENCE INTO ls_attri.
+          FIELD-SYMBOLS <comp> TYPE any.
+          ASSIGN COMPONENT ls_attri->name OF STRUCTURE val TO <comp>.
 
           IF ls_attri->name = `ITEM`.
             lt_tab = msg_get( <comp> ).
@@ -86,12 +105,21 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
 
       WHEN cl_abap_datadescr=>typekind_oref.
         TRY.
-            DATA(lx) = CAST cx_root( val ).
-            ls_result = VALUE #( type = `E` text = lx->get_text( ) ).
-            DATA(lt_attri_o) = zabaputil_cl_util=>rtti_get_t_attri_by_oref( val ).
-            LOOP AT lt_attri_o REFERENCE INTO DATA(ls_attri_o)
+            DATA temp5 TYPE REF TO cx_root.
+            temp5 ?= val.
+            DATA lx LIKE temp5.
+            lx = temp5.
+            CLEAR ls_result.
+            ls_result-type = `E`.
+            ls_result-text = lx->get_text( ).
+            DATA lt_attri_o TYPE abap_attrdescr_tab.
+            lt_attri_o = zabaputil_cl_util=>rtti_get_t_attri_by_oref( val ).
+            DATA temp6 LIKE LINE OF lt_attri_o.
+            DATA ls_attri_o LIKE REF TO temp6.
+            LOOP AT lt_attri_o REFERENCE INTO ls_attri_o
                  WHERE visibility = `U`.
-              DATA(lv_name) = ls_attri_o->name.
+              DATA lv_name LIKE ls_attri_o->name.
+              lv_name = ls_attri_o->name.
               ASSIGN val->(lv_name) TO <comp>.
               ls_result = msg_map( name = ls_attri_o->name val = <comp> is_msg = ls_result ).
             ENDLOOP.
@@ -105,13 +133,15 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
 
                 DATA lr_tab TYPE REF TO data.
                 CREATE DATA lr_tab TYPE (`if_bali_log=>ty_item_table`).
-                ASSIGN lr_tab->* TO FIELD-SYMBOL(<tab2>).
+                FIELD-SYMBOLS <tab2> TYPE data.
+                ASSIGN lr_tab->* TO <tab2>.
 
                 CALL METHOD obj->(`IF_BALI_LOG~GET_ALL_ITEMS`)
                   RECEIVING
                     item_table = <tab2>.
 
-                DATA(lt_tab2) = msg_get( <tab2> ).
+                DATA lt_tab2 TYPE zabaputil_cl_util=>ty_t_msg.
+                lt_tab2 = msg_get( <tab2> ).
                 INSERT LINES OF lt_tab2 INTO TABLE result.
 
               CATCH cx_root.
@@ -128,7 +158,8 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
                     lt_tab2 = msg_get( <tab2> ).
                     INSERT LINES OF lt_tab2 INTO TABLE result.
 
-                  CATCH cx_root INTO DATA(lx2).
+                    DATA lx2 TYPE REF TO cx_root.
+                  CATCH cx_root INTO lx2.
 
                     lt_attri_o = zabaputil_cl_util=>rtti_get_t_attri_by_oref( val ).
                     LOOP AT lt_attri_o REFERENCE INTO ls_attri_o
@@ -145,8 +176,11 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
 
       WHEN OTHERS.
 
-        IF zabaputil_cl_util=>rtti_check_clike( val ).
-          INSERT VALUE #( text = val ) INTO TABLE result.
+        IF zabaputil_cl_util=>rtti_check_clike( val ) IS NOT INITIAL.
+          DATA temp7 TYPE zabaputil_cl_util=>ty_s_msg.
+          CLEAR temp7.
+          temp7-text = val.
+          INSERT temp7 INTO TABLE result.
         ENDIF.
     ENDCASE.
 

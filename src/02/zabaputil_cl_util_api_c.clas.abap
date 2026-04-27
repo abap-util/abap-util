@@ -131,15 +131,20 @@ CLASS zabaputil_cl_util_api_c IMPLEMENTATION.
   METHOD context_get_user_tech.
     TRY.
 
-        DATA(lv_result) = VALUE string( ).
-        DATA(lv_class) = 'CL_ABAP_CONTEXT_INFO'.
+        DATA temp1 TYPE string.
+        CLEAR temp1.
+        DATA lv_result LIKE temp1.
+        lv_result = temp1.
+        DATA lv_class TYPE c LENGTH 20.
+        lv_class = 'CL_ABAP_CONTEXT_INFO'.
         CALL METHOD (lv_class)=>('GET_USER_TECHNICAL_NAME')
           RECEIVING
             rv_business_partner_id = lv_result.
 
         result = lv_result.
 
-      CATCH cx_root INTO DATA(x).
+        DATA x TYPE REF TO cx_root.
+      CATCH cx_root INTO x.
         RAISE EXCEPTION TYPE zabaputil_cx_util_error
           EXPORTING
             previous = x.
@@ -486,8 +491,10 @@ CLASS zabaputil_cl_util_api_c IMPLEMENTATION.
         ENDLOOP.
         result = temp3.
 
-      CATCH cx_root INTO DATA(x).
-        DATA(lv_dummy) = x->get_text( ).
+        DATA x TYPE REF TO cx_root.
+      CATCH cx_root INTO x.
+        DATA lv_dummy TYPE string.
+        lv_dummy = x->get_text( ).
     ENDTRY.
 
   ENDMETHOD.
@@ -593,8 +600,10 @@ CLASS zabaputil_cl_util_api_c IMPLEMENTATION.
               RECEIVING
                 rs_long_field_label = result-long.
 
-          CATCH cx_root INTO DATA(x).
-            DATA(error) = x->get_text( ).
+            DATA x TYPE REF TO cx_root.
+          CATCH cx_root INTO x.
+            DATA error TYPE string.
+            error = x->get_text( ).
         ENDTRY.
     ENDTRY.
 
@@ -712,8 +721,10 @@ CLASS zabaputil_cl_util_api_c IMPLEMENTATION.
           RECEIVING
             rv_short_description = result.
 
-      CATCH cx_root INTO DATA(x).
-        DATA(lv_dummy) = x->get_text( ).
+        DATA x TYPE REF TO cx_root.
+      CATCH cx_root INTO x.
+        DATA lv_dummy TYPE string.
+        lv_dummy = x->get_text( ).
     ENDTRY.
 
   ENDMETHOD.
@@ -723,23 +734,25 @@ CLASS zabaputil_cl_util_api_c IMPLEMENTATION.
     DATA ddtext TYPE c LENGTH 60.
 
     IF langu IS NOT SUPPLIED.
-      DATA(lan) = sy-langu.
+      DATA lan LIKE sy-langu.
+      lan = sy-langu.
     ELSE.
       lan = langu.
     ENDIF.
 
-    IF context_check_abap_cloud( ).
+    IF context_check_abap_cloud( ) IS NOT INITIAL.
 
       ddtext = tabname.
 
     ELSE.
 
-      DATA(lv_tabname) = `dd02t`.
+      DATA lv_tabname TYPE string.
+      lv_tabname = `dd02t`.
       SELECT SINGLE ddtext
-        FROM (lv_tabname)
-        WHERE tabname    = @tabname
-          AND ddlanguage = @lan
-        INTO @ddtext.
+        FROM (lv_tabname) INTO ddtext
+        WHERE tabname    = tabname
+          AND ddlanguage = lan
+        .
 
     ENDIF.
 
@@ -760,7 +773,7 @@ CLASS zabaputil_cl_util_api_c IMPLEMENTATION.
 
   METHOD context_get_callstack.
 
-    IF context_check_abap_cloud( ).
+    IF context_check_abap_cloud( ) IS NOT INITIAL.
 
       DATA current_obj TYPE REF TO object.
       DATA stack TYPE REF TO object.
@@ -778,7 +791,8 @@ CLASS zabaputil_cl_util_api_c IMPLEMENTATION.
       FIELD-SYMBOLS <format2> TYPE any.
 
       "1 format source
-      DATA(lv_assign) = `XCO_CP_CALL_STACK=>LINE_NUMBER_FLAVOR->SOURCE`.
+      DATA lv_assign TYPE string.
+      lv_assign = `XCO_CP_CALL_STACK=>LINE_NUMBER_FLAVOR->SOURCE`.
       ASSIGN (lv_assign) TO <format>.
 
       lv_assign = `XCO_CP_CALL_STACK=>FORMAT`.
@@ -830,8 +844,12 @@ CLASS zabaputil_cl_util_api_c IMPLEMENTATION.
 
     DELETE <lt_lines> INDEX 1.
 
-    LOOP AT <lt_lines> INTO DATA(text).
-      DATA(ls_stack) = VALUE zabaputil_cl_util_api=>ty_S_stack( ).
+    DATA text LIKE LINE OF <lt_lines>.
+    LOOP AT <lt_lines> INTO text.
+      DATA temp2 TYPE zabaputil_cl_util_api=>ty_s_stack.
+      CLEAR temp2.
+      DATA ls_stack LIKE temp2.
+      ls_stack = temp2.
       SPLIT text AT ` ` INTO ls_stack-class ls_stack-include ls_stack-method.
       INSERT ls_stack INTO TABLE result.
     ENDLOOP.

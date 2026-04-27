@@ -341,7 +341,7 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
 
   METHOD context_get_user_tech.
 
-    IF context_check_abap_cloud( ).
+    IF context_check_abap_cloud( ) IS NOT INITIAL.
       result = zabaputil_cl_util_api_c=>context_get_user_tech( ).
     ELSE.
       result = zabaputil_cl_util_api_s=>context_get_user_tech( ).
@@ -648,7 +648,7 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
     FIELD-SYMBOLS <description> TYPE any.
     DATA temp6 TYPE zabaputil_cl_util_api=>ty_s_class_descr.
 
-    IF context_check_abap_cloud( ).
+    IF context_check_abap_cloud( ) IS NOT INITIAL.
 
       ls_clskey-clsname = val.
 
@@ -846,8 +846,10 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
               RECEIVING
                 rs_long_field_label = result-long.
 
-          CATCH cx_root INTO DATA(x).
-            DATA(error) = x->get_text( ).
+            DATA x TYPE REF TO cx_root.
+          CATCH cx_root INTO x.
+            DATA error TYPE string.
+            error = x->get_text( ).
         ENDTRY.
     ENDTRY.
 
@@ -964,8 +966,10 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
           RECEIVING
             rv_short_description = result.
 
-      CATCH cx_root INTO DATA(x).
-        DATA(lv_error) = x->get_text( ).
+        DATA x TYPE REF TO cx_root.
+      CATCH cx_root INTO x.
+        DATA lv_error TYPE string.
+        lv_error = x->get_text( ).
     ENDTRY.
   ENDMETHOD.
 
@@ -974,23 +978,25 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
     DATA ddtext TYPE c LENGTH 60.
 
     IF langu IS NOT SUPPLIED.
-      DATA(lan) = sy-langu.
+      DATA lan LIKE sy-langu.
+      lan = sy-langu.
     ELSE.
       lan = langu.
     ENDIF.
 
-    IF context_check_abap_cloud( ).
+    IF context_check_abap_cloud( ) IS NOT INITIAL.
 
       ddtext = tabname.
 
     ELSE.
 
-      DATA(lv_tabname) = `dd02t`.
+      DATA lv_tabname TYPE string.
+      lv_tabname = `dd02t`.
       SELECT SINGLE ddtext
-        FROM (lv_tabname)
-        WHERE tabname    = @tabname
-          AND ddlanguage = @lan
-        INTO @ddtext.
+        FROM (lv_tabname) INTO ddtext
+        WHERE tabname    = tabname
+          AND ddlanguage = lan
+        .
 
     ENDIF.
 
@@ -1012,7 +1018,7 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
   METHOD context_get_callstack.
 
     DATA lo_util TYPE REF TO object.
-    IF context_check_abap_cloud( ).
+    IF context_check_abap_cloud( ) IS NOT INITIAL.
 
       CREATE OBJECT lo_util TYPE ('Z2UI5_CL_UTIL_ABAP_C').
       CALL METHOD lo_util->('CONTEXT_GET_CALLSTACK')
@@ -1089,7 +1095,7 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
 
   METHOD context_get_sy.
 
-    result = CORRESPONDING #( sy ).
+    MOVE-CORRESPONDING sy TO result.
 
   ENDMETHOD.
 
