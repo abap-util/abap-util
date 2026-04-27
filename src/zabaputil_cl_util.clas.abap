@@ -96,13 +96,7 @@ CLASS zabaputil_cl_util DEFINITION
       RETURNING
         VALUE(result) TYPE string.
 
-    CLASS-METHODS msg_get_title
-      IMPORTING
-        val           TYPE clike
-      RETURNING
-        VALUE(result) TYPE string.
-
-    CLASS-METHODS msg_box_format
+    CLASS-METHODS ui5_msg_box_format
       IMPORTING
         val           TYPE any
       RETURNING
@@ -163,13 +157,13 @@ CLASS zabaputil_cl_util DEFINITION
       RETURNING
         VALUE(result) TYPE string.
 
-    CLASS-METHODS check_bound_a_not_inital
+    CLASS-METHODS check_bound_a_not_initial
       IMPORTING
         val           TYPE REF TO data
       RETURNING
         VALUE(result) TYPE abap_bool.
 
-    CLASS-METHODS check_unassign_inital
+    CLASS-METHODS check_unassign_initial
       IMPORTING
         val           TYPE REF TO data
       RETURNING
@@ -213,7 +207,7 @@ CLASS zabaputil_cl_util DEFINITION
 
     CLASS-METHODS filter_itab
       IMPORTING
-        !filter TYPE ty_t_filter_multi
+        filter TYPE ty_t_filter_multi
       CHANGING
         val     TYPE STANDARD TABLE.
 
@@ -349,7 +343,7 @@ CLASS zabaputil_cl_util DEFINITION
       RETURNING
         VALUE(result) TYPE timestampl.
 
-    CLASS-METHODS time_substract_seconds
+    CLASS-METHODS time_subtract_seconds
       IMPORTING
         !time         TYPE timestampl
         !seconds      TYPE i
@@ -697,18 +691,18 @@ CLASS zabaputil_cl_util IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD check_bound_a_not_inital.
+  METHOD check_bound_a_not_initial.
 
     IF val IS NOT BOUND.
       result = abap_false.
       RETURN.
     ENDIF.
-    result = xsdbool( check_unassign_inital( val ) = abap_false ).
+    result = xsdbool( check_unassign_initial( val ) = abap_false ).
 
   ENDMETHOD.
 
 
-  METHOD check_unassign_inital.
+  METHOD check_unassign_initial.
 
     IF val IS INITIAL.
       result = abap_true.
@@ -1362,7 +1356,7 @@ CLASS zabaputil_cl_util IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD time_substract_seconds.
+  METHOD time_subtract_seconds.
 
     result = cl_abap_tstmp=>subtractsecs( tstmp = time
                                           secs  = seconds ).
@@ -1424,7 +1418,6 @@ CLASS zabaputil_cl_util IMPLEMENTATION.
 
     lv_search = shift_left( val = lv_search
                             sub = `?` ).
-*    lv_search = c_trim_lower( lv_search ).
 
     DATA(lv_search2) = substring_after( val = lv_search
                                         sub = `&sap-startup-params=` ).
@@ -1440,8 +1433,6 @@ CLASS zabaputil_cl_util IMPLEMENTATION.
 
     LOOP AT lt_param REFERENCE INTO DATA(lr_param).
       SPLIT lr_param->* AT `=` INTO DATA(lv_name) DATA(lv_value).
-*      INSERT VALUE #( n = c_trim_lower( lv_name )
-*                      v = c_trim_lower( lv_value ) ) INTO TABLE rt_params.
       INSERT VALUE #( n = lv_name
                       v = lv_value ) INTO TABLE rt_params.
     ENDLOOP.
@@ -1660,7 +1651,6 @@ CLASS zabaputil_cl_util IMPLEMENTATION.
   METHOD itab_get_by_struc.
 
     DATA(lt_attri) = zabaputil_cl_util=>rtti_get_t_attri_by_any( val ).
-*    result  = VALUE z2ui5_cl_util=>ty_t_name_value( ).
     LOOP AT lt_attri REFERENCE INTO DATA(lr_attri).
 
       ASSIGN COMPONENT lr_attri->name OF STRUCTURE val TO FIELD-SYMBOL(<component>).
@@ -1753,8 +1743,6 @@ CLASS zabaputil_cl_util IMPLEMENTATION.
         ENDLOOP.
       ENDLOOP.
 
-*      DATA result TYPE string.
-*    DATA lt_where TYPE rsdmd_t_where.
       DATA(lv_fm) = `RSDS_RANGE_TO_WHERE`.
       CALL FUNCTION lv_fm
         EXPORTING
@@ -1830,14 +1818,14 @@ CLASS zabaputil_cl_util IMPLEMENTATION.
 
   METHOD rtti_get_data_element_text_l.
 
-    result = zabaputil_cl_util=>rtti_get_data_element_texts( val )-long.
+    result = rtti_get_data_element_texts( val )-long.
 
   ENDMETHOD.
 
 
   METHOD msg_get_by_msg.
 
-    DATA(ls_msg) = VALUE zabaputil_cl_util=>ty_s_msg(
+    DATA(ls_msg) = VALUE ty_s_msg(
       id         = id
       no         = no
       v1         = v1
@@ -2043,25 +2031,14 @@ CLASS zabaputil_cl_util IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD msg_get_title.
-
-    result = SWITCH #( val
-                       WHEN `E` THEN `Error`
-                       WHEN `S` THEN `Success`
-                       WHEN `W` THEN `Warning`
-                       ELSE `Information` ).
-
-  ENDMETHOD.
-
-
-  METHOD msg_box_format.
+  METHOD ui5_msg_box_format.
 
     DATA(lt_msg) = msg_get_t( val ).
 
     IF lines( lt_msg ) = 1.
       result-text  = lt_msg[ 1 ]-text.
       result-type  = to_lower( ui5_get_msg_type( lt_msg[ 1 ]-type ) ).
-      result-title = msg_get_title( lt_msg[ 1 ]-type ).
+      result-title = ui5_get_msg_type( lt_msg[ 1 ]-type ).
 
     ELSEIF lines( lt_msg ) > 1.
       result-text = | { lines( lt_msg ) } Messages found: |.
@@ -2070,7 +2047,7 @@ CLASS zabaputil_cl_util IMPLEMENTATION.
         INSERT |<li>{ lr_msg->text }</li>| INTO TABLE lt_detail_items.
       ENDLOOP.
       result-details = `<ul>` && concat_lines_of( lt_detail_items ) && `</ul>`.
-      result-title   = msg_get_title( lt_msg[ 1 ]-type ).
+      result-title   = ui5_get_msg_type( lt_msg[ 1 ]-type ).
       result-type    = ui5_get_msg_type( lt_msg[ 1 ]-type ).
 
     ELSE.
