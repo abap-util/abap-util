@@ -1,6 +1,9 @@
 name: ABAP_702
 
 on:
+  workflow_run:
+    workflows: [auto_downport]
+    types: [completed]
   push:
     branches: [702]
 
@@ -9,6 +12,7 @@ permissions:
 
 jobs:
   ABAP_702:
+    if: ${{ github.event_name == 'push' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
