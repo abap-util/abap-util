@@ -1,4 +1,3 @@
-[![ABAP_702](https://github.com/oblomov-dev/abap-util/actions/workflows/ABAP_702.yaml/badge.svg?branch=702)](https://github.com/oblomov-dev/abap-util/actions/workflows/ABAP_702.yaml)
 [![ABAP_STANDARD](https://github.com/oblomov-dev/abap-util/actions/workflows/ABAP_STANDARD.yaml/badge.svg)](https://github.com/oblomov-dev/abap-util/actions/workflows/ABAP_STANDARD.yaml)
 [![ABAP_CLOUD](https://github.com/oblomov-dev/abap-util/actions/workflows/ABAP_CLOUD.yaml/badge.svg)](https://github.com/oblomov-dev/abap-util/actions/workflows/ABAP_CLOUD.yaml)
 <br>
@@ -36,6 +35,15 @@ Install via [abapGit](https://abapgit.org) - clone this repository into your SAP
 DATA(lv_upper) = zabaputil_cl_util=>c_trim_upper( ` Hello World  ` ). " => 'HELLO WORLD'
 DATA(lv_lower) = zabaputil_cl_util=>c_trim_lower( ` Hello World  ` ). " => 'hello world'
 DATA(lv_trim)  = zabaputil_cl_util=>c_trim( ` Hello World  ` ).       " => 'Hello World'
+
+" Predicates
+DATA(lv_has)   = zabaputil_cl_util=>c_contains(    val = `Hello World`  sub    = `World` ). " => abap_true
+DATA(lv_pre)   = zabaputil_cl_util=>c_starts_with( val = `Hello World`  prefix = `Hello` ). " => abap_true
+DATA(lv_suf)   = zabaputil_cl_util=>c_ends_with(   val = `Hello World`  suffix = `World` ). " => abap_true
+
+" Split & Join
+DATA(lt_parts) = zabaputil_cl_util=>c_split( val = `a,b,c`  sep = `,` ). " => ('a' 'b' 'c')
+DATA(lv_csv)   = zabaputil_cl_util=>c_join(  tab = lt_parts  sep = `;` ). " => 'a;b;c'
 ```
 
 ###### JSON
@@ -135,12 +143,70 @@ zabaputil_cl_util=>conv_get_itab_by_xlsx(
     IMPORTING result = lr_data ).
 ```
 
+###### Internal Tables
+```abap
+" Move corresponding rows between tables of different row types
+zabaputil_cl_util=>itab_corresponding(
+    EXPORTING val = lt_source
+    CHANGING  tab = lt_target ).
+
+" Filter table in place by a substring across all clike fields
+zabaputil_cl_util=>itab_filter_by_val(
+    EXPORTING val = `LH`
+    CHANGING  tab = lt_flights ).
+
+" Project a flat structure to a list of name/value pairs
+DATA(lt_kv) = zabaputil_cl_util=>itab_get_by_struc( ls_flight ).
+" => [ ( name = 'CARRID' value = 'LH' ) ( name = 'CONNID' value = '0400' ) ... ]
+```
+
+###### Range & Token Filters
+```abap
+" Build select-options ranges programmatically
+DATA(ls_eq) = zabaputil_cl_util_range=>eq( `LH` ).        " I EQ 'LH'
+DATA(ls_bt) = zabaputil_cl_util_range=>bt( low = `100` high = `200` ).
+DATA(ls_cp) = zabaputil_cl_util_range=>cp( `LH*` ).        " I CP 'LH*'
+DATA(ls_ne) = zabaputil_cl_util_range=>ne( `XX` ).         " E EQ 'XX'
+
+" Token strings (e.g. from a UI search field) <-> ranges
+DATA(ls_range) = zabaputil_cl_util=>filter_get_range_by_token( `>=100` ).
+DATA(lt_token) = zabaputil_cl_util=>filter_get_token_t_by_range_t( lt_range ).
+
+" Apply a multi-field filter on an internal table in place
+zabaputil_cl_util=>filter_itab(
+    EXPORTING filter = lt_filter
+    CHANGING  val    = lt_flights ).
+```
+
+###### Messages
+```abap
+" Resolve any message-like input (sy, exception, T100 record, ...) to a single text
+DATA(lv_text) = zabaputil_cl_util_msg=>msg_get_text( sy ).
+
+" Get the current sy-msg* as a typed message table (type, id, number, text, ...)
+DATA(lt_msg)  = zabaputil_cl_util_msg=>msg_get_by_sy( ).
+
+" Map an arbitrary value to a message text via a configurable mapping
+DATA(lv_mapped) = zabaputil_cl_util_msg=>msg_map( name = `STATUS` ).
+```
+
 ###### Timestamps
 ```abap
 DATA(lv_now)  = zabaputil_cl_util=>time_get_timestampl( ).
-DATA(lv_past) = zabaputil_cl_util=>time_substract_seconds( time = lv_now  seconds = 3600 ).
+DATA(lv_past) = zabaputil_cl_util=>time_subtract_seconds( time = lv_now  seconds = 3600 ).
+DATA(lv_next) = zabaputil_cl_util=>time_add_seconds(      time = lv_now  seconds = 60 ).
+DATA(lv_diff) = zabaputil_cl_util=>time_diff_seconds(     val1 = lv_now  val2    = lv_past ).
 DATA(lv_date) = zabaputil_cl_util=>time_get_date_by_stampl( lv_now ).
 DATA(lv_time) = zabaputil_cl_util=>time_get_time_by_stampl( lv_now ).
+
+" Build a timestampl from date/time
+DATA(lv_stmp) = zabaputil_cl_util=>time_get_stampl_by_date_time(
+    date = sy-datum
+    time = sy-uzeit ).
+
+" Date <-> string with format pattern
+DATA(lv_iso)  = zabaputil_cl_util=>conv_date_to_string(   val = sy-datum    format = `YYYY-MM-DD` ).
+DATA(lv_dat)  = zabaputil_cl_util=>conv_string_to_date(   val = `2024-03-15` format = `YYYY-MM-DD` ).
 ```
 
 ###### Error Handling
@@ -185,12 +251,48 @@ lo_http->set_status( code = 200  reason = 'OK' ).
 ###### Logging
 ```abap
 DATA(lo_log) = NEW zabaputil_cl_util_log( ).
-lo_log->add( 'Step 1 completed' ).
-lo_log->add( 'Step 2 completed' ).
+lo_log->info(    `Step 1 completed` ).
+lo_log->warning( `Cache miss, falling back` ).
+lo_log->error(   `Step 3 failed` ).
+lo_log->success( `Done` ).
+
+" Add an exception directly
+TRY.
+    " ...
+  CATCH cx_root INTO DATA(lx).
+    lo_log->add( lx ).
+ENDTRY.
+
+IF lo_log->has_error( ) = abap_true.
+  " ...
+ENDIF.
 
 DATA(lv_csv_log)  = lo_log->to_csv( ).   " Export as CSV
-DATA(lv_xlsx_log) = lo_log->to_xlsx( ).   " Export as XLSX
+DATA(lv_xlsx_log) = lo_log->to_xlsx( ).  " Export as XLSX
 DATA(lt_messages) = lo_log->to_msg( ).   " Get as message table
+DATA(lv_text)     = lo_log->to_string( ).
+```
+
+###### XML Builder
+Fluent builder for nested XML / UI5 view fragments.
+`__` opens an element (must be closed with `n( )`), `_` writes a self-closing leaf,
+`p` adds a single attribute, the `p =` parameter takes an attribute table.
+```abap
+DATA(lo_view) = zabaputil_cl_util_xml=>factory(
+  )->__( n = `View` ns = `mvc`
+         p = VALUE #( ( n = `xmlns`     v = `sap.m` )
+                      ( n = `xmlns:mvc` v = `sap.ui.core.mvc` ) ) ).
+
+DATA(lo_page) = lo_view->__( n = `Page`
+  p = VALUE #( ( n = `title`         v = `Hello` )
+               ( n = `showNavButton` v = `true` ) ) ).
+
+lo_page->__( `content`
+  )->_( n = `Button` p = VALUE #( ( n = `text` v = `Click me` ) )
+  )->n( ).  " close <content>
+
+DATA(lv_xml)        = lo_view->stringify( ).
+DATA(lv_xml_pretty) = lo_view->stringify( indent = abap_true ).
 ```
 
 #### Contribution & Support

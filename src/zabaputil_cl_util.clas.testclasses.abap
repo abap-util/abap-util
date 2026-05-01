@@ -203,13 +203,14 @@ CLASS ltcl_unit_test_open_abap IMPLEMENTATION.
 
   METHOD test_raise_error.
 
+    DATA lx TYPE REF TO zabaputil_cx_util_error.
     TRY.
         IF 1 = 1.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error.
         ENDIF.
         cl_abap_unit_assert=>fail( ).
 
-      CATCH zabaputil_cx_util_error INTO DATA(lx).
+      CATCH zabaputil_cx_util_error INTO lx.
         cl_abap_unit_assert=>assert_bound( lx ).
     ENDTRY.
 

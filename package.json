@@ -3,32 +3,32 @@
     "version": "1.0.0",
     "description": "utiliy functions for ABAP",
     "repository": {
-      "type": "git",
-      "url": "git+https://github.com/oblomov-dev/abap-util"
+        "type": "git",
+        "url": "git+https://github.com/oblomov-dev/abap-util"
     },
     "license": "MIT",
     "homepage": "https://github.com/oblomov-dev/abap-util",
     "dependencies": {
-      "@abaplint/cli": "^2.113.120",
-      "@abaplint/database-sqlite": "^2.10.24",
-      "@abaplint/runtime": "^2.10.55",
-      "@abaplint/transpiler-cli": "^2.10.55",
-      "@types/node": "^22.15.21",
-      "buffer": "^6.0.3",
-      "express": "^5.1.0",
-      "html-webpack-plugin": "^5.6.3",
-      "path-browserify": "^1.0.1",
-      "web-encoding": "^1.1.5"
+        "@abaplint/cli": "^2.119.12",
+        "@abaplint/database-sqlite": "^2.11.78",
+        "@abaplint/runtime": "^2.13.21",
+        "@abaplint/transpiler-cli": "^2.13.21",
+        "@types/node": "^25.6.0",
+        "buffer": "^6.0.3",
+        "express": "^5.2.1",
+        "html-webpack-plugin": "^5.6.7",
+        "path-browserify": "^1.0.1",
+        "web-encoding": "^1.1.5"
     },
-    "scripts" : {
-      "clone": "git clone https://github.com/abap2UI5/abap2UI5.git input/abap2UI5",
-      "rename": "abaplint ./.github/abaplint/rename.jsonc --rename && rm src/z* && cp ./.github/input/abap2UI5/src/00/03/z* src/",
-      "cleanup": "rm -rf input && rm -rf output",
-      "mirror": "npm run clone && npm run rename",
-      "syfixes": "find . -type f -name '*.abap' -exec sed -i -e 's/ RAISE EXCEPTION TYPE cx_sy_itab_line_not_found/ ASSERT 1 = 0/g' {} + ",
-      "downport": "abaplint --fix .github/abaplint/abap_702.jsonc && npm run syfixes",
-      "auto_transpile": "rm -rf node/output && cp -r src node/downport && abap_transpile ./node/setup/abap_transpile.json",
-      "unit": "echo RUNNING && node node/output/index.mjs",
-      "rename_test": "abaplint .github/abaplint/rename_test.jsonc --rename"
+    "scripts": {
+        "clone": "git clone https://github.com/abap2UI5/abap2UI5.git input/abap2UI5",
+        "rename": "abaplint ./.github/abaplint/rename.jsonc --rename && rm src/z* && cp ./.github/input/abap2UI5/src/00/03/z* src/",
+        "cleanup": "rm -rf input && rm -rf output",
+        "mirror": "npm run clone && npm run rename",
+        "syfixes": "find . -type f -name '*.abap' -exec sed -i -e 's/ RAISE EXCEPTION TYPE cx_sy_itab_line_not_found/ ASSERT 1 = 0/g' {} + ",
+        "downport": "abaplint --fix .github/abaplint/abap_702.jsonc && npm run syfixes",
+        "auto_transpile": "rm -rf node/output && cp -r src node/downport && abap_transpile ./node/setup/abap_transpile.json",
+        "unit": "echo RUNNING && node node/output/index.mjs",
+        "rename_test": "abaplint .github/abaplint/rename_test.jsonc --rename"
     }
-  }
+}

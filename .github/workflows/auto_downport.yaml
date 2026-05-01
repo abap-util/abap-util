@@ -20,6 +20,9 @@ jobs:
     - run: npm ci
     - run: npm run downport
 
+    - name: Run abaplint on downported code
+      run: npx abaplint .github/abaplint/abap_702.jsonc
+
     - name: Commit Changes
       run: |
         git config --global user.name 'github-actions[bot]'
