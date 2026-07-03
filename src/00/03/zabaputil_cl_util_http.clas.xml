@@ -3,13 +3,14 @@
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
   <asx:values>
    <VSEOCLASS>
-    <CLSNAME>ZABAPUTIL_CL_UTIL_JSON_FLTR</CLSNAME>
+    <CLSNAME>ZABAPUTIL_CL_UTIL_HTTP</CLSNAME>
     <LANGU>E</LANGU>
-    <DESCRIPT>util - json filter for empty values</DESCRIPT>
+    <DESCRIPT>util - http</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>
     <UNICODE>X</UNICODE>
+    <WITH_UNIT_TESTS>X</WITH_UNIT_TESTS>
    </VSEOCLASS>
   </asx:values>
  </asx:abap>

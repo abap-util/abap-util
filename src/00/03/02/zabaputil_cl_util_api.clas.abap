@@ -219,12 +219,25 @@ CLASS zabaputil_cl_util_api DEFINITION
       RETURNING
         VALUE(result) TYPE zabaputil_cl_util=>ty_t_msg.
 
-    CLASS-METHODS bal_save
+    CLASS-METHODS bal_create
       IMPORTING
         object    TYPE clike
         subobject TYPE clike
         id        TYPE clike
         t_log     TYPE zabaputil_cl_util=>ty_t_msg.
+
+    CLASS-METHODS bal_update
+      IMPORTING
+        object    TYPE clike
+        subobject TYPE clike
+        id        TYPE clike
+        t_log     TYPE zabaputil_cl_util=>ty_t_msg.
+
+    CLASS-METHODS bal_delete
+      IMPORTING
+        object    TYPE clike
+        subobject TYPE clike
+        id        TYPE clike.
 
     CLASS-METHODS context_get_callstack
       RETURNING
@@ -323,6 +336,41 @@ CLASS zabaputil_cl_util_api DEFINITION
       RETURNING
         VALUE(result) TYPE string ##NEEDED.
 
+    CLASS-METHODS tr_create
+      IMPORTING
+        text          TYPE clike
+        target        TYPE clike
+        type          TYPE clike DEFAULT `T`
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS tr_release
+      IMPORTING
+        trkorr       TYPE clike
+        ignore_locks TYPE abap_bool DEFAULT abap_true.
+
+    CLASS-METHODS tr_copy_objects
+      IMPORTING
+        source      TYPE clike
+        destination TYPE clike.
+
+    CLASS-METHODS tr_import
+      IMPORTING
+        trkorr         TYPE clike
+        target_system  TYPE clike
+        client         TYPE clike OPTIONAL
+        ignore_version TYPE abap_bool DEFAULT abap_true
+      RETURNING
+        VALUE(result)  TYPE i.
+
+    CLASS-METHODS tr_check_status
+      IMPORTING
+        trkorr   TYPE clike
+        system   TYPE clike
+      EXPORTING
+        imported TYPE abap_bool
+        rc       TYPE i.
+
 
   PROTECTED SECTION.
 
@@ -333,6 +381,9 @@ CLASS zabaputil_cl_util_api DEFINITION
         VALUE(result) TYPE string.
 
   PRIVATE SECTION.
+
+    CLASS-DATA gv_check_cloud TYPE abap_bool.
+    CLASS-DATA gv_check_cloud_cached TYPE abap_bool.
 
 ENDCLASS.
 
@@ -351,12 +402,19 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
 
   METHOD context_check_abap_cloud.
 
+    IF gv_check_cloud_cached = abap_true.
+      result = gv_check_cloud.
+      RETURN.
+    ENDIF.
+
     TRY.
-        cl_abap_typedescr=>describe_by_name( 'T100' ).
-        result = abap_false.
+        cl_abap_typedescr=>describe_by_name( `T100` ).
+        gv_check_cloud = abap_false.
       CATCH cx_root.
-        result = abap_true.
+        gv_check_cloud = abap_true.
     ENDTRY.
+    gv_check_cloud_cached = abap_true.
+    result = gv_check_cloud.
 
   ENDMETHOD.
 
@@ -378,10 +436,10 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
     DATA lr_fix    LIKE REF TO temp1.
     DATA temp2     TYPE zabaputil_cl_util_api=>ty_s_fix_val.
 
-    lv_langu = ' '.
+    lv_langu = ` `.
     lv_langu = langu.
 
-    CALL METHOD elemdescr->('GET_DDIC_FIXED_VALUES')
+    CALL METHOD elemdescr->(`GET_DDIC_FIXED_VALUES`)
       EXPORTING
         p_langu        = lv_langu
       RECEIVING
@@ -410,8 +468,8 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
 
     TRY.
 
-        lv_web_http_name = 'CL_WEB_HTTP_UTILITY'.
-        CALL METHOD (lv_web_http_name)=>('DECODE_X_BASE64')
+        lv_web_http_name = `CL_WEB_HTTP_UTILITY`.
+        CALL METHOD (lv_web_http_name)=>(`DECODE_X_BASE64`)
           EXPORTING
             encoded = val
           RECEIVING
@@ -419,8 +477,8 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
 
       CATCH cx_root.
 
-        classname = 'CL_HTTP_UTILITY'.
-        CALL METHOD (classname)=>('DECODE_X_BASE64')
+        classname = `CL_HTTP_UTILITY`.
+        CALL METHOD (classname)=>(`DECODE_X_BASE64`)
           EXPORTING
             encoded = val
           RECEIVING
@@ -436,8 +494,8 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
 
     TRY.
 
-        lv_web_http_name = 'CL_WEB_HTTP_UTILITY'.
-        CALL METHOD (lv_web_http_name)=>('ENCODE_X_BASE64')
+        lv_web_http_name = `CL_WEB_HTTP_UTILITY`.
+        CALL METHOD (lv_web_http_name)=>(`ENCODE_X_BASE64`)
           EXPORTING
             unencoded = val
           RECEIVING
@@ -445,8 +503,8 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
 
       CATCH cx_root.
 
-        classname = 'CL_HTTP_UTILITY'.
-        CALL METHOD (classname)=>('ENCODE_X_BASE64')
+        classname = `CL_HTTP_UTILITY`.
+        CALL METHOD (classname)=>(`ENCODE_X_BASE64`)
           EXPORTING
             unencoded = val
           RECEIVING
@@ -464,12 +522,12 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
 
     TRY.
 
-        conv_codepage = 'CL_ABAP_CONV_CODEPAGE'.
+        conv_codepage = `CL_ABAP_CONV_CODEPAGE`.
         CALL METHOD (conv_codepage)=>create_in
           RECEIVING
             instance = conv.
 
-        CALL METHOD conv->('IF_ABAP_CONV_IN~CONVERT')
+        CALL METHOD conv->(`IF_ABAP_CONV_IN~CONVERT`)
           EXPORTING
             source = val
           RECEIVING
@@ -477,14 +535,14 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
 
       CATCH cx_root.
 
-        conv_in_class = 'CL_ABAP_CONV_IN_CE'.
+        conv_in_class = `CL_ABAP_CONV_IN_CE`.
         CALL METHOD (conv_in_class)=>create
           EXPORTING
-            encoding = 'UTF-8'
+            encoding = `UTF-8`
           RECEIVING
             conv     = conv.
 
-        CALL METHOD conv->('CONVERT')
+        CALL METHOD conv->(`CONVERT`)
           EXPORTING
             input = val
           IMPORTING
@@ -501,12 +559,12 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
 
     TRY.
 
-        conv_codepage = 'CL_ABAP_CONV_CODEPAGE'.
+        conv_codepage = `CL_ABAP_CONV_CODEPAGE`.
         CALL METHOD (conv_codepage)=>create_out
           RECEIVING
             instance = conv.
 
-        CALL METHOD conv->('IF_ABAP_CONV_OUT~CONVERT')
+        CALL METHOD conv->(`IF_ABAP_CONV_OUT~CONVERT`)
           EXPORTING
             source = val
           RECEIVING
@@ -514,14 +572,14 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
 
       CATCH cx_root.
 
-        conv_out_class = 'CL_ABAP_CONV_OUT_CE'.
+        conv_out_class = `CL_ABAP_CONV_OUT_CE`.
         CALL METHOD (conv_out_class)=>create
           EXPORTING
-            encoding = 'UTF-8'
+            encoding = `UTF-8`
           RECEIVING
             conv     = conv.
 
-        CALL METHOD conv->('CONVERT')
+        CALL METHOD conv->(`CONVERT`)
           EXPORTING
             data   = val
           IMPORTING
@@ -549,68 +607,68 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
         lv_class  = to_upper( iv_classname ).
         lv_method = to_upper( iv_methodname ).
 
-        xco_cp_abap = 'XCO_CP_ABAP'.
-        CALL METHOD (xco_cp_abap)=>('CLASS')
+        xco_cp_abap = `XCO_CP_ABAP`.
+        CALL METHOD (xco_cp_abap)=>(`CLASS`)
           EXPORTING
             iv_name  = lv_class
           RECEIVING
             ro_class = object.
 
-        ASSIGN object->('IF_XCO_AO_CLASS~IMPLEMENTATION') TO <any>.
+        ASSIGN object->(`IF_XCO_AO_CLASS~IMPLEMENTATION`) TO <any>.
         ASSERT sy-subrc = 0.
         object = <any>.
 
-        CALL METHOD object->('IF_XCO_CLAS_IMPLEMENTATION~METHOD')
+        CALL METHOD object->(`IF_XCO_CLAS_IMPLEMENTATION~METHOD`)
           EXPORTING
             iv_name   = lv_method
           RECEIVING
             ro_method = object.
 
-        CALL METHOD object->('IF_XCO_CLAS_I_METHOD~CONTENT')
+        CALL METHOD object->(`IF_XCO_CLAS_I_METHOD~CONTENT`)
           RECEIVING
             ro_content = object.
 
-        CALL METHOD object->('IF_XCO_CLAS_I_METHOD_CONTENT~GET_SOURCE')
+        CALL METHOD object->(`IF_XCO_CLAS_I_METHOD_CONTENT~GET_SOURCE`)
           RECEIVING
             rt_source = result.
 
       CATCH cx_root.
 
-        lv_name = 'CL_OO_FACTORY'.
-        CALL METHOD (lv_name)=>('CREATE_INSTANCE')
-          RECEIVING
-            result = object.
-
-        CALL METHOD object->('IF_OO_CLIF_SOURCE_FACTORY~CREATE_CLIF_SOURCE')
-          EXPORTING
-            clif_name = lv_class
-          RECEIVING
-            result    = object.
-
-        CALL METHOD object->('IF_OO_CLIF_SOURCE~GET_SOURCE')
-          IMPORTING
-            source = lt_source.
-
-        lv_check_method = abap_false.
-
-        LOOP AT lt_source INTO lv_source.
-
-          lv_source_upper = to_upper( lv_source ).
-
-          IF lv_source_upper CS `ENDMETHOD`.
-            lv_check_method = abap_false.
-          ENDIF.
-
-          IF lv_source_upper CS |METHOD { lv_method }|.
-            lv_check_method = abap_true.
-            CONTINUE.
-          ENDIF.
-
-          IF lv_check_method = abap_true.
-            INSERT lv_source INTO TABLE lt_string.
-          ENDIF.
-
-        ENDLOOP.
+*        lv_name = `CL_OO_FACTORY`.
+*        CALL METHOD (lv_name)=>(`CREATE_INSTANCE`)
+*          RECEIVING
+*            result = object.
+*
+*        CALL METHOD object->(`IF_OO_CLIF_SOURCE_FACTORY~CREATE_CLIF_SOURCE`)
+*          EXPORTING
+*            clif_name = lv_class
+*          RECEIVING
+*            result    = object.
+*
+*        CALL METHOD object->(`IF_OO_CLIF_SOURCE~GET_SOURCE`)
+*          IMPORTING
+*            source = lt_source.
+*
+*        lv_check_method = abap_false.
+*
+*        LOOP AT lt_source INTO lv_source.
+*
+*          lv_source_upper = to_upper( lv_source ).
+*
+*          IF lv_source_upper CS `ENDMETHOD`.
+*            lv_check_method = abap_false.
+*          ENDIF.
+*
+*          IF lv_source_upper CS |METHOD { lv_method }|.
+*            lv_check_method = abap_true.
+*            CONTINUE.
+*          ENDIF.
+*
+*          IF lv_check_method = abap_true.
+*            INSERT lv_source INTO TABLE lt_string.
+*          ENDIF.
+*
+*        ENDLOOP.
 
     ENDTRY.
 
@@ -652,26 +710,26 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
 
       ls_clskey-clsname = val.
 
-      xco_cp_abap = 'XCO_CP_ABAP'.
+      xco_cp_abap = `XCO_CP_ABAP`.
       CALL METHOD (xco_cp_abap)=>interface
         EXPORTING
           iv_name      = ls_clskey-clsname
         RECEIVING
           ro_interface = obj.
 
-      ASSIGN obj->('IF_XCO_AO_INTERFACE~IMPLEMENTATIONS') TO <any>.
+      ASSIGN obj->(`IF_XCO_AO_INTERFACE~IMPLEMENTATIONS`) TO <any>.
       IF sy-subrc <> 0.
         RAISE EXCEPTION TYPE cx_sy_dyn_call_illegal_class.
       ENDIF.
       obj = <any>.
 
-      ASSIGN obj->('IF_XCO_INTF_IMPLEMENTATIONS_FC~ALL') TO <any>.
+      ASSIGN obj->(`IF_XCO_INTF_IMPLEMENTATIONS_FC~ALL`) TO <any>.
       IF sy-subrc <> 0.
         RAISE EXCEPTION TYPE cx_sy_dyn_call_illegal_class.
       ENDIF.
       obj = <any>.
 
-      CALL METHOD obj->('IF_XCO_INTF_IMPLEMENTATIONS~GET_NAMES')
+      CALL METHOD obj->(`IF_XCO_INTF_IMPLEMENTATIONS~GET_NAMES`)
         RECEIVING
           rt_names = lt_implementation_names.
 
@@ -703,7 +761,7 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
         RETURN.
       ENDIF.
 
-      type = 'SEOC_CLASS_R'.
+      type = `SEOC_CLASS_R`.
       CREATE DATA class TYPE (type).
 
       ASSIGN class->* TO <class>.
@@ -728,7 +786,7 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
         ENDIF.
 
         ASSIGN
-          COMPONENT 'DESCRIPT'
+          COMPONENT `DESCRIPT`
           OF STRUCTURE <class>
           TO <description>.
         ASSERT sy-subrc = 0.
@@ -769,9 +827,9 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
     data_element_name = val.
 
     TRY.
-        cl_abap_typedescr=>describe_by_name( 'T100' ).
+        cl_abap_typedescr=>describe_by_name( `T100` ).
 
-        temp7 ?= cl_abap_structdescr=>describe_by_name( 'DFIES' ).
+        temp7 ?= cl_abap_structdescr=>describe_by_name( `DFIES` ).
 
         struct_desrc = temp7.
 
@@ -791,7 +849,7 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
 
         data_descr = temp8.
 
-        CALL METHOD data_descr->('GET_DDIC_FIELD')
+        CALL METHOD data_descr->(`GET_DDIC_FIELD`)
           RECEIVING
             p_flddescr   = <ddic>
           EXCEPTIONS
@@ -811,14 +869,14 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
       CATCH cx_root.
         TRY.
             DATA lv_xco_cp_abap_dictionary TYPE string.
-            lv_xco_cp_abap_dictionary = 'XCO_CP_ABAP_DICTIONARY'.
-            CALL METHOD (lv_xco_cp_abap_dictionary)=>('DATA_ELEMENT')
+            lv_xco_cp_abap_dictionary = `XCO_CP_ABAP_DICTIONARY`.
+            CALL METHOD (lv_xco_cp_abap_dictionary)=>(`DATA_ELEMENT`)
               EXPORTING
                 iv_name         = data_element_name
               RECEIVING
                 ro_data_element = data_element.
 
-            CALL METHOD data_element->('IF_XCO_AD_DATA_ELEMENT~EXISTS')
+            CALL METHOD data_element->(`IF_XCO_AD_DATA_ELEMENT~EXISTS`)
               RECEIVING
                 rv_exists = exists.
 
@@ -826,23 +884,23 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
               RETURN.
             ENDIF.
 
-            CALL METHOD data_element->('IF_XCO_AD_DATA_ELEMENT~CONTENT')
+            CALL METHOD data_element->(`IF_XCO_AD_DATA_ELEMENT~CONTENT`)
               RECEIVING
                 ro_content = content.
 
-            CALL METHOD content->('IF_XCO_DTEL_CONTENT~GET_HEADING_FIELD_LABEL')
+            CALL METHOD content->(`IF_XCO_DTEL_CONTENT~GET_HEADING_FIELD_LABEL`)
               RECEIVING
                 rs_heading_field_label = result-header.
 
-            CALL METHOD content->('IF_XCO_DTEL_CONTENT~GET_SHORT_FIELD_LABEL')
+            CALL METHOD content->(`IF_XCO_DTEL_CONTENT~GET_SHORT_FIELD_LABEL`)
               RECEIVING
                 rs_short_field_label = result-short.
 
-            CALL METHOD content->('IF_XCO_DTEL_CONTENT~GET_MEDIUM_FIELD_LABEL')
+            CALL METHOD content->(`IF_XCO_DTEL_CONTENT~GET_MEDIUM_FIELD_LABEL`)
               RECEIVING
                 rs_medium_field_label = result-medium.
 
-            CALL METHOD content->('IF_XCO_DTEL_CONTENT~GET_LONG_FIELD_LABEL')
+            CALL METHOD content->(`IF_XCO_DTEL_CONTENT~GET_LONG_FIELD_LABEL`)
               RECEIVING
                 rs_long_field_label = result-long.
 
@@ -949,18 +1007,18 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
 
         lv_classname = i_classname.
 
-        xco_cp_abap = 'XCO_CP_ABAP'.
-        CALL METHOD (xco_cp_abap)=>('CLASS')
+        xco_cp_abap = `XCO_CP_ABAP`.
+        CALL METHOD (xco_cp_abap)=>(`CLASS`)
           EXPORTING
             iv_name  = lv_classname
           RECEIVING
             ro_class = obj.
 
-        CALL METHOD obj->('IF_XCO_AO_CLASS~CONTENT')
+        CALL METHOD obj->(`IF_XCO_AO_CLASS~CONTENT`)
           RECEIVING
             ro_content = content.
 
-        CALL METHOD content->('IF_XCO_CLAS_CONTENT~GET_SHORT_DESCRIPTION')
+        CALL METHOD content->(`IF_XCO_CLAS_CONTENT~GET_SHORT_DESCRIPTION`)
           RECEIVING
             rv_short_description = result.
 
@@ -1014,8 +1072,8 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
     DATA lo_util TYPE REF TO object.
     IF context_check_abap_cloud( ).
 
-      CREATE OBJECT lo_util TYPE ('Z2UI5_CL_UTIL_ABAP_C').
-      CALL METHOD lo_util->('CONTEXT_GET_CALLSTACK')
+      CREATE OBJECT lo_util TYPE (`Z2UI5_CL_UTIL_API_C`).
+      CALL METHOD lo_util->(`CONTEXT_GET_CALLSTACK`)
         RECEIVING
           result = result.
 
@@ -1052,44 +1110,191 @@ CLASS zabaputil_cl_util_api IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD bal_read.
+  METHOD bal_create.
 
-*" Create and set header
-*
-*
-*DATA(lo_header) = cl_bali_header_setter=>create( object      = 'ZBS_DEMO_LOG_OBJECT'
-*                                                 subobject   = 'TEST'
-*                                                 external_id = cl_system_uuid=>create_uuid_c32_static( )
-*                                                 ).
-*
-*
-*DATA(lo_ohandler) = cl_bali_object_handler=>get_instance( ).
-*
-*lo_ohandler->read_object(
-*  EXPORTING
-*    iv_object      = 'TEST'
-*  IMPORTING
-**    ev_object_text =
-*    et_subobjects  = data(lo_obj)
-*).
-**CATCH cx_bali_objects.
-*
-*lo_obj
-*DATA(lo_log_db) = cl_bali_log_db=>get_instance( ).
-*data(ls_hanlde) =  value if_bali_log_db=>ty_handle( ).
-*DATA(lo_log) = lo_header->load_log( value ).
-*DATA(lt_items) = lo_log->get_all_items( ).
-
+    IF context_check_abap_cloud( ).
+      zabaputil_cl_util_api_c=>bal_create(
+        object    = object
+        subobject = subobject
+        id        = id
+        t_log     = t_log ).
+    ELSE.
+      zabaputil_cl_util_api_s=>bal_create(
+        object    = object
+        subobject = subobject
+        id        = id
+        t_log     = t_log ).
+    ENDIF.
 
   ENDMETHOD.
 
-  METHOD bal_save.
+  METHOD bal_read.
+
+    IF context_check_abap_cloud( ).
+      result = zabaputil_cl_util_api_c=>bal_read(
+        object    = object
+        subobject = subobject
+        id        = id ).
+    ELSE.
+      result = zabaputil_cl_util_api_s=>bal_read(
+        object    = object
+        subobject = subobject
+        id        = id ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD bal_update.
+
+    IF context_check_abap_cloud( ).
+      zabaputil_cl_util_api_c=>bal_update(
+        object    = object
+        subobject = subobject
+        id        = id
+        t_log     = t_log ).
+    ELSE.
+      zabaputil_cl_util_api_s=>bal_update(
+        object    = object
+        subobject = subobject
+        id        = id
+        t_log     = t_log ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD bal_delete.
+
+    IF context_check_abap_cloud( ).
+      zabaputil_cl_util_api_c=>bal_delete(
+        object    = object
+        subobject = subobject
+        id        = id ).
+    ELSE.
+      zabaputil_cl_util_api_s=>bal_delete(
+        object    = object
+        subobject = subobject
+        id        = id ).
+    ENDIF.
 
   ENDMETHOD.
 
   METHOD context_get_sy.
 
     result = CORRESPONDING #( sy ).
+
+  ENDMETHOD.
+
+  METHOD tr_create.
+
+    " Create an empty transport request (default type `T` = transport of copies).
+    " Uses the released class CL_ADT_CTS_MANAGEMENT, available on standard ABAP
+    " (>= 7.51) and ABAP Cloud. Called dynamically so the source stays compilable
+    " on all targets - on releases where the class is missing a clean
+    " z2ui5_cx_util_error is raised instead of a short dump.
+    TRY.
+
+        DATA lr_header TYPE REF TO data.
+        FIELD-SYMBOLS <header> TYPE any.
+        FIELD-SYMBOLS <trkorr> TYPE any.
+        DATA lv_class TYPE string.
+
+        CREATE DATA lr_header TYPE (`TRWBO_REQUEST_HEADER`).
+        ASSIGN lr_header->* TO <header>.
+
+        lv_class = `CL_ADT_CTS_MANAGEMENT`.
+        CALL METHOD (lv_class)=>(`CREATE_EMPTY_REQUEST`)
+          EXPORTING
+            iv_type           = type
+            iv_text           = text
+            iv_target         = target
+          IMPORTING
+            es_request_header = <header>.
+
+        ASSIGN COMPONENT `TRKORR` OF STRUCTURE <header> TO <trkorr>.
+        result = <trkorr>.
+
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            previous = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD tr_release.
+
+    " Release a transport request via the released CTS REST API
+    " (CL_CTS_REST_API_FACTORY). Works on standard ABAP and ABAP Cloud.
+    TRY.
+
+        DATA lo_api   TYPE REF TO object.
+        DATA lv_class TYPE string.
+
+        lv_class = `CL_CTS_REST_API_FACTORY`.
+        CALL METHOD (lv_class)=>(`CREATE_INSTANCE`)
+          RECEIVING
+            result = lo_api.
+
+        CALL METHOD lo_api->(`RELEASE`)
+          EXPORTING
+            iv_trkorr       = trkorr
+            iv_ignore_locks = ignore_locks.
+
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            previous = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD tr_copy_objects.
+
+    IF context_check_abap_cloud( ).
+      zabaputil_cl_util_api_c=>tr_copy_objects( source = source destination = destination ).
+    ELSE.
+      zabaputil_cl_util_api_s=>tr_copy_objects( source = source destination = destination ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD tr_import.
+
+    IF context_check_abap_cloud( ).
+      result = zabaputil_cl_util_api_c=>tr_import(
+                 trkorr         = trkorr
+                 target_system  = target_system
+                 client         = client
+                 ignore_version = ignore_version ).
+    ELSE.
+      result = zabaputil_cl_util_api_s=>tr_import(
+                 trkorr         = trkorr
+                 target_system  = target_system
+                 client         = client
+                 ignore_version = ignore_version ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD tr_check_status.
+
+    IF context_check_abap_cloud( ).
+      zabaputil_cl_util_api_c=>tr_check_status(
+        EXPORTING
+          trkorr   = trkorr
+          system   = system
+        IMPORTING
+          imported = imported
+          rc       = rc ).
+    ELSE.
+      zabaputil_cl_util_api_s=>tr_check_status(
+        EXPORTING
+          trkorr   = trkorr
+          system   = system
+        IMPORTING
+          imported = imported
+          rc       = rc ).
+    ENDIF.
 
   ENDMETHOD.
 

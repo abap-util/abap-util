@@ -203,14 +203,13 @@ CLASS ltcl_unit_test_open_abap IMPLEMENTATION.
 
   METHOD test_raise_error.
 
-    DATA lx TYPE REF TO zabaputil_cx_util_error.
     TRY.
         IF 1 = 1.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error.
         ENDIF.
         cl_abap_unit_assert=>fail( ).
 
-      CATCH zabaputil_cx_util_error INTO lx.
+      CATCH zabaputil_cx_util_error INTO DATA(lx).
         cl_abap_unit_assert=>assert_bound( lx ).
     ENDTRY.
 
@@ -1143,6 +1142,42 @@ CLASS ltcl_unit_test_filter DEFINITION FINAL
     METHODS test_filter_get_multi       FOR TESTING RAISING cx_static_check.
     METHODS test_filter_get_data        FOR TESTING RAISING cx_static_check.
 
+    METHODS test_sql_where_eq           FOR TESTING RAISING cx_static_check.
+    METHODS test_sql_where_ne           FOR TESTING RAISING cx_static_check.
+    METHODS test_sql_where_lt           FOR TESTING RAISING cx_static_check.
+    METHODS test_sql_where_le           FOR TESTING RAISING cx_static_check.
+    METHODS test_sql_where_gt           FOR TESTING RAISING cx_static_check.
+    METHODS test_sql_where_ge           FOR TESTING RAISING cx_static_check.
+    METHODS test_sql_where_cp           FOR TESTING RAISING cx_static_check.
+    METHODS test_sql_where_np           FOR TESTING RAISING cx_static_check.
+    METHODS test_sql_where_bt           FOR TESTING RAISING cx_static_check.
+    METHODS test_sql_where_nb           FOR TESTING RAISING cx_static_check.
+    METHODS test_sql_where_excl_sign    FOR TESTING RAISING cx_static_check.
+    METHODS test_sql_where_quote_esc    FOR TESTING RAISING cx_static_check.
+    METHODS test_sql_where_or           FOR TESTING RAISING cx_static_check.
+    METHODS test_sql_where_and          FOR TESTING RAISING cx_static_check.
+    METHODS test_sql_where_empty        FOR TESTING RAISING cx_static_check.
+    METHODS test_sql_where_skip_empty   FOR TESTING RAISING cx_static_check.
+
+    METHODS test_multi_by_where_eq      FOR TESTING RAISING cx_static_check.
+    METHODS test_multi_by_where_ops     FOR TESTING RAISING cx_static_check.
+    METHODS test_multi_by_where_bt      FOR TESTING RAISING cx_static_check.
+    METHODS test_multi_by_where_like    FOR TESTING RAISING cx_static_check.
+    METHODS test_multi_by_where_combo   FOR TESTING RAISING cx_static_check.
+    METHODS test_multi_by_where_empty   FOR TESTING RAISING cx_static_check.
+    METHODS test_multi_by_where_quote   FOR TESTING RAISING cx_static_check.
+
+    METHODS test_sql_roundtrip          FOR TESTING RAISING cx_static_check.
+    METHODS test_sql_string_with_where  FOR TESTING RAISING cx_static_check.
+    METHODS test_sql_string_tab_only    FOR TESTING RAISING cx_static_check.
+    METHODS test_sql_string_no_fields   FOR TESTING RAISING cx_static_check.
+
+    METHODS test_filter_itab            FOR TESTING RAISING cx_static_check.
+    METHODS test_itab_filter_by_val_ci  FOR TESTING RAISING cx_static_check.
+    METHODS test_itab_filter_by_val_fld FOR TESTING RAISING cx_static_check.
+    METHODS test_update_tokens          FOR TESTING RAISING cx_static_check.
+    METHODS test_update_tokens_remove   FOR TESTING RAISING cx_static_check.
+
 ENDCLASS.
 
 
@@ -1298,6 +1333,466 @@ CLASS ltcl_unit_test_filter IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD test_sql_where_eq.
+
+    DATA(lt_filter) = VALUE zabaputil_cl_util=>ty_t_filter_multi(
+      ( name    = `F1`
+        t_range = VALUE #( ( sign = `I` option = `EQ` low = `A` ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+      exp = `( F1 = 'A' )`
+      act = zabaputil_cl_util=>filter_get_sql_where( lt_filter ) ).
+
+  ENDMETHOD.
+
+  METHOD test_sql_where_ne.
+
+    DATA(lt_filter) = VALUE zabaputil_cl_util=>ty_t_filter_multi(
+      ( name    = `F1`
+        t_range = VALUE #( ( sign = `I` option = `NE` low = `A` ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+      exp = `( F1 <> 'A' )`
+      act = zabaputil_cl_util=>filter_get_sql_where( lt_filter ) ).
+
+  ENDMETHOD.
+
+  METHOD test_sql_where_lt.
+
+    DATA(lt_filter) = VALUE zabaputil_cl_util=>ty_t_filter_multi(
+      ( name    = `F1`
+        t_range = VALUE #( ( sign = `I` option = `LT` low = `100` ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+      exp = `( F1 < '100' )`
+      act = zabaputil_cl_util=>filter_get_sql_where( lt_filter ) ).
+
+  ENDMETHOD.
+
+  METHOD test_sql_where_le.
+
+    DATA(lt_filter) = VALUE zabaputil_cl_util=>ty_t_filter_multi(
+      ( name    = `F1`
+        t_range = VALUE #( ( sign = `I` option = `LE` low = `100` ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+      exp = `( F1 <= '100' )`
+      act = zabaputil_cl_util=>filter_get_sql_where( lt_filter ) ).
+
+  ENDMETHOD.
+
+  METHOD test_sql_where_gt.
+
+    DATA(lt_filter) = VALUE zabaputil_cl_util=>ty_t_filter_multi(
+      ( name    = `F1`
+        t_range = VALUE #( ( sign = `I` option = `GT` low = `100` ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+      exp = `( F1 > '100' )`
+      act = zabaputil_cl_util=>filter_get_sql_where( lt_filter ) ).
+
+  ENDMETHOD.
+
+  METHOD test_sql_where_ge.
+
+    DATA(lt_filter) = VALUE zabaputil_cl_util=>ty_t_filter_multi(
+      ( name    = `F1`
+        t_range = VALUE #( ( sign = `I` option = `GE` low = `100` ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+      exp = `( F1 >= '100' )`
+      act = zabaputil_cl_util=>filter_get_sql_where( lt_filter ) ).
+
+  ENDMETHOD.
+
+  METHOD test_sql_where_cp.
+
+    DATA(lt_filter) = VALUE zabaputil_cl_util=>ty_t_filter_multi(
+      ( name    = `F1`
+        t_range = VALUE #( ( sign = `I` option = `CP` low = `te*st+` ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+      exp = `( F1 LIKE 'te%st_' )`
+      act = zabaputil_cl_util=>filter_get_sql_where( lt_filter ) ).
+
+  ENDMETHOD.
+
+  METHOD test_sql_where_np.
+
+    DATA(lt_filter) = VALUE zabaputil_cl_util=>ty_t_filter_multi(
+      ( name    = `F1`
+        t_range = VALUE #( ( sign = `I` option = `NP` low = `*x*` ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+      exp = `( F1 NOT LIKE '%x%' )`
+      act = zabaputil_cl_util=>filter_get_sql_where( lt_filter ) ).
+
+  ENDMETHOD.
+
+  METHOD test_sql_where_bt.
+
+    DATA(lt_filter) = VALUE zabaputil_cl_util=>ty_t_filter_multi(
+      ( name    = `F1`
+        t_range = VALUE #( ( sign = `I` option = `BT` low = `100` high = `500` ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+      exp = `( F1 BETWEEN '100' AND '500' )`
+      act = zabaputil_cl_util=>filter_get_sql_where( lt_filter ) ).
+
+  ENDMETHOD.
+
+  METHOD test_sql_where_nb.
+
+    DATA(lt_filter) = VALUE zabaputil_cl_util=>ty_t_filter_multi(
+      ( name    = `F1`
+        t_range = VALUE #( ( sign = `I` option = `NB` low = `100` high = `500` ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+      exp = `( F1 NOT BETWEEN '100' AND '500' )`
+      act = zabaputil_cl_util=>filter_get_sql_where( lt_filter ) ).
+
+  ENDMETHOD.
+
+  METHOD test_sql_where_excl_sign.
+
+    DATA(lt_filter) = VALUE zabaputil_cl_util=>ty_t_filter_multi(
+      ( name    = `F1`
+        t_range = VALUE #( ( sign = `E` option = `EQ` low = `A` ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+      exp = `( F1 <> 'A' )`
+      act = zabaputil_cl_util=>filter_get_sql_where( lt_filter ) ).
+
+  ENDMETHOD.
+
+  METHOD test_sql_where_quote_esc.
+
+    DATA(lt_filter) = VALUE zabaputil_cl_util=>ty_t_filter_multi(
+      ( name    = `NAME`
+        t_range = VALUE #( ( sign = `I` option = `EQ` low = `O'Brien` ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+      exp = `( NAME = 'O''Brien' )`
+      act = zabaputil_cl_util=>filter_get_sql_where( lt_filter ) ).
+
+  ENDMETHOD.
+
+  METHOD test_sql_where_or.
+
+    DATA(lt_filter) = VALUE zabaputil_cl_util=>ty_t_filter_multi(
+      ( name    = `F1`
+        t_range = VALUE #( ( sign = `I` option = `EQ` low = `A` )
+                           ( sign = `I` option = `EQ` low = `B` ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+      exp = `( F1 = 'A' OR F1 = 'B' )`
+      act = zabaputil_cl_util=>filter_get_sql_where( lt_filter ) ).
+
+  ENDMETHOD.
+
+  METHOD test_sql_where_and.
+
+    DATA(lt_filter) = VALUE zabaputil_cl_util=>ty_t_filter_multi(
+      ( name    = `F1`
+        t_range = VALUE #( ( sign = `I` option = `EQ` low = `A` ) ) )
+      ( name    = `F2`
+        t_range = VALUE #( ( sign = `I` option = `EQ` low = `B` ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+      exp = `( F1 = 'A' ) AND ( F2 = 'B' )`
+      act = zabaputil_cl_util=>filter_get_sql_where( lt_filter ) ).
+
+  ENDMETHOD.
+
+  METHOD test_sql_where_empty.
+
+    DATA lt_filter TYPE zabaputil_cl_util=>ty_t_filter_multi.
+
+    cl_abap_unit_assert=>assert_initial(
+      zabaputil_cl_util=>filter_get_sql_where( lt_filter ) ).
+
+  ENDMETHOD.
+
+  METHOD test_sql_where_skip_empty.
+
+    DATA(lt_filter) = VALUE zabaputil_cl_util=>ty_t_filter_multi(
+      ( name = `F1` )
+      ( name    = `F2`
+        t_range = VALUE #( ( sign = `I` option = `EQ` low = `B` ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+      exp = `( F2 = 'B' )`
+      act = zabaputil_cl_util=>filter_get_sql_where( lt_filter ) ).
+
+  ENDMETHOD.
+
+  METHOD test_multi_by_where_eq.
+
+    DATA(lt_filter) = zabaputil_cl_util=>filter_get_multi_by_sql_where(
+                        `( F1 = 'A' )` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_filter ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `F1` act = lt_filter[ 1 ]-name ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_filter[ 1 ]-t_range ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `EQ` act = lt_filter[ 1 ]-t_range[ 1 ]-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `A`  act = lt_filter[ 1 ]-t_range[ 1 ]-low ).
+    cl_abap_unit_assert=>assert_equals( exp = `I`  act = lt_filter[ 1 ]-t_range[ 1 ]-sign ).
+
+  ENDMETHOD.
+
+  METHOD test_multi_by_where_ops.
+
+    DATA(lt_filter) = zabaputil_cl_util=>filter_get_multi_by_sql_where(
+                        `( F1 <> 'A' OR F1 < 'B' OR F1 <= 'C' OR F1 > 'D' OR F1 >= 'E' )` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_filter ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 5 act = lines( lt_filter[ 1 ]-t_range ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `NE` act = lt_filter[ 1 ]-t_range[ 1 ]-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `LT` act = lt_filter[ 1 ]-t_range[ 2 ]-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `LE` act = lt_filter[ 1 ]-t_range[ 3 ]-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `GT` act = lt_filter[ 1 ]-t_range[ 4 ]-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `GE` act = lt_filter[ 1 ]-t_range[ 5 ]-option ).
+
+  ENDMETHOD.
+
+  METHOD test_multi_by_where_bt.
+
+    DATA(lt_filter) = zabaputil_cl_util=>filter_get_multi_by_sql_where(
+                        `( F1 BETWEEN '100' AND '500' OR F1 NOT BETWEEN '700' AND '900' )` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_filter ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_filter[ 1 ]-t_range ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `BT`  act = lt_filter[ 1 ]-t_range[ 1 ]-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `100` act = lt_filter[ 1 ]-t_range[ 1 ]-low ).
+    cl_abap_unit_assert=>assert_equals( exp = `500` act = lt_filter[ 1 ]-t_range[ 1 ]-high ).
+    cl_abap_unit_assert=>assert_equals( exp = `NB`  act = lt_filter[ 1 ]-t_range[ 2 ]-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `700` act = lt_filter[ 1 ]-t_range[ 2 ]-low ).
+    cl_abap_unit_assert=>assert_equals( exp = `900` act = lt_filter[ 1 ]-t_range[ 2 ]-high ).
+
+  ENDMETHOD.
+
+  METHOD test_multi_by_where_like.
+
+    DATA(lt_filter) = zabaputil_cl_util=>filter_get_multi_by_sql_where(
+                        `( F1 LIKE 'te%st_' OR F1 NOT LIKE '%bad%' )` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_filter ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_filter[ 1 ]-t_range ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `CP`     act = lt_filter[ 1 ]-t_range[ 1 ]-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `te*st+` act = lt_filter[ 1 ]-t_range[ 1 ]-low ).
+    cl_abap_unit_assert=>assert_equals( exp = `NP`     act = lt_filter[ 1 ]-t_range[ 2 ]-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `*bad*`  act = lt_filter[ 1 ]-t_range[ 2 ]-low ).
+
+  ENDMETHOD.
+
+  METHOD test_multi_by_where_combo.
+
+    DATA(lt_filter) = zabaputil_cl_util=>filter_get_multi_by_sql_where(
+                        `( F1 = 'A' OR F1 = 'B' ) AND ( F2 = 'X' )` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_filter ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `F1` act = lt_filter[ 1 ]-name ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_filter[ 1 ]-t_range ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `F2` act = lt_filter[ 2 ]-name ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_filter[ 2 ]-t_range ) ).
+
+  ENDMETHOD.
+
+  METHOD test_multi_by_where_empty.
+
+    DATA(lt_filter) = zabaputil_cl_util=>filter_get_multi_by_sql_where( `` ).
+    cl_abap_unit_assert=>assert_initial( lt_filter ).
+
+  ENDMETHOD.
+
+  METHOD test_multi_by_where_quote.
+
+    DATA(lt_filter) = zabaputil_cl_util=>filter_get_multi_by_sql_where(
+                        `( NAME = 'O''Brien' )` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_filter ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `O'Brien`
+                                        act = lt_filter[ 1 ]-t_range[ 1 ]-low ).
+
+  ENDMETHOD.
+
+  METHOD test_sql_roundtrip.
+
+    DATA(lt_filter) = VALUE zabaputil_cl_util=>ty_t_filter_multi(
+      ( name    = `CARRID`
+        t_range = VALUE #( ( sign = `I` option = `EQ` low = `LH` )
+                           ( sign = `I` option = `EQ` low = `AA` ) ) )
+      ( name    = `CONNID`
+        t_range = VALUE #( ( sign = `I` option = `BT` low = `100` high = `500` ) ) ) ).
+
+    DATA(lv_where) = zabaputil_cl_util=>filter_get_sql_where( lt_filter ).
+    DATA(lt_parsed) = zabaputil_cl_util=>filter_get_multi_by_sql_where( lv_where ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_parsed ) ).
+    cl_abap_unit_assert=>assert_equals( exp = lt_filter[ 1 ]-name act = lt_parsed[ 1 ]-name ).
+    cl_abap_unit_assert=>assert_equals( exp = lt_filter[ 1 ]-t_range act = lt_parsed[ 1 ]-t_range ).
+    cl_abap_unit_assert=>assert_equals( exp = lt_filter[ 2 ]-name act = lt_parsed[ 2 ]-name ).
+    cl_abap_unit_assert=>assert_equals( exp = lt_filter[ 2 ]-t_range act = lt_parsed[ 2 ]-t_range ).
+
+  ENDMETHOD.
+
+  METHOD test_sql_string_with_where.
+
+    DATA(ls_sql) = zabaputil_cl_util=>filter_get_sql_by_sql_string(
+                     `SELECT FROM scarr FIELDS carrid, carrname WHERE carrid = 'LH'` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `SCARR` act = ls_sql-tabname ).
+    cl_abap_unit_assert=>assert_equals( exp = `carrid = 'LH'` act = ls_sql-where ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( ls_sql-t_filter ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `carrid` act = ls_sql-t_filter[ 1 ]-name ).
+    cl_abap_unit_assert=>assert_equals( exp = `LH` act = ls_sql-t_filter[ 1 ]-t_range[ 1 ]-low ).
+
+  ENDMETHOD.
+
+  METHOD test_sql_string_tab_only.
+
+    DATA(ls_sql) = zabaputil_cl_util=>filter_get_sql_by_sql_string(
+                     `SELECT FROM scarr FIELDS carrid` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `SCARR` act = ls_sql-tabname ).
+    cl_abap_unit_assert=>assert_initial( ls_sql-where ).
+    cl_abap_unit_assert=>assert_initial( ls_sql-t_filter ).
+
+  ENDMETHOD.
+
+  METHOD test_sql_string_no_fields.
+
+    DATA(ls_sql) = zabaputil_cl_util=>filter_get_sql_by_sql_string(
+                     `SELECT FROM scarr WHERE carrid = 'LH'` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `SCARR` act = ls_sql-tabname ).
+    cl_abap_unit_assert=>assert_equals( exp = `carrid = 'LH'` act = ls_sql-where ).
+
+  ENDMETHOD.
+
+  METHOD test_filter_itab.
+
+    TYPES:
+      BEGIN OF ty_row,
+        name  TYPE string,
+        value TYPE string,
+      END OF ty_row.
+
+    DATA lt_data TYPE STANDARD TABLE OF ty_row WITH EMPTY KEY.
+
+    INSERT VALUE #( name = `alpha` value = `low` ) INTO TABLE lt_data.
+    INSERT VALUE #( name = `beta`  value = `mid` ) INTO TABLE lt_data.
+    INSERT VALUE #( name = `gamma` value = `top` ) INTO TABLE lt_data.
+
+    DATA(lt_filter) = VALUE zabaputil_cl_util=>ty_t_filter_multi(
+      ( name    = `VALUE`
+        t_range = VALUE #( ( sign = `I` option = `EQ` low = `mid` )
+                           ( sign = `I` option = `EQ` low = `top` ) ) ) ).
+
+    zabaputil_cl_util=>filter_itab( EXPORTING filter = lt_filter
+                                CHANGING  val    = lt_data ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_data ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `beta` act = lt_data[ 1 ]-name ).
+    cl_abap_unit_assert=>assert_equals( exp = `gamma` act = lt_data[ 2 ]-name ).
+
+  ENDMETHOD.
+
+  METHOD test_itab_filter_by_val_ci.
+
+    TYPES:
+      BEGIN OF ty_row,
+        name  TYPE string,
+        value TYPE string,
+      END OF ty_row.
+
+    DATA lt_data TYPE STANDARD TABLE OF ty_row WITH EMPTY KEY.
+
+    INSERT VALUE #( name = `alpha` value = `low` ) INTO TABLE lt_data.
+    INSERT VALUE #( name = `beta`  value = `mid` ) INTO TABLE lt_data.
+    INSERT VALUE #( name = `gamma` value = `top` ) INTO TABLE lt_data.
+
+    zabaputil_cl_util=>itab_filter_by_val( EXPORTING val = `mid`
+                                       CHANGING  tab = lt_data ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_data ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `beta` act = lt_data[ 1 ]-name ).
+
+    lt_data = VALUE #( ( name = `alpha` value = `low` )
+                       ( name = `beta`  value = `MID` ) ).
+
+    zabaputil_cl_util=>itab_filter_by_val( EXPORTING val         = `mid`
+                                                 ignore_case = abap_true
+                                       CHANGING  tab         = lt_data ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_data ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `beta` act = lt_data[ 1 ]-name ).
+
+  ENDMETHOD.
+
+  METHOD test_itab_filter_by_val_fld.
+
+    TYPES:
+      BEGIN OF ty_row,
+        name  TYPE string,
+        value TYPE string,
+      END OF ty_row.
+
+    DATA lt_data TYPE STANDARD TABLE OF ty_row WITH EMPTY KEY.
+
+    INSERT VALUE #( name = `alpha` value = `low` ) INTO TABLE lt_data.
+    INSERT VALUE #( name = `beta`  value = `mid` ) INTO TABLE lt_data.
+    INSERT VALUE #( name = `low`   value = `top` ) INTO TABLE lt_data.
+
+    zabaputil_cl_util=>itab_filter_by_val(
+      EXPORTING
+        val    = `low`
+        fields = VALUE #( ( `NAME` ) )
+      CHANGING
+        tab    = lt_data ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_data ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `top` act = lt_data[ 1 ]-value ).
+
+  ENDMETHOD.
+
+  METHOD test_update_tokens.
+
+    DATA(lt_filter) = VALUE zabaputil_cl_util=>ty_t_filter_multi(
+      ( name          = `F1`
+        t_token_added = VALUE #( ( key = `=A` text = `=A` ) ) ) ).
+
+    DATA(lt_result) = zabaputil_cl_util=>filter_update_tokens( val  = lt_filter
+                                                           name = `F1` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_result[ 1 ]-t_token ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `=A` act = lt_result[ 1 ]-t_token[ 1 ]-text ).
+    cl_abap_unit_assert=>assert_initial( lt_result[ 1 ]-t_token_added ).
+    cl_abap_unit_assert=>assert_initial( lt_result[ 1 ]-t_token_removed ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_result[ 1 ]-t_range ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `EQ` act = lt_result[ 1 ]-t_range[ 1 ]-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `A`  act = lt_result[ 1 ]-t_range[ 1 ]-low ).
+
+  ENDMETHOD.
+
+  METHOD test_update_tokens_remove.
+
+    DATA(lt_filter) = VALUE zabaputil_cl_util=>ty_t_filter_multi(
+      ( name            = `F1`
+        t_token         = VALUE #( ( key = `=A` text = `=A` )
+                                   ( key = `=B` text = `=B` ) )
+        t_token_removed = VALUE #( ( key = `=A` text = `=A` ) ) ) ).
+
+    DATA(lt_result) = zabaputil_cl_util=>filter_update_tokens( val  = lt_filter
+                                                           name = `F1` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_result[ 1 ]-t_token ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `=B` act = lt_result[ 1 ]-t_token[ 1 ]-text ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_result[ 1 ]-t_range ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `B` act = lt_result[ 1 ]-t_range[ 1 ]-low ).
+
+  ENDMETHOD.
+
 ENDCLASS.
 
 
@@ -1315,6 +1810,11 @@ CLASS ltcl_unit_test_conversion DEFINITION FINAL
     METHODS test_itab_get_by_struc       FOR TESTING RAISING cx_static_check.
     METHODS test_time_add_seconds        FOR TESTING RAISING cx_static_check.
     METHODS test_time_diff_seconds       FOR TESTING RAISING cx_static_check.
+    METHODS test_cal_weekday             FOR TESTING RAISING cx_static_check.
+    METHODS test_cal_workdays            FOR TESTING RAISING cx_static_check.
+    METHODS test_zip_pack                FOR TESTING RAISING cx_static_check.
+    METHODS test_zip_unpack              FOR TESTING RAISING cx_static_check.
+    METHODS test_lock_get_dequeue        FOR TESTING RAISING cx_static_check.
 
 ENDCLASS.
 
@@ -1453,6 +1953,98 @@ CLASS ltcl_unit_test_conversion IMPLEMENTATION.
 
     cl_abap_unit_assert=>assert_equals( exp = 120
                                         act = lv_diff ).
+
+  ENDMETHOD.
+
+  METHOD test_cal_weekday.
+
+    " 2024-01-01 was a Monday, 2024-01-07 a Sunday
+    cl_abap_unit_assert=>assert_equals(
+        exp = 1
+        act = zabaputil_cl_util=>cal_get_weekday( CONV d( `20240101` ) ) ).
+    cl_abap_unit_assert=>assert_false(
+        zabaputil_cl_util=>cal_is_weekend( CONV d( `20240101` ) ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = 7
+        act = zabaputil_cl_util=>cal_get_weekday( CONV d( `20240107` ) ) ).
+    cl_abap_unit_assert=>assert_true(
+        zabaputil_cl_util=>cal_is_weekend( CONV d( `20240107` ) ) ).
+
+  ENDMETHOD.
+
+  METHOD test_cal_workdays.
+
+    " Friday 2024-03-15 + 1 workday skips the weekend -> Monday 2024-03-18
+    cl_abap_unit_assert=>assert_equals(
+        exp = CONV d( `20240318` )
+        act = zabaputil_cl_util=>cal_add_workdays( date = CONV d( `20240315` )
+                                               days = 1 ) ).
+
+    " Monday 2024-01-01 to Monday 2024-01-08 -> 5 workdays
+    cl_abap_unit_assert=>assert_equals(
+        exp = 5
+        act = zabaputil_cl_util=>cal_count_workdays( date_from = CONV d( `20240101` )
+                                                 date_to   = CONV d( `20240108` ) ) ).
+
+  ENDMETHOD.
+
+  METHOD test_zip_pack.
+
+    " Skip when the runtime (e.g. the transpiler) does not provide CL_ABAP_ZIP
+    DATA lo_probe TYPE REF TO object.
+    TRY.
+        CREATE OBJECT lo_probe TYPE ('CL_ABAP_ZIP').
+      CATCH cx_root.
+        RETURN.
+    ENDTRY.
+
+    DATA(lt_in) = VALUE zabaputil_cl_util=>ty_t_zip_file(
+        ( name = `hello.txt` content = CONV xstring( `48656C6C6F` ) )
+        ( name = `world.txt` content = CONV xstring( `576F726C64` ) ) ).
+
+    DATA(lv_archive) = zabaputil_cl_util=>zip_pack( lt_in ).
+    cl_abap_unit_assert=>assert_not_initial( lv_archive ).
+
+  ENDMETHOD.
+
+  METHOD test_zip_unpack.
+
+    " Note: this full round-trip relies on CL_ABAP_ZIP=>LOAD, which the
+    " open-abap transpiler runtime does not implement - the method is therefore
+    " listed in the transpiler skip list (node/setup/abap_transpile.json).
+    DATA(lt_in) = VALUE zabaputil_cl_util=>ty_t_zip_file(
+        ( name = `hello.txt` content = CONV xstring( `48656C6C6F` ) )
+        ( name = `world.txt` content = CONV xstring( `576F726C64` ) ) ).
+
+    DATA(lv_archive) = zabaputil_cl_util=>zip_pack( lt_in ).
+    DATA(lt_out) = zabaputil_cl_util=>zip_unpack( lv_archive ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_out ) ).
+
+    LOOP AT lt_in INTO DATA(ls_in).
+      DATA(ls_out) = VALUE #( lt_out[ name = ls_in-name ] OPTIONAL ).
+      cl_abap_unit_assert=>assert_equals( exp = ls_in-content
+                                          act = ls_out-content ).
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD test_lock_get_dequeue.
+
+    DATA lv_result TYPE string.
+
+    lv_result = zabaputil_cl_util=>lock_get_dequeue_by_enqueue( `ENQUEUE_EVVBAKE` ).
+    cl_abap_unit_assert=>assert_equals( exp = `DEQUEUE_EVVBAKE`
+                                        act = lv_result ).
+
+    lv_result = zabaputil_cl_util=>lock_get_dequeue_by_enqueue( `enqueue_evvbake` ).
+    cl_abap_unit_assert=>assert_equals( exp = `DEQUEUE_EVVBAKE`
+                                        act = lv_result ).
+
+    lv_result = zabaputil_cl_util=>lock_get_dequeue_by_enqueue( `DEQUEUE_EVVBAKE` ).
+    cl_abap_unit_assert=>assert_equals( exp = `DEQUEUE_EVVBAKE`
+                                        act = lv_result ).
 
   ENDMETHOD.
 

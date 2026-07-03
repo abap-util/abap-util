@@ -151,7 +151,7 @@ CLASS zabaputil_cl_util_log IMPLEMENTATION.
 
   METHOD bal_save.
 
-    zabaputil_cl_util=>bal_save(
+    zabaputil_cl_util=>bal_create(
         object    = object
         subobject = subobject
         id        = id

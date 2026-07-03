@@ -256,7 +256,7 @@ CLASS zabaputil_cl_util_ext DEFINITION
 
     TYPES:
       BEGIN OF ty_ddshtextsearch_field,
-        fieldname TYPE c LENGTH 30, " Name of a searchable field (frei gewählt, da nicht spezifiziert)
+        fieldname TYPE c LENGTH 30, " Name of a searchable field (freely chosen, not specified by SAP)
       END OF ty_ddshtextsearch_field.
 
     TYPES tt_ddshtextsearch_fields TYPE STANDARD TABLE OF ty_ddshtextsearch_field WITH DEFAULT KEY.
@@ -365,18 +365,18 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
 
     lv_classname = i_classname.
 
-    xco_cp_abap = 'XCO_CP_ABAP'.
-    CALL METHOD (xco_cp_abap)=>('CLASS')
+    xco_cp_abap = `XCO_CP_ABAP`.
+    CALL METHOD (xco_cp_abap)=>(`CLASS`)
       EXPORTING
         iv_name  = lv_classname
       RECEIVING
         ro_class = obj.
 
-    CALL METHOD obj->('IF_XCO_AO_CLASS~CONTENT')
+    CALL METHOD obj->(`IF_XCO_AO_CLASS~CONTENT`)
       RECEIVING
         ro_content = content.
 
-    CALL METHOD content->('IF_XCO_CLAS_CONTENT~GET_SHORT_DESCRIPTION')
+    CALL METHOD content->(`IF_XCO_CLAS_CONTENT~GET_SHORT_DESCRIPTION`)
       RECEIVING
         rv_short_description = result.
 
@@ -454,9 +454,9 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
 *             nohistory   TYPE c LENGTH 1,
 *             ampmformat  TYPE c LENGTH 1,
 *           END OF ty_s_dfies.
-*    temp10 ?= cl_abap_structdescr=>describe_by_name( 'TY_S_DFIES' ).
+*    temp10 ?= cl_abap_structdescr=>describe_by_name( `TY_S_DFIES` ).
 
-    temp10 ?= cl_abap_structdescr=>describe_by_name( 'DFIES' ).
+    temp10 ?= cl_abap_structdescr=>describe_by_name( `DFIES` ).
 
     lo_struct = temp10.
     comps = lo_struct->get_components( ).
@@ -510,8 +510,7 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
 
         ENDLOOP.
 
-      CATCH cx_root INTO DATA(x).
-        DATA(error) = x->get_text( ).
+      CATCH cx_root ##NO_HANDLER.
     ENDTRY.
 
   ENDMETHOD.
@@ -533,39 +532,38 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
     TRY.
         TRY.
             DATA(lv_method2) = `XCO_CP_ABAP_DICTIONARY`.
-            CALL METHOD (lv_method2)=>('DATABASE_TABLE')
+            CALL METHOD (lv_method2)=>(`DATABASE_TABLE`)
               EXPORTING
                 iv_name           = lv_tabname
               RECEIVING
                 ro_database_table = obj.
-            ASSIGN obj->('IF_XCO_DATABASE_TABLE~FIELDS->IF_XCO_DBT_FIELDS_FACTORY~KEY') TO <any>.
+            ASSIGN obj->(`IF_XCO_DATABASE_TABLE~FIELDS->IF_XCO_DBT_FIELDS_FACTORY~KEY`) TO <any>.
             IF sy-subrc  <> 0.
 * fallback to RTTI, KEY field does not exist in S/4 2020
               RAISE EXCEPTION TYPE cx_sy_dyn_call_illegal_class.
             ENDIF.
             obj = <any>.
-            CALL METHOD obj->('IF_XCO_DBT_FIELDS~GET_NAMES')
+            CALL METHOD obj->(`IF_XCO_DBT_FIELDS~GET_NAMES`)
               RECEIVING
                 rt_names = names.
           CATCH cx_sy_dyn_call_illegal_class.
-            DATA(workaround) = 'DDFIELDS'.
+            DATA(workaround) = `DDFIELDS`.
             CREATE DATA lr_ddfields TYPE (workaround).
             ASSIGN lr_ddfields->* TO <ddfields>.
             ASSERT sy-subrc = 0.
             <ddfields> = CAST cl_abap_structdescr( cl_abap_typedescr=>describe_by_name(
               lv_tabname ) )->get_ddic_field_list( ).
             LOOP AT <ddfields> ASSIGNING <any>.
-              ASSIGN COMPONENT 'KEYFLAG' OF STRUCTURE <any> TO <field>.
+              ASSIGN COMPONENT `KEYFLAG` OF STRUCTURE <any> TO <field>.
               IF sy-subrc <> 0 OR <field> <> abap_true.
                 CONTINUE.
               ENDIF.
-              ASSIGN COMPONENT 'FIELDNAME' OF STRUCTURE <any> TO <field>.
+              ASSIGN COMPONENT `FIELDNAME` OF STRUCTURE <any> TO <field>.
               ASSERT sy-subrc = 0.
               APPEND <field> TO names.
             ENDLOOP.
         ENDTRY.
-      CATCH cx_root INTO DATA(x).
-        DATA(error) = x->get_text( ).
+      CATCH cx_root ##NO_HANDLER.
     ENDTRY.
 
 
@@ -636,13 +634,13 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
 *
 *    tab = tabname.
 *
-*    CALL METHOD ('XCO_CP_ABAP_DICTIONARY')=>database_table
+*    CALL METHOD (`XCO_CP_ABAP_DICTIONARY`)=>database_table
 *      EXPORTING
 *        iv_name           = tab
 *      RECEIVING
 *        ro_database_table = db.
 *
-*    ASSIGN db->('IF_XCO_DATABASE_TABLE~FIELDS->IF_XCO_DBT_FIELDS_FACTORY~ALL') TO <any>.
+*    ASSIGN db->(`IF_XCO_DATABASE_TABLE~FIELDS->IF_XCO_DBT_FIELDS_FACTORY~ALL`) TO <any>.
 *
 *    IF sy-subrc <> 0.
 *      RETURN.
@@ -650,13 +648,13 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
 *
 *    fields = <any>.
 *
-*    CREATE DATA r_names TYPE ('SXCO_T_AD_FIELD_NAMES').
+*    CREATE DATA r_names TYPE (`SXCO_T_AD_FIELD_NAMES`).
 *    ASSIGN r_names->* TO <Names>.
 *    IF <Names> IS NOT ASSIGNED.
 *      RETURN.
 *    ENDIF.
 *
-*    CALL METHOD fields->('IF_XCO_DBT_FIELDS~GET_NAMES')
+*    CALL METHOD fields->(`IF_XCO_DBT_FIELDS~GET_NAMES`)
 *      RECEIVING
 *        rt_names = <Names>.
 *
@@ -664,17 +662,17 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
 *
 *      CLEAR t_param.
 *
-*      INSERT VALUE #( name  = 'IV_NAME'
+*      INSERT VALUE #( name  = `IV_NAME`
 *                      kind  = cl_abap_objectdescr=>exporting
 *                      value = REF #( <name> ) ) INTO TABLE t_param.
-*      INSERT VALUE #( name  = 'RO_FIELD'
+*      INSERT VALUE #( name  = `RO_FIELD`
 *                      kind  = cl_abap_objectdescr=>receiving
 *                      value = REF #( field ) ) INTO TABLE t_param.
 *
 *      CALL METHOD db->(`IF_XCO_DATABASE_TABLE~FIELD`)
 *        PARAMETER-TABLE t_param.
 *
-*      ASSIGN t_param[ name = 'RO_FIELD' ] TO FIELD-SYMBOL(<line>).
+*      ASSIGN t_param[ name = `RO_FIELD` ] TO FIELD-SYMBOL(<line>).
 *      IF <line> IS NOT ASSIGNED.
 *        CONTINUE.
 *      ENDIF.
@@ -683,36 +681,36 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
 *        CONTINUE.
 *      ENDIF.
 *
-*      CALL METHOD <fiel>->('IF_XCO_DBT_FIELD~CONTENT')
+*      CALL METHOD <fiel>->(`IF_XCO_DBT_FIELD~CONTENT`)
 *        RECEIVING
 *          ro_content = content.
 *
-*      CREATE DATA r_content TYPE ('IF_XCO_DBT_FIELD_CONTENT=>TS_CONTENT').
-*      ASSIGN r_content->* TO FIELD-SYMBOL(<Content>) CASTING TYPE ('IF_XCO_DBT_FIELD_CONTENT=>TS_CONTENT').
+*      CREATE DATA r_content TYPE (`IF_XCO_DBT_FIELD_CONTENT=>TS_CONTENT`).
+*      ASSIGN r_content->* TO FIELD-SYMBOL(<Content>) CASTING TYPE (`IF_XCO_DBT_FIELD_CONTENT=>TS_CONTENT`).
 *      IF <content> IS NOT ASSIGNED.
 *        CONTINUE.
 *      ENDIF.
 *
-*      CALL METHOD content->('IF_XCO_DBT_FIELD_CONTENT~GET')
+*      CALL METHOD content->(`IF_XCO_DBT_FIELD_CONTENT~GET`)
 *        RECEIVING
 *          rs_content = <Content>.
 *
-*      ASSIGN COMPONENT 'KEY_INDICATOR' OF STRUCTURE <content> TO FIELD-SYMBOL(<key>).
+*      ASSIGN COMPONENT `KEY_INDICATOR` OF STRUCTURE <content> TO FIELD-SYMBOL(<key>).
 *      IF <key> IS NOT ASSIGNED.
 *        CONTINUE.
 *      ENDIF.
-*      ASSIGN COMPONENT 'SHORT_DESCRIPTION' OF STRUCTURE <content> TO FIELD-SYMBOL(<text>).
+*      ASSIGN COMPONENT `SHORT_DESCRIPTION` OF STRUCTURE <content> TO FIELD-SYMBOL(<text>).
 *      IF <text> IS NOT ASSIGNED.
 *        CONTINUE.
 *      ENDIF.
-*      ASSIGN COMPONENT 'TYPE' OF STRUCTURE <content> TO FIELD-SYMBOL(<type>).
+*      ASSIGN COMPONENT `TYPE` OF STRUCTURE <content> TO FIELD-SYMBOL(<type>).
 *      IF <type> IS NOT ASSIGNED.
 *        CONTINUE.
 *      ENDIF.
 *
 *      type = <type>.
 *
-*      CALL METHOD type->('IF_XCO_DBT_FIELD_TYPE~GET_DATA_ELEMENT')
+*      CALL METHOD type->(`IF_XCO_DBT_FIELD_TYPE~GET_DATA_ELEMENT`)
 *        RECEIVING
 *          ro_data_element = element.
 *
@@ -720,7 +718,7 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
 *        <text> = <name>.
 *      ENDIF.
 *
-*      ASSIGN element->('IF_XCO_AD_OBJECT~NAME') TO FIELD-SYMBOL(<rname>).
+*      ASSIGN element->(`IF_XCO_AD_OBJECT~NAME`) TO FIELD-SYMBOL(<rname>).
 *      IF <rname> IS NOT ASSIGNED.
 *        CONTINUE.
 *      ENDIF.
@@ -798,7 +796,7 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
 
     DATA lr_shlp       TYPE REF TO data.
 
-    DATA(lv_type) = 'SHLP_DESCR'.
+    DATA(lv_type) = `SHLP_DESCR`.
     CREATE DATA lr_shlp TYPE (lv_type).
     FIELD-SYMBOLS <shlp> TYPE any.
     ASSIGN lr_shlp->* TO <shlp>.
@@ -810,7 +808,7 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
 
     IF ms_shlp IS INITIAL.
       " Suchhilfe lesen
-      DATA(lv_fm) = 'F4IF_DETERMINE_SEARCHHELP'.
+      DATA(lv_fm) = `F4IF_DETERMINE_SEARCHHELP`.
       CALL FUNCTION lv_fm
         EXPORTING
           tabname           = lv_tabname
@@ -823,7 +821,9 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
           inconsistent_help = 3
           OTHERS            = 4.
       IF sy-subrc <> 0.
-        " FEHLER
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |F4IF_DETERMINE_SEARCHHELP failed for { lv_tabname }-{ lv_fieldname }|.
       ENDIF.
       ms_shlp = CORRESPONDING #( <shlp> ).
 
@@ -831,12 +831,12 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
 
 *      DATA lt_shlp       TYPE shlp_desct.
         DATA lr_t_shlp TYPE REF TO data.
-        DATA(lv_type2) = 'SHLP_DESCT'.
+        DATA(lv_type2) = `SHLP_DESCT`.
         CREATE DATA lr_t_shlp TYPE (lv_type2).
         FIELD-SYMBOLS <shlp2> TYPE STANDARD TABLE.
         ASSIGN lr_t_shlp->* TO <shlp2>.
 
-        lv_fm = 'F4IF_EXPAND_SEARCHHELP'.
+        lv_fm = `F4IF_EXPAND_SEARCHHELP`.
         CALL FUNCTION lv_fm
           EXPORTING
             shlp_top = ms_shlp
@@ -881,8 +881,8 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
         ms_shlp-selopt = VALUE #( BASE ms_shlp-selopt
                                   ( shlpfield = interface-shlpfield
                                     shlpname  = interface-valtabname
-                                    option    = COND #( WHEN interface-value CA `*` THEN 'CP' ELSE 'EQ' )
-                                    sign      = 'I'
+                                    option    = COND #( WHEN interface-value CA `*` THEN `CP` ELSE `EQ` )
+                                    sign      = `I`
                                     low       = interface-value  ) ).
 
       ENDIF.
@@ -901,8 +901,8 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
       ms_shlp-selopt = VALUE #( BASE ms_shlp-selopt
                                 ( shlpfield = fieldrop-fieldname
 *                                  shlpname  =
-                                  option    = COND #( WHEN fieldrop-defaultval CA `*` THEN 'CP' ELSE 'EQ' )
-                                  sign      = 'I'
+                                  option    = COND #( WHEN fieldrop-defaultval CA `*` THEN `CP` ELSE `EQ` )
+                                  sign      = `I`
                                   low       = valule  ) ).
 
     ENDLOOP.
@@ -912,7 +912,7 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
     CLEAR: <shlp>.
     MOVE-CORRESPONDING ms_shlp TO <shlp>.
 
-    lv_fm = 'F4IF_SELECT_VALUES'.
+    lv_fm = `F4IF_SELECT_VALUES`.
     CALL FUNCTION lv_fm
       EXPORTING
         shlp           = <shlp>
@@ -934,9 +934,9 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
 
     ENDLOOP.
 
-    IF NOT line_exists( lt_comps[ name = 'ROW_ID' ] ).
-      lo_datadescr ?= cl_abap_datadescr=>describe_by_name( 'INT4' ).
-      ls_comp-name  = 'ROW_ID'.
+    IF NOT line_exists( lt_comps[ name = `ROW_ID` ] ).
+      lo_datadescr ?= cl_abap_datadescr=>describe_by_name( `INT4` ).
+      ls_comp-name  = `ROW_ID`.
       ls_comp-type ?= lo_datadescr.
       APPEND ls_comp TO lt_comps.
     ENDIF.
@@ -954,7 +954,7 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
 
     CLEAR <fs_target_tab>.
 
-    " we dont want to loose all inputs in row ...
+    " we don`t want to lose all inputs in row ...
     IF ms_data_row IS NOT BOUND.
       CREATE DATA ms_data_row TYPE HANDLE strucdescr.
     ENDIF.
@@ -984,10 +984,9 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
           CATCH cx_root.
 
             TRY.
-                " Sting table will crash if value length <> outputlen
+                " String table will crash if value length <> outputlen
                 <line_content> = result_line+result_desc-offset.
-              CATCH cx_root INTO DATA(x).
-                DATA(error) = x->get_text( ).
+              CATCH cx_root ##NO_HANDLER.
             ENDTRY.
         ENDTRY.
 
@@ -1025,7 +1024,7 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
 *          CONTINUE.
 *        ENDIF.
 *        <value> = fieldrop-defaultval.
-*       REPLACE ALL OCCURRENCES OF `'` in <value> with ``.
+*       REPLACE ALL OCCURRENCES OF ``` in <value> with ``.
 *      ENDIF.
 *
 *    ENDLOOP.
@@ -1220,8 +1219,7 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
         ASSIGN t_e071k->* TO <t_e071k>.
         ASSIGN s_e071k->* TO <s_e071k>.
 
-      CATCH cx_root INTO DATA(x).
-        DATA(error) = x->get_text( ).
+      CATCH cx_root ##NO_HANDLER.
     ENDTRY.
 
     DATA(dfies) = rtti_get_t_dfies_by_table_name( iv_tabname ).
@@ -1320,8 +1318,7 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
         ASSIGN t_e071->* TO <t_e071>.
         ASSIGN s_e071->* TO <s_e071>.
 
-      CATCH cx_root INTO DATA(x).
-        DATA(error) = x->get_text( ).
+      CATCH cx_root ##NO_HANDLER.
     ENDTRY.
 
     ASSIGN COMPONENT 'TRKORR' OF STRUCTURE <s_e071> TO <value>.
@@ -1410,8 +1407,7 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
         IF sy-subrc <> 0.
           RETURN.
         ENDIF.
-      CATCH cx_root INTO DATA(x).
-        DATA(error) = x->get_text( ).
+      CATCH cx_root ##NO_HANDLER.
     ENDTRY.
 
     LOOP AT <table> INTO <line>.
@@ -1512,7 +1508,7 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
             IF index = 1.
               DATA(where) = |TRKORR EQ '{ line-task }'|.
             ELSE.
-              where = |{ where }OR TRKORR EQ '{ line-task }'|.
+              where = |{ where } OR TRKORR EQ '{ line-task }'|.
             ENDIF.
             where = |( { where } )|.
           ENDLOOP.
@@ -1527,8 +1523,7 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
             RETURN.
           ENDIF.
 
-        CATCH cx_root INTO DATA(x).
-          DATA(error) = x->get_text( ).
+        CATCH cx_root ##NO_HANDLER.
       ENDTRY.
 
       LOOP AT <table> INTO <line>.
@@ -1574,8 +1569,7 @@ CLASS zabaputil_cl_util_ext IMPLEMENTATION.
 
         TRY.
             <row> = sy-mandt.
-          CATCH cx_root INTO DATA(x).
-            DATA(error) = x->get_text( ).
+          CATCH cx_root ##NO_HANDLER.
         ENDTRY.
 
       ENDIF.

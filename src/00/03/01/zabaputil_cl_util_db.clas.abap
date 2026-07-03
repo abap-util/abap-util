@@ -39,6 +39,20 @@ CLASS zabaputil_cl_util_db DEFINITION
       EXPORTING
         VALUE(result) TYPE any.
 
+    TYPES ty_s_db TYPE zabaputil_t_91.
+    TYPES ty_t_db TYPE STANDARD TABLE OF ty_s_db WITH EMPTY KEY.
+
+    " only supplied parameters filter the selection, initial values of
+    " unsupplied parameters do not restrict the result
+    CLASS-METHODS load_multi_by_handle
+      IMPORTING
+        uname         TYPE clike OPTIONAL
+        handle        TYPE clike OPTIONAL
+        handle2       TYPE clike OPTIONAL
+        handle3       TYPE clike OPTIONAL
+      RETURNING
+        VALUE(result) TYPE ty_t_db.
+
   PROTECTED SECTION.
   PRIVATE SECTION.
 ENDCLASS.
@@ -67,8 +81,6 @@ CLASS zabaputil_cl_util_db IMPLEMENTATION.
 
   METHOD load_by_handle.
 
-    DATA lt_db TYPE STANDARD TABLE OF zabaputil_t_91 WITH EMPTY KEY.
-
     SELECT SINGLE data
       FROM zabaputil_t_91
        WHERE
@@ -92,15 +104,48 @@ CLASS zabaputil_cl_util_db IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD load_by_id.
+  METHOD load_multi_by_handle.
 
-    DATA lt_db TYPE STANDARD TABLE OF zabaputil_t_91 WITH EMPTY KEY.
+    DATA lr_uname   TYPE RANGE OF zabaputil_t_91-uname.
+    DATA lr_handle  TYPE RANGE OF zabaputil_t_91-handle.
+    DATA lr_handle2 TYPE RANGE OF zabaputil_t_91-handle2.
+    DATA lr_handle3 TYPE RANGE OF zabaputil_t_91-handle3.
+
+    IF uname IS SUPPLIED.
+      lr_uname = VALUE #( ( sign = `I` option = `EQ` low = uname ) ).
+    ENDIF.
+    IF handle IS SUPPLIED.
+      lr_handle = VALUE #( ( sign = `I` option = `EQ` low = handle ) ).
+    ENDIF.
+    IF handle2 IS SUPPLIED.
+      lr_handle2 = VALUE #( ( sign = `I` option = `EQ` low = handle2 ) ).
+    ENDIF.
+    IF handle3 IS SUPPLIED.
+      lr_handle3 = VALUE #( ( sign = `I` option = `EQ` low = handle3 ) ).
+    ENDIF.
+
+    SELECT FROM zabaputil_t_91
+      FIELDS *
+      WHERE uname   IN @lr_uname
+        AND handle  IN @lr_handle
+        AND handle2 IN @lr_handle2
+        AND handle3 IN @lr_handle3 "#EC WARNOK
+      INTO CORRESPONDING FIELDS OF TABLE @result.
+
+  ENDMETHOD.
+
+
+  METHOD load_by_id.
 
     SELECT SINGLE data
       FROM zabaputil_t_91
       WHERE id = @id  "#EC WARNOK
       INTO @DATA(lv_data).
-    ASSERT sy-subrc = 0.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |NO_ENTRY_FOR_ID_EXISTS: { id }|.
+    ENDIF.
 
     zabaputil_cl_util=>xml_parse(
       EXPORTING
@@ -113,7 +158,6 @@ CLASS zabaputil_cl_util_db IMPLEMENTATION.
 
   METHOD save.
 
-    DATA lt_db TYPE STANDARD TABLE OF zabaputil_t_91 WITH EMPTY KEY.
     SELECT SINGLE id
       FROM zabaputil_t_91
        WHERE
@@ -137,7 +181,11 @@ CLASS zabaputil_cl_util_db IMPLEMENTATION.
     ENDIF.
 
     MODIFY zabaputil_t_91 FROM @ls_db.
-    ASSERT sy-subrc = 0.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = `DB_SAVE_FAILED`.
+    ENDIF.
 
     IF check_commit = abap_true.
       COMMIT WORK AND WAIT.

@@ -22,7 +22,7 @@
     },
     "scripts": {
         "clone": "git clone https://github.com/abap2UI5/abap2UI5.git input/abap2UI5",
-        "rename": "abaplint ./.github/abaplint/rename.jsonc --rename && rm src/z* && cp ./.github/input/abap2UI5/src/00/03/z* src/",
+        "rename": "abaplint ./.github/abaplint/rename.jsonc --rename && rm -rf src/* && cp -r .github/abaplint/output/workspaces/abap-util/input/abap2UI5/src/00/ src/",
         "cleanup": "rm -rf input && rm -rf output",
         "mirror": "npm run clone && npm run rename",
         "syfixes": "find . -type f -name '*.abap' -exec sed -i -e 's/ RAISE EXCEPTION TYPE cx_sy_itab_line_not_found/ ASSERT 1 = 0/g' {} + ",
