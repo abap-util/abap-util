@@ -1927,6 +1927,276 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE ty_t_zip_file.
 
+    TYPES:
+      BEGIN OF ty_s_http_response,
+        code   TYPE i,
+        reason TYPE string,
+        body   TYPE string,
+      END OF ty_s_http_response.
+
+    TYPES:
+      BEGIN OF ty_s_user_info,
+        uname          TYPE string,
+        name_formatted TYPE string,
+        email          TYPE string,
+        langu          TYPE string,
+        timezone       TYPE string,
+        date_format    TYPE string,
+        decimal_format TYPE string,
+      END OF ty_s_user_info.
+
+    CLASS-METHODS c_escape_html
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS c_escape_json
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS c_levenshtein
+      IMPORTING
+        val1          TYPE clike
+        val2          TYPE clike
+      RETURNING
+        VALUE(result) TYPE i.
+
+    CLASS-METHODS url_encode
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS url_decode
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS regex_match
+      IMPORTING
+        val           TYPE clike
+        regex         TYPE clike
+      RETURNING
+        VALUE(result) TYPE abap_bool.
+
+    CLASS-METHODS regex_find_all
+      IMPORTING
+        val           TYPE clike
+        regex         TYPE clike
+      RETURNING
+        VALUE(result) TYPE string_table.
+
+    CLASS-METHODS regex_replace_all
+      IMPORTING
+        val           TYPE clike
+        regex         TYPE clike
+        new_val       TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS uuid_get_c36
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS uuid_conv_c32_to_c36
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS uuid_conv_c36_to_c32
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS uuid_conv_c32_to_c22
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS uuid_conv_c22_to_c32
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS itab_sum_by
+      IMPORTING
+        tab           TYPE ANY TABLE
+        fieldname     TYPE clike
+      RETURNING
+        VALUE(result) TYPE decfloat34.
+
+    CLASS-METHODS itab_distinct
+      IMPORTING
+        tab           TYPE ANY TABLE
+        fieldname     TYPE clike
+      RETURNING
+        VALUE(result) TYPE string_table.
+
+    CLASS-METHODS itab_group_sum_by
+      IMPORTING
+        tab           TYPE ANY TABLE
+        group_by      TYPE clike
+        sum_by        TYPE clike
+      RETURNING
+        VALUE(result) TYPE ty_t_name_value.
+
+    CLASS-METHODS num_round
+      IMPORTING
+        val           TYPE decfloat34
+        decimals      TYPE i DEFAULT 0
+        mode          TYPE clike DEFAULT `HALF_UP`
+      RETURNING
+        VALUE(result) TYPE decfloat34.
+
+    CLASS-METHODS file_get_mimetype
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS lang_sap_to_iso
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS lang_iso_to_sap
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS time_get_user_timezone
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS time_stampl_to_tz
+      IMPORTING
+        val  TYPE timestampl
+        tz   TYPE clike DEFAULT `UTC`
+      EXPORTING
+        date TYPE d
+        time TYPE t.
+
+    CLASS-METHODS time_stampl_from_tz
+      IMPORTING
+        date          TYPE d
+        time          TYPE t
+        tz            TYPE clike DEFAULT `UTC`
+      RETURNING
+        VALUE(result) TYPE timestampl.
+
+    CLASS-METHODS context_get_user_info
+      IMPORTING
+        uname         TYPE clike OPTIONAL
+      RETURNING
+        VALUE(result) TYPE ty_s_user_info.
+
+    CLASS-METHODS cur_get_decimals
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE i.
+
+    CLASS-METHODS cur_amount_to_external
+      IMPORTING
+        val           TYPE decfloat34
+        currency      TYPE clike OPTIONAL
+        decimals      TYPE i DEFAULT -1
+      RETURNING
+        VALUE(result) TYPE decfloat34.
+
+    CLASS-METHODS cur_amount_to_internal
+      IMPORTING
+        val           TYPE decfloat34
+        currency      TYPE clike OPTIONAL
+        decimals      TYPE i DEFAULT -1
+      RETURNING
+        VALUE(result) TYPE decfloat34.
+
+    CLASS-METHODS unit_convert
+      IMPORTING
+        val           TYPE decfloat34
+        unit_from     TYPE clike
+        unit_to       TYPE clike
+      RETURNING
+        VALUE(result) TYPE decfloat34.
+
+    CLASS-METHODS hash_calculate
+      IMPORTING
+        val           TYPE clike
+        algorithm     TYPE clike DEFAULT `SHA256`
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS hash_hmac
+      IMPORTING
+        val           TYPE clike
+        key           TYPE clike
+        algorithm     TYPE clike DEFAULT `SHA256`
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS http_get
+      IMPORTING
+        url           TYPE clike
+        t_header      TYPE ty_t_name_value OPTIONAL
+      RETURNING
+        VALUE(result) TYPE ty_s_http_response.
+
+    CLASS-METHODS http_post
+      IMPORTING
+        url           TYPE clike
+        body          TYPE clike
+        content_type  TYPE clike DEFAULT `application/json`
+        t_header      TYPE ty_t_name_value OPTIONAL
+      RETURNING
+        VALUE(result) TYPE ty_s_http_response.
+
+    CLASS-METHODS db_check_table_exists
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE abap_bool.
+
+    CLASS-METHODS db_select_by_name
+      IMPORTING
+        tabname       TYPE clike
+        where         TYPE clike OPTIONAL
+        max_rows      TYPE i DEFAULT 0
+      RETURNING
+        VALUE(result) TYPE REF TO data.
+
+    CLASS-METHODS db_count_by_name
+      IMPORTING
+        tabname       TYPE clike
+        where         TYPE clike OPTIONAL
+      RETURNING
+        VALUE(result) TYPE i.
+
+    CLASS-METHODS param_get_user_default
+      IMPORTING
+        val           TYPE clike
+        uname         TYPE clike OPTIONAL
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS job_get_status
+      IMPORTING
+        jobname       TYPE clike
+        jobcount      TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+
   PROTECTED SECTION.
 
     CLASS-METHODS rtti_get_class_descr_on_cloud
@@ -2066,6 +2336,70 @@ CLASS zabaputil_cl_util_context DEFINITION
         VALUE(result) TYPE ty_t_dfies ##NEEDED.
 
   PRIVATE SECTION.
+
+    CLASS-METHODS regex_create_matcher
+      IMPORTING
+        val           TYPE clike
+        regex         TYPE clike
+      RETURNING
+        VALUE(result) TYPE REF TO object.
+
+    CLASS-METHODS http_execute
+      IMPORTING
+        method        TYPE string
+        url           TYPE string
+        body          TYPE string
+        content_type  TYPE string
+        t_header      TYPE ty_t_name_value
+      RETURNING
+        VALUE(result) TYPE ty_s_http_response.
+
+    CLASS-METHODS http_execute_cloud
+      IMPORTING
+        method        TYPE string
+        url           TYPE string
+        body          TYPE string
+        content_type  TYPE string
+        t_header      TYPE ty_t_name_value
+      RETURNING
+        VALUE(result) TYPE ty_s_http_response.
+
+    CLASS-METHODS http_execute_std
+      IMPORTING
+        method        TYPE string
+        url           TYPE string
+        body          TYPE string
+        content_type  TYPE string
+        t_header      TYPE ty_t_name_value
+      RETURNING
+        VALUE(result) TYPE ty_s_http_response.
+
+
+    CLASS-METHODS rtti_get_classes_intf_cloud
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE ty_t_classes.
+
+    CLASS-METHODS rtti_get_classes_intf_std
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE ty_t_classes.
+
+    CLASS-METHODS rtti_get_dtel_texts_by_ddic
+      IMPORTING
+        name        TYPE string
+      EXPORTING
+        texts       TYPE ty_s_data_element_text
+        do_fallback TYPE abap_bool.
+
+    CLASS-METHODS rtti_get_dtel_texts_by_xco
+      IMPORTING
+        name        TYPE string
+      EXPORTING
+        texts       TYPE ty_s_data_element_text
+        do_fallback TYPE abap_bool.
 
     TYPES:
       BEGIN OF ty_s_bool_cache,
@@ -3732,11 +4066,16 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD ui5_get_msg_type.
 
-    result = SWITCH #( val
-                       WHEN `E` THEN cs_ui5_msg_type-e
-                       WHEN `S` THEN cs_ui5_msg_type-s
-                       WHEN `W` THEN cs_ui5_msg_type-w
-                       ELSE cs_ui5_msg_type-i ).
+    CASE val.
+      WHEN `E`.
+        result = cs_ui5_msg_type-e.
+      WHEN `S`.
+        result = cs_ui5_msg_type-s.
+      WHEN `W`.
+        result = cs_ui5_msg_type-w.
+      WHEN OTHERS.
+        result = cs_ui5_msg_type-i.
+    ENDCASE.
 
   ENDMETHOD.
 
@@ -4879,243 +5218,269 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD rtti_get_classes_impl_intf.
 
+    IF context_check_abap_cloud( ).
+      result = rtti_get_classes_intf_cloud( val ).
+    ELSE.
+      result = rtti_get_classes_intf_std( val ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD rtti_get_classes_intf_cloud.
+
     DATA obj TYPE REF TO object.
     FIELD-SYMBOLS <any> TYPE any.
     DATA lt_implementation_names TYPE string_table.
+    DATA BEGIN OF ls_clskey.
+    DATA clsname TYPE c LENGTH 30.
+    DATA END OF ls_clskey.
+    DATA xco_cp_abap         TYPE c LENGTH 11.
+    DATA implementation_name LIKE LINE OF lt_implementation_names.
+    DATA ls_class            LIKE LINE OF result.
+
+    ls_clskey-clsname = val.
+
+    xco_cp_abap = `XCO_CP_ABAP`.
+    CALL METHOD (xco_cp_abap)=>interface
+      EXPORTING
+        iv_name      = ls_clskey-clsname
+      RECEIVING
+        ro_interface = obj.
+
+    ASSIGN obj->(`IF_XCO_AO_INTERFACE~IMPLEMENTATIONS`) TO <any>.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE cx_sy_dyn_call_illegal_class.
+    ENDIF.
+    obj = <any>.
+
+    ASSIGN obj->(`IF_XCO_INTF_IMPLEMENTATIONS_FC~ALL`) TO <any>.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE cx_sy_dyn_call_illegal_class.
+    ENDIF.
+    obj = <any>.
+
+    CALL METHOD obj->(`IF_XCO_INTF_IMPLEMENTATIONS~GET_NAMES`)
+      RECEIVING
+        rt_names = lt_implementation_names.
+
+    LOOP AT lt_implementation_names INTO implementation_name.
+
+      ls_class-classname   = implementation_name.
+      ls_class-description = rtti_get_class_descr_on_cloud( implementation_name ).
+      INSERT ls_class INTO TABLE result.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD rtti_get_classes_intf_std.
+
     TYPES BEGIN OF ty_s_impl.
-    TYPES   clsname    TYPE c LENGTH 30.
-    TYPES   refclsname TYPE c LENGTH 30.
+    TYPES clsname    TYPE c LENGTH 30.
+    TYPES refclsname TYPE c LENGTH 30.
     TYPES END OF ty_s_impl.
-    DATA lt_impl TYPE STANDARD TABLE OF ty_s_impl WITH DEFAULT KEY.
+    DATA lt_impl TYPE STANDARD TABLE OF ty_s_impl WITH EMPTY KEY.
     TYPES BEGIN OF ty_s_key.
-    TYPES   intkey TYPE c LENGTH 30.
+    TYPES intkey TYPE c LENGTH 30.
     TYPES END OF ty_s_key.
     DATA ls_key TYPE ty_s_key.
     DATA BEGIN OF ls_clskey.
-    DATA   clsname TYPE c LENGTH 30.
+    DATA clsname TYPE c LENGTH 30.
     DATA END OF ls_clskey.
-    DATA class               TYPE REF TO data.
-    DATA xco_cp_abap         TYPE c LENGTH 11.
-    DATA temp3               TYPE ty_t_classes.
-    DATA implementation_name LIKE LINE OF lt_implementation_names.
-    DATA temp4               LIKE LINE OF temp3.
-
-    DATA type                TYPE c LENGTH 12.
+    DATA class    TYPE REF TO data.
+    DATA type     TYPE c LENGTH 12.
     FIELD-SYMBOLS <class> TYPE data.
-    DATA temp5   LIKE LINE OF lt_impl.
-    DATA lr_impl LIKE REF TO temp5.
+    DATA lr_impl  TYPE REF TO ty_s_impl.
     FIELD-SYMBOLS <description> TYPE any.
-    DATA temp6 TYPE ty_s_class_descr.
+    DATA ls_class TYPE ty_s_class_descr.
+    DATA lv_fm    TYPE string.
 
-    IF context_check_abap_cloud( ).
+    ls_key-intkey = val.
 
-      ls_clskey-clsname = val.
+    lv_fm = `SEO_INTERFACE_IMPLEM_GET_ALL`.
+    CALL FUNCTION lv_fm
+      EXPORTING
+        intkey        = ls_key
+      IMPORTING
+        impkeys       = lt_impl
+      EXCEPTIONS
+        error_message = 1
+        OTHERS        = 2.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
 
-      xco_cp_abap = `XCO_CP_ABAP`.
-      CALL METHOD (xco_cp_abap)=>interface
-        EXPORTING
-          iv_name      = ls_clskey-clsname
-        RECEIVING
-          ro_interface = obj.
+    type = `SEOC_CLASS_R`.
+    CREATE DATA class TYPE (type).
 
-      ASSIGN obj->(`IF_XCO_AO_INTERFACE~IMPLEMENTATIONS`) TO <any>.
-      IF sy-subrc <> 0.
-        RAISE EXCEPTION TYPE cx_sy_dyn_call_illegal_class.
-      ENDIF.
-      obj = <any>.
+    ASSIGN class->* TO <class>.
 
-      ASSIGN obj->(`IF_XCO_INTF_IMPLEMENTATIONS_FC~ALL`) TO <any>.
-      IF sy-subrc <> 0.
-        RAISE EXCEPTION TYPE cx_sy_dyn_call_illegal_class.
-      ENDIF.
-      obj = <any>.
+    LOOP AT lt_impl REFERENCE INTO lr_impl.
 
-      CALL METHOD obj->(`IF_XCO_INTF_IMPLEMENTATIONS~GET_NAMES`)
-        RECEIVING
-          rt_names = lt_implementation_names.
+      CLEAR <class>.
 
-      CLEAR temp3.
+      ls_clskey-clsname = lr_impl->clsname.
 
-      LOOP AT lt_implementation_names INTO implementation_name.
-
-        temp4-classname   = implementation_name.
-        temp4-description = rtti_get_class_descr_on_cloud( implementation_name ).
-        INSERT temp4 INTO TABLE temp3.
-      ENDLOOP.
-      result = temp3.
-
-    ELSE.
-
-      ls_key-intkey = val.
-
-      DATA lv_fm               TYPE string.
-      lv_fm = `SEO_INTERFACE_IMPLEM_GET_ALL`.
+      lv_fm = `SEO_CLASS_READ`.
       CALL FUNCTION lv_fm
         EXPORTING
-          intkey        = ls_key
+          clskey        = ls_clskey
         IMPORTING
-          impkeys       = lt_impl
+          class         = <class>
         EXCEPTIONS
           error_message = 1
           OTHERS        = 2.
       IF sy-subrc <> 0.
-        RETURN.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error.
       ENDIF.
 
-      type = `SEOC_CLASS_R`.
-      CREATE DATA class TYPE (type).
+      ASSIGN
+        COMPONENT `DESCRIPT`
+        OF STRUCTURE <class>
+        TO <description>.
+      ASSERT sy-subrc = 0.
 
-      ASSIGN class->* TO <class>.
-
-      LOOP AT lt_impl REFERENCE INTO lr_impl.
-
-        CLEAR <class>.
-
-        ls_clskey-clsname = lr_impl->clsname.
-
-        lv_fm = `SEO_CLASS_READ`.
-        CALL FUNCTION lv_fm
-          EXPORTING
-            clskey        = ls_clskey
-          IMPORTING
-            class         = <class>
-          EXCEPTIONS
-            error_message = 1
-            OTHERS        = 2.
-        IF sy-subrc <> 0.
-          RAISE EXCEPTION TYPE zabaputil_cx_util_error.
-        ENDIF.
-
-        ASSIGN
-          COMPONENT `DESCRIPT`
-          OF STRUCTURE <class>
-          TO <description>.
-        ASSERT sy-subrc = 0.
-
-        CLEAR temp6.
-        temp6-classname   = lr_impl->clsname.
-        temp6-description = <description>.
-        INSERT
-          temp6
-          INTO TABLE result.
-      ENDLOOP.
-
-    ENDIF.
+      CLEAR ls_class.
+      ls_class-classname   = lr_impl->clsname.
+      ls_class-description = <description>.
+      INSERT
+        ls_class
+        INTO TABLE result.
+    ENDLOOP.
 
   ENDMETHOD.
 
   METHOD rtti_get_data_element_texts.
 
-    DATA ddic_ref     TYPE REF TO data.
-    DATA data_element TYPE REF TO object.
-    DATA content      TYPE REF TO object.
+    DATA data_element_name TYPE string.
+    DATA lv_do_fallback    TYPE abap_bool.
+
+    data_element_name = val.
+
+    TRY.
+        rtti_get_dtel_texts_by_ddic( EXPORTING name        = data_element_name
+                                     IMPORTING texts       = result
+                                               do_fallback = lv_do_fallback ).
+      CATCH cx_root.
+        rtti_get_dtel_texts_by_xco( EXPORTING name        = data_element_name
+                                    IMPORTING texts       = result
+                                              do_fallback = lv_do_fallback ).
+    ENDTRY.
+
+    IF lv_do_fallback = abap_true AND result IS INITIAL.
+      result-header = val.
+      result-long = val.
+      result-medium = val.
+      result-short = val.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD rtti_get_dtel_texts_by_ddic.
+
+    DATA ddic_ref TYPE REF TO data.
     DATA: BEGIN OF ddic,
             reptext   TYPE string,
             scrtext_s TYPE string,
             scrtext_m TYPE string,
             scrtext_l TYPE string,
           END OF ddic.
-    DATA exists            TYPE abap_bool.
-
-    DATA data_element_name TYPE string.
-    DATA temp7             TYPE REF TO cl_abap_structdescr.
-    DATA struct_desrc      LIKE temp7.
+    DATA struct_desrc TYPE REF TO cl_abap_structdescr.
     FIELD-SYMBOLS <ddic> TYPE data.
-    DATA lo_typedescr           TYPE REF TO cl_abap_typedescr.
-    DATA temp8                  TYPE REF TO cl_abap_datadescr.
-    DATA data_descr             LIKE temp8.
+    DATA lo_typedescr TYPE REF TO cl_abap_typedescr.
+    DATA data_descr   TYPE REF TO cl_abap_datadescr.
 
-    data_element_name = val.
+    CLEAR texts.
+    do_fallback = abap_false.
+
+    cl_abap_typedescr=>describe_by_name( `T100` ).
+
+    struct_desrc ?= cl_abap_structdescr=>describe_by_name( `DFIES` ).
+
+    CREATE DATA ddic_ref TYPE HANDLE struct_desrc.
+
+    ASSIGN ddic_ref->* TO <ddic>.
+    ASSERT sy-subrc = 0.
+
+    cl_abap_elemdescr=>describe_by_name( EXPORTING  p_name     = name
+                                         RECEIVING p_descr_ref = lo_typedescr
+                                         EXCEPTIONS OTHERS     = 1 ).
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    data_descr ?= lo_typedescr.
+
+    CALL METHOD data_descr->(`GET_DDIC_FIELD`)
+      RECEIVING
+        p_flddescr   = <ddic>
+      EXCEPTIONS
+        not_found    = 1
+        no_ddic_type = 2
+        OTHERS       = 3.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    MOVE-CORRESPONDING <ddic> TO ddic.
+    texts-header = ddic-reptext.
+    texts-short  = ddic-scrtext_s.
+    texts-medium = ddic-scrtext_m.
+    texts-long   = ddic-scrtext_l.
+    do_fallback  = abap_true.
+
+  ENDMETHOD.
+
+  METHOD rtti_get_dtel_texts_by_xco.
+
+    DATA data_element TYPE REF TO object.
+    DATA content      TYPE REF TO object.
+    DATA exists       TYPE abap_bool.
+    DATA lv_xco_cp_abap_dictionary TYPE string.
+
+    CLEAR texts.
+    do_fallback = abap_false.
 
     TRY.
-        cl_abap_typedescr=>describe_by_name( `T100` ).
-
-        temp7 ?= cl_abap_structdescr=>describe_by_name( `DFIES` ).
-
-        struct_desrc = temp7.
-
-        CREATE DATA ddic_ref TYPE HANDLE struct_desrc.
-
-        ASSIGN ddic_ref->* TO <ddic>.
-        ASSERT sy-subrc = 0.
-
-        cl_abap_elemdescr=>describe_by_name( EXPORTING  p_name      = data_element_name
-                                             RECEIVING  p_descr_ref = lo_typedescr
-                                             EXCEPTIONS OTHERS      = 1 ).
-        IF sy-subrc <> 0.
-          RETURN.
-        ENDIF.
-
-        temp8 ?= lo_typedescr.
-
-        data_descr = temp8.
-
-        CALL METHOD data_descr->(`GET_DDIC_FIELD`)
+        lv_xco_cp_abap_dictionary = `XCO_CP_ABAP_DICTIONARY`.
+        CALL METHOD (lv_xco_cp_abap_dictionary)=>(`DATA_ELEMENT`)
+          EXPORTING
+            iv_name         = name
           RECEIVING
-            p_flddescr   = <ddic>
-          EXCEPTIONS
-            not_found    = 1
-            no_ddic_type = 2
-            OTHERS       = 3.
-        IF sy-subrc <> 0.
+            ro_data_element = data_element.
+
+        CALL METHOD data_element->(`IF_XCO_AD_DATA_ELEMENT~EXISTS`)
+          RECEIVING
+            rv_exists = exists.
+
+        IF exists = abap_false.
           RETURN.
         ENDIF.
 
-        MOVE-CORRESPONDING <ddic> TO ddic.
-        result-header = ddic-reptext.
-        result-short  = ddic-scrtext_s.
-        result-medium = ddic-scrtext_m.
-        result-long   = ddic-scrtext_l.
+        CALL METHOD data_element->(`IF_XCO_AD_DATA_ELEMENT~CONTENT`)
+          RECEIVING
+            ro_content = content.
+
+        CALL METHOD content->(`IF_XCO_DTEL_CONTENT~GET_HEADING_FIELD_LABEL`)
+          RECEIVING
+            rs_heading_field_label = texts-header.
+
+        CALL METHOD content->(`IF_XCO_DTEL_CONTENT~GET_SHORT_FIELD_LABEL`)
+          RECEIVING
+            rs_short_field_label = texts-short.
+
+        CALL METHOD content->(`IF_XCO_DTEL_CONTENT~GET_MEDIUM_FIELD_LABEL`)
+          RECEIVING
+            rs_medium_field_label = texts-medium.
+
+        CALL METHOD content->(`IF_XCO_DTEL_CONTENT~GET_LONG_FIELD_LABEL`)
+          RECEIVING
+            rs_long_field_label = texts-long.
+
+        do_fallback = abap_true.
 
       CATCH cx_root.
-        TRY.
-            DATA lv_xco_cp_abap_dictionary TYPE string.
-            lv_xco_cp_abap_dictionary = `XCO_CP_ABAP_DICTIONARY`.
-            CALL METHOD (lv_xco_cp_abap_dictionary)=>(`DATA_ELEMENT`)
-              EXPORTING
-                iv_name         = data_element_name
-              RECEIVING
-                ro_data_element = data_element.
-
-            CALL METHOD data_element->(`IF_XCO_AD_DATA_ELEMENT~EXISTS`)
-              RECEIVING
-                rv_exists = exists.
-
-            IF exists = abap_false.
-              RETURN.
-            ENDIF.
-
-            CALL METHOD data_element->(`IF_XCO_AD_DATA_ELEMENT~CONTENT`)
-              RECEIVING
-                ro_content = content.
-
-            CALL METHOD content->(`IF_XCO_DTEL_CONTENT~GET_HEADING_FIELD_LABEL`)
-              RECEIVING
-                rs_heading_field_label = result-header.
-
-            CALL METHOD content->(`IF_XCO_DTEL_CONTENT~GET_SHORT_FIELD_LABEL`)
-              RECEIVING
-                rs_short_field_label = result-short.
-
-            CALL METHOD content->(`IF_XCO_DTEL_CONTENT~GET_MEDIUM_FIELD_LABEL`)
-              RECEIVING
-                rs_medium_field_label = result-medium.
-
-            CALL METHOD content->(`IF_XCO_DTEL_CONTENT~GET_LONG_FIELD_LABEL`)
-              RECEIVING
-                rs_long_field_label = result-long.
-
-          CATCH cx_root INTO DATA(x).
-            DATA(error) = x->get_text( ).
-        ENDTRY.
+        do_fallback = abap_true.
     ENDTRY.
-
-    IF result IS INITIAL.
-      result-header = val.
-      result-long = val.
-      result-medium = val.
-      result-short = val.
-    ENDIF.
 
   ENDMETHOD.
 
@@ -9733,5 +10098,1328 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDTRY.
 
   ENDMETHOD.
+
+  METHOD c_escape_html.
+
+    result = val.
+    REPLACE ALL OCCURRENCES OF `&` IN result WITH `&amp;`.
+    REPLACE ALL OCCURRENCES OF `<` IN result WITH `&lt;`.
+    REPLACE ALL OCCURRENCES OF `>` IN result WITH `&gt;`.
+    REPLACE ALL OCCURRENCES OF `"` IN result WITH `&quot;`.
+    REPLACE ALL OCCURRENCES OF `'` IN result WITH `&#39;`.
+
+  ENDMETHOD.
+
+  METHOD c_escape_json.
+
+    DATA(lv_cr) = cv_char_util_cr_lf(1).
+
+    result = val.
+    REPLACE ALL OCCURRENCES OF `\` IN result WITH `\\`.
+    REPLACE ALL OCCURRENCES OF `"` IN result WITH `\"`.
+    REPLACE ALL OCCURRENCES OF lv_cr IN result WITH `\r`.
+    REPLACE ALL OCCURRENCES OF cv_char_util_newline IN result WITH `\n`.
+    REPLACE ALL OCCURRENCES OF cv_char_util_horizontal_tab IN result WITH `\t`.
+
+  ENDMETHOD.
+
+  METHOD c_levenshtein.
+
+    TYPES ty_t_int TYPE STANDARD TABLE OF i WITH EMPTY KEY.
+
+    DATA(lv_a) = CONV string( val1 ).
+    DATA(lv_b) = CONV string( val2 ).
+    DATA(lv_la) = strlen( lv_a ).
+    DATA(lv_lb) = strlen( lv_b ).
+
+    IF lv_la = 0.
+      result = lv_lb.
+      RETURN.
+    ENDIF.
+    IF lv_lb = 0.
+      result = lv_la.
+      RETURN.
+    ENDIF.
+
+    DATA lt_prev TYPE ty_t_int.
+    DATA lt_curr TYPE ty_t_int.
+    DATA lv_j TYPE i.
+
+    WHILE lv_j <= lv_lb.
+      APPEND lv_j TO lt_prev.
+      lv_j = lv_j + 1.
+    ENDWHILE.
+
+    DATA lv_i TYPE i.
+    WHILE lv_i < lv_la.
+
+      CLEAR lt_curr.
+      APPEND lv_i + 1 TO lt_curr.
+
+      lv_j = 0.
+      WHILE lv_j < lv_lb.
+
+        DATA(lv_cost) = COND i( WHEN lv_a+lv_i(1) = lv_b+lv_j(1) THEN 0 ELSE 1 ).
+        DATA(lv_min) = lt_curr[ lv_j + 1 ] + 1.
+        DATA(lv_del) = lt_prev[ lv_j + 2 ] + 1.
+        IF lv_del < lv_min.
+          lv_min = lv_del.
+        ENDIF.
+        DATA(lv_sub) = lt_prev[ lv_j + 1 ] + lv_cost.
+        IF lv_sub < lv_min.
+          lv_min = lv_sub.
+        ENDIF.
+        APPEND lv_min TO lt_curr.
+
+        lv_j = lv_j + 1.
+      ENDWHILE.
+
+      lt_prev = lt_curr.
+      lv_i = lv_i + 1.
+    ENDWHILE.
+
+    result = lt_prev[ lv_lb + 1 ].
+
+  ENDMETHOD.
+
+  METHOD url_encode.
+
+    CONSTANTS lc_unreserved TYPE string VALUE `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~`.
+
+    DATA(lv_val) = CONV string( val ).
+    DATA(lv_len) = strlen( lv_val ).
+    DATA lv_i TYPE i.
+
+    WHILE lv_i < lv_len.
+
+      DATA(lv_char) = substring( val = lv_val
+                                 off = lv_i
+                                 len = 1 ).
+
+      IF lv_char <> ` ` AND lv_char CO lc_unreserved.
+        result = result && lv_char.
+      ELSE.
+        DATA(lv_x) = conv_get_xstring_by_string( lv_char ).
+        DATA lv_j TYPE i.
+        lv_j = 0.
+        WHILE lv_j < xstrlen( lv_x ).
+          DATA lv_hex TYPE c LENGTH 2.
+          lv_hex = lv_x+lv_j(1).
+          result = result && `%` && lv_hex.
+          lv_j = lv_j + 1.
+        ENDWHILE.
+      ENDIF.
+
+      lv_i = lv_i + 1.
+    ENDWHILE.
+
+  ENDMETHOD.
+
+  METHOD url_decode.
+
+    DATA(lv_val) = CONV string( val ).
+    DATA(lv_len) = strlen( lv_val ).
+    DATA lv_i TYPE i.
+    DATA lv_xbuf TYPE xstring.
+
+    WHILE lv_i < lv_len.
+
+      DATA(lv_char) = substring( val = lv_val
+                                 off = lv_i
+                                 len = 1 ).
+
+      IF lv_char = `%` AND lv_i + 2 < lv_len.
+        DATA lv_x TYPE x LENGTH 1.
+        lv_x = to_upper( substring( val = lv_val
+                                    off = lv_i + 1
+                                    len = 2 ) ).
+        CONCATENATE lv_xbuf lv_x INTO lv_xbuf IN BYTE MODE.
+        lv_i = lv_i + 3.
+        CONTINUE.
+      ENDIF.
+
+      IF lv_xbuf IS NOT INITIAL.
+        result = result && conv_get_string_by_xstring( lv_xbuf ).
+        CLEAR lv_xbuf.
+      ENDIF.
+
+      IF lv_char = `+`.
+        result = result && ` `.
+      ELSE.
+        result = result && lv_char.
+      ENDIF.
+
+      lv_i = lv_i + 1.
+    ENDWHILE.
+
+    IF lv_xbuf IS NOT INITIAL.
+      result = result && conv_get_string_by_xstring( lv_xbuf ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD regex_create_matcher.
+
+    DATA lo_regex TYPE REF TO object.
+    DATA lv_class TYPE string.
+
+    IF context_check_abap_cloud( ) = abap_true.
+
+      lv_class = `CL_ABAP_REGEX`.
+      CALL METHOD (lv_class)=>create_pcre
+        EXPORTING
+          pattern = regex
+        RECEIVING
+          regex   = lo_regex.
+
+      CALL METHOD lo_regex->(`CREATE_MATCHER`)
+        EXPORTING
+          text    = val
+        RECEIVING
+          matcher = result.
+
+    ELSE.
+
+      lv_class = `CL_ABAP_MATCHER`.
+      CALL METHOD (lv_class)=>create
+        EXPORTING
+          pattern = regex
+          text    = val
+        RECEIVING
+          matcher = result.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD regex_match.
+
+    DATA(lo_matcher) = regex_create_matcher( val   = val
+                                             regex = regex ).
+
+    CALL METHOD lo_matcher->(`MATCH`)
+      RECEIVING
+        success = result.
+
+  ENDMETHOD.
+
+  METHOD regex_find_all.
+
+    DATA lv_success TYPE abap_bool.
+    DATA lv_off     TYPE i.
+    DATA lv_len     TYPE i.
+
+    DATA(lv_val) = CONV string( val ).
+    DATA(lo_matcher) = regex_create_matcher( val   = lv_val
+                                             regex = regex ).
+
+    DO.
+      CALL METHOD lo_matcher->(`FIND_NEXT`)
+        RECEIVING
+          success = lv_success.
+      IF lv_success = abap_false.
+        EXIT.
+      ENDIF.
+
+      CALL METHOD lo_matcher->(`GET_OFFSET`)
+        RECEIVING
+          offset = lv_off.
+      CALL METHOD lo_matcher->(`GET_LENGTH`)
+        RECEIVING
+          length = lv_len.
+
+      IF lv_len = 0.
+        EXIT.
+      ENDIF.
+
+      APPEND substring( val = lv_val
+                        off = lv_off
+                        len = lv_len ) TO result.
+    ENDDO.
+
+  ENDMETHOD.
+
+  METHOD regex_replace_all.
+
+    DATA lv_success TYPE abap_bool.
+    DATA lv_off     TYPE i.
+    DATA lv_len     TYPE i.
+    DATA lv_pos     TYPE i.
+
+    DATA(lv_val) = CONV string( val ).
+    DATA(lo_matcher) = regex_create_matcher( val   = lv_val
+                                             regex = regex ).
+
+    DO.
+      CALL METHOD lo_matcher->(`FIND_NEXT`)
+        RECEIVING
+          success = lv_success.
+      IF lv_success = abap_false.
+        EXIT.
+      ENDIF.
+
+      CALL METHOD lo_matcher->(`GET_OFFSET`)
+        RECEIVING
+          offset = lv_off.
+      CALL METHOD lo_matcher->(`GET_LENGTH`)
+        RECEIVING
+          length = lv_len.
+
+      IF lv_len = 0.
+        EXIT.
+      ENDIF.
+
+      result = result && substring( val = lv_val
+                                    off = lv_pos
+                                    len = lv_off - lv_pos ) && new_val.
+      lv_pos = lv_off + lv_len.
+    ENDDO.
+
+    result = result && substring( val = lv_val
+                                  off = lv_pos ).
+
+  ENDMETHOD.
+
+  METHOD uuid_get_c36.
+
+    result = uuid_conv_c32_to_c36( uuid_get_c32( ) ).
+
+  ENDMETHOD.
+
+  METHOD uuid_conv_c32_to_c36.
+
+    DATA(lv_c32) = to_upper( c_trim( val ) ).
+
+    IF strlen( lv_c32 ) <> 32.
+      x_raise( `INVALID_UUID_C32` ).
+    ENDIF.
+
+    result = lv_c32(8) && `-` && lv_c32+8(4) && `-` && lv_c32+12(4) && `-` && lv_c32+16(4) && `-` && lv_c32+20(12).
+
+  ENDMETHOD.
+
+  METHOD uuid_conv_c36_to_c32.
+
+    result = to_upper( c_trim( val ) ).
+    REPLACE ALL OCCURRENCES OF `-` IN result WITH ``.
+
+    IF strlen( result ) <> 32.
+      x_raise( `INVALID_UUID_C36` ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD uuid_conv_c32_to_c22.
+
+    CONSTANTS lc_b64 TYPE string VALUE `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_`.
+
+    DATA(lv_c32) = to_upper( c_trim( val ) ).
+
+    IF strlen( lv_c32 ) <> 32.
+      x_raise( `INVALID_UUID_C32` ).
+    ENDIF.
+
+    DATA lv_x TYPE xstring.
+    lv_x = lv_c32.
+
+    DATA lv_i TYPE i.
+    DATA(lv_xlen) = xstrlen( lv_x ).
+
+    WHILE lv_i < lv_xlen.
+
+      DATA(lv_b1) = CONV i( lv_x+lv_i(1) ).
+      DATA lv_b2 TYPE i.
+      DATA lv_b3 TYPE i.
+      lv_b2 = -1.
+      lv_b3 = -1.
+      IF lv_i + 1 < lv_xlen.
+        lv_b2 = lv_x+lv_i(2) MOD 256.
+      ENDIF.
+      IF lv_i + 2 < lv_xlen.
+        DATA(lv_i2) = lv_i + 2.
+        lv_b3 = CONV i( lv_x+lv_i2(1) ).
+      ENDIF.
+
+      DATA(lv_n) = lv_b1 * 65536.
+      IF lv_b2 >= 0.
+        lv_n = lv_n + lv_b2 * 256.
+      ENDIF.
+      IF lv_b3 >= 0.
+        lv_n = lv_n + lv_b3.
+      ENDIF.
+
+      result = result && substring( val = lc_b64
+                                    off = lv_n DIV 262144
+                                    len = 1 )
+                      && substring( val = lc_b64
+                                    off = ( lv_n DIV 4096 ) MOD 64
+                                    len = 1 ).
+      IF lv_b2 >= 0.
+        result = result && substring( val = lc_b64
+                                      off = ( lv_n DIV 64 ) MOD 64
+                                      len = 1 ).
+      ENDIF.
+      IF lv_b3 >= 0.
+        result = result && substring( val = lc_b64
+                                      off = lv_n MOD 64
+                                      len = 1 ).
+      ENDIF.
+
+      lv_i = lv_i + 3.
+    ENDWHILE.
+
+  ENDMETHOD.
+
+  METHOD uuid_conv_c22_to_c32.
+
+    CONSTANTS lc_b64 TYPE string VALUE `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_`.
+
+    DATA(lv_c22) = c_trim( val ).
+    REPLACE ALL OCCURRENCES OF `+` IN lv_c22 WITH `-`.
+    REPLACE ALL OCCURRENCES OF `/` IN lv_c22 WITH `_`.
+
+    IF strlen( lv_c22 ) <> 22.
+      x_raise( `INVALID_UUID_C22` ).
+    ENDIF.
+
+    DATA lv_x TYPE xstring.
+    DATA lv_xb TYPE x LENGTH 1.
+    DATA lv_i TYPE i.
+    DATA(lv_len) = strlen( lv_c22 ).
+
+    WHILE lv_i < lv_len.
+
+      DATA(lv_take) = lv_len - lv_i.
+      IF lv_take > 4.
+        lv_take = 4.
+      ENDIF.
+
+      DATA lv_n TYPE i.
+      DATA lv_k TYPE i.
+      lv_n = 0.
+      lv_k = 0.
+      WHILE lv_k < lv_take.
+        DATA(lv_pos) = lv_i + lv_k.
+        DATA(lv_char) = substring( val = lv_c22
+                                   off = lv_pos
+                                   len = 1 ).
+        FIND lv_char IN lc_b64 MATCH OFFSET DATA(lv_idx).
+        IF sy-subrc <> 0.
+          x_raise( `INVALID_UUID_C22` ).
+        ENDIF.
+        lv_n = lv_n * 64 + lv_idx.
+        lv_k = lv_k + 1.
+      ENDWHILE.
+
+      CASE lv_take.
+        WHEN 4.
+          lv_xb = lv_n DIV 65536.
+          CONCATENATE lv_x lv_xb INTO lv_x IN BYTE MODE.
+          lv_xb = ( lv_n DIV 256 ) MOD 256.
+          CONCATENATE lv_x lv_xb INTO lv_x IN BYTE MODE.
+          lv_xb = lv_n MOD 256.
+          CONCATENATE lv_x lv_xb INTO lv_x IN BYTE MODE.
+        WHEN 3.
+          lv_xb = lv_n DIV 1024.
+          CONCATENATE lv_x lv_xb INTO lv_x IN BYTE MODE.
+          lv_xb = ( lv_n DIV 4 ) MOD 256.
+          CONCATENATE lv_x lv_xb INTO lv_x IN BYTE MODE.
+        WHEN 2.
+          lv_xb = lv_n DIV 16.
+          CONCATENATE lv_x lv_xb INTO lv_x IN BYTE MODE.
+      ENDCASE.
+
+      lv_i = lv_i + lv_take.
+    ENDWHILE.
+
+    IF xstrlen( lv_x ) <> 16.
+      x_raise( `INVALID_UUID_C22` ).
+    ENDIF.
+
+    DATA lv_c TYPE c LENGTH 32.
+    lv_c = lv_x.
+    result = lv_c.
+
+  ENDMETHOD.
+
+  METHOD itab_sum_by.
+
+    FIELD-SYMBOLS <row> TYPE any.
+    DATA(lv_fieldname) = to_upper( fieldname ).
+
+    LOOP AT tab ASSIGNING <row>.
+      ASSIGN COMPONENT lv_fieldname OF STRUCTURE <row> TO FIELD-SYMBOL(<val>).
+      IF sy-subrc = 0.
+        result = result + <val>.
+      ENDIF.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD itab_distinct.
+
+    FIELD-SYMBOLS <row> TYPE any.
+    DATA(lv_fieldname) = to_upper( fieldname ).
+
+    LOOP AT tab ASSIGNING <row>.
+      ASSIGN COMPONENT lv_fieldname OF STRUCTURE <row> TO FIELD-SYMBOL(<val>).
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      DATA(lv_str) = CONV string( <val> ).
+      READ TABLE result WITH KEY table_line = lv_str TRANSPORTING NO FIELDS.
+      IF sy-subrc <> 0.
+        APPEND lv_str TO result.
+      ENDIF.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD itab_group_sum_by.
+
+    TYPES:
+      BEGIN OF ty_s_sum,
+        n   TYPE string,
+        sum TYPE decfloat34,
+      END OF ty_s_sum.
+
+    DATA lt_sum TYPE STANDARD TABLE OF ty_s_sum WITH EMPTY KEY.
+    FIELD-SYMBOLS <row> TYPE any.
+
+    DATA(lv_group_by) = to_upper( group_by ).
+    DATA(lv_sum_by) = to_upper( sum_by ).
+
+    LOOP AT tab ASSIGNING <row>.
+
+      ASSIGN COMPONENT lv_group_by OF STRUCTURE <row> TO FIELD-SYMBOL(<group>).
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      ASSIGN COMPONENT lv_sum_by OF STRUCTURE <row> TO FIELD-SYMBOL(<val>).
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+
+      DATA(lv_group) = CONV string( <group> ).
+      READ TABLE lt_sum ASSIGNING FIELD-SYMBOL(<sum>) WITH KEY n = lv_group.
+      IF sy-subrc <> 0.
+        APPEND VALUE #( n = lv_group ) TO lt_sum ASSIGNING <sum>.
+      ENDIF.
+      <sum>-sum = <sum>-sum + <val>.
+
+    ENDLOOP.
+
+    LOOP AT lt_sum ASSIGNING <sum>.
+      APPEND VALUE #( n = <sum>-n
+                      v = |{ <sum>-sum }| ) TO result.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD num_round.
+
+    DATA lv_factor TYPE decfloat34 VALUE 1.
+
+    DO decimals TIMES.
+      lv_factor = lv_factor * 10.
+    ENDDO.
+
+    DATA lv_sign TYPE decfloat34 VALUE 1.
+    IF val < 0.
+      lv_sign = -1.
+    ENDIF.
+
+    DATA(lv_abs) = val * lv_sign * lv_factor.
+    DATA lv_rounded TYPE decfloat34.
+    DATA lv_half TYPE decfloat34 VALUE '0.5'.
+    DATA(lv_mode) = to_upper( CONV string( mode ) ).
+
+    lv_rounded = trunc( lv_abs ).
+
+    CASE lv_mode.
+      WHEN `UP`.
+        IF frac( lv_abs ) > 0.
+          lv_rounded = lv_rounded + 1.
+        ENDIF.
+      WHEN `DOWN`.
+        " truncation is already rounding toward zero
+      WHEN OTHERS.
+        IF frac( lv_abs ) >= lv_half.
+          lv_rounded = lv_rounded + 1.
+        ENDIF.
+    ENDCASE.
+
+    result = lv_rounded * lv_sign / lv_factor.
+
+  ENDMETHOD.
+
+  METHOD file_get_mimetype.
+
+    DATA(lv_name) = to_lower( c_trim( val ) ).
+    SPLIT lv_name AT `.` INTO TABLE DATA(lt_parts).
+    DATA(lv_ext) = lt_parts[ lines( lt_parts ) ].
+
+    CASE lv_ext.
+      WHEN `txt` OR `text` OR `log` OR `md`.
+        result = `text/plain`.
+      WHEN `html` OR `htm`.
+        result = `text/html`.
+      WHEN `css`.
+        result = `text/css`.
+      WHEN `csv`.
+        result = `text/csv`.
+      WHEN `js` OR `mjs`.
+        result = `text/javascript`.
+      WHEN `json`.
+        result = `application/json`.
+      WHEN `xml`.
+        result = `application/xml`.
+      WHEN `pdf`.
+        result = `application/pdf`.
+      WHEN `zip`.
+        result = `application/zip`.
+      WHEN `png`.
+        result = `image/png`.
+      WHEN `jpg` OR `jpeg`.
+        result = `image/jpeg`.
+      WHEN `gif`.
+        result = `image/gif`.
+      WHEN `svg`.
+        result = `image/svg+xml`.
+      WHEN `webp`.
+        result = `image/webp`.
+      WHEN `ico`.
+        result = `image/x-icon`.
+      WHEN `mp3`.
+        result = `audio/mpeg`.
+      WHEN `mp4`.
+        result = `video/mp4`.
+      WHEN `woff`.
+        result = `font/woff`.
+      WHEN `woff2`.
+        result = `font/woff2`.
+      WHEN `ttf`.
+        result = `font/ttf`.
+      WHEN `otf`.
+        result = `font/otf`.
+      WHEN `xlsx`.
+        result = `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`.
+      WHEN `xls`.
+        result = `application/vnd.ms-excel`.
+      WHEN `docx`.
+        result = `application/vnd.openxmlformats-officedocument.wordprocessingml.document`.
+      WHEN `doc`.
+        result = `application/msword`.
+      WHEN `pptx`.
+        result = `application/vnd.openxmlformats-officedocument.presentationml.presentation`.
+      WHEN `ppt`.
+        result = `application/vnd.ms-powerpoint`.
+      WHEN OTHERS.
+        result = `application/octet-stream`.
+    ENDCASE.
+
+  ENDMETHOD.
+
+  METHOD lang_sap_to_iso.
+
+    CONSTANTS lc_map TYPE string VALUE `A:af;B:he;C:zh;D:de;E:en;F:fr;G:el;H:hu;I:it;J:ja;K:da;L:pl;M:zf;N:nl;O:no;P:pt;Q:sk;R:ru;S:es;T:tr;U:fi;V:sv;W:bg;X:lt;Y:lv`.
+
+    DATA(lv_sap) = to_upper( c_trim( val ) ).
+
+    SPLIT lc_map AT `;` INTO TABLE DATA(lt_pairs).
+    LOOP AT lt_pairs INTO DATA(lv_pair).
+      SPLIT lv_pair AT `:` INTO DATA(lv_key) DATA(lv_iso).
+      IF lv_key = lv_sap.
+        result = lv_iso.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+
+    TRY.
+        DATA(lv_tab) = `T002`.
+        SELECT SINGLE laiso FROM (lv_tab) WHERE spras = @lv_sap INTO @result.
+        IF sy-subrc = 0.
+          result = to_lower( result ).
+        ELSE.
+          CLEAR result.
+        ENDIF.
+      CATCH cx_root.
+        CLEAR result.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD lang_iso_to_sap.
+
+    CONSTANTS lc_map TYPE string VALUE `A:af;B:he;C:zh;D:de;E:en;F:fr;G:el;H:hu;I:it;J:ja;K:da;L:pl;M:zf;N:nl;O:no;P:pt;Q:sk;R:ru;S:es;T:tr;U:fi;V:sv;W:bg;X:lt;Y:lv`.
+
+    DATA(lv_iso) = to_lower( c_trim( val ) ).
+
+    SPLIT lc_map AT `;` INTO TABLE DATA(lt_pairs).
+    LOOP AT lt_pairs INTO DATA(lv_pair).
+      SPLIT lv_pair AT `:` INTO DATA(lv_key) DATA(lv_map_iso).
+      IF lv_map_iso = lv_iso.
+        result = lv_key.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+
+    TRY.
+        DATA(lv_tab) = `T002`.
+        DATA(lv_laiso) = to_upper( lv_iso ).
+        SELECT SINGLE spras FROM (lv_tab) WHERE laiso = @lv_laiso INTO @result.
+        IF sy-subrc <> 0.
+          CLEAR result.
+        ENDIF.
+      CATCH cx_root.
+        CLEAR result.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD time_get_user_timezone.
+
+    DATA lv_class TYPE string.
+    FIELD-SYMBOLS <zonlo> TYPE any.
+
+    TRY.
+        lv_class = `CL_ABAP_CONTEXT_INFO`.
+        CALL METHOD (lv_class)=>(`GET_USER_TIME_ZONE`)
+          RECEIVING
+            rv_time_zone = result.
+      CATCH cx_root.
+        ASSIGN (`SY-ZONLO`) TO <zonlo>.
+        IF sy-subrc = 0.
+          result = <zonlo>.
+        ENDIF.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD time_stampl_to_tz.
+
+    DATA lv_tz TYPE c LENGTH 6.
+    lv_tz = tz.
+
+    CONVERT TIME STAMP val TIME ZONE lv_tz INTO DATE date TIME time.
+
+  ENDMETHOD.
+
+  METHOD time_stampl_from_tz.
+
+    DATA lv_tz TYPE c LENGTH 6.
+    lv_tz = tz.
+
+    CONVERT DATE date TIME time INTO TIME STAMP result TIME ZONE lv_tz.
+
+  ENDMETHOD.
+
+  METHOD context_get_user_info.
+
+    DATA lv_class TYPE string.
+    DATA lv_tab   TYPE string.
+
+    DATA(lv_uname) = COND string( WHEN uname IS NOT INITIAL
+                                  THEN to_upper( c_trim( uname ) )
+                                  ELSE CONV string( sy-uname ) ).
+
+    result-uname    = lv_uname.
+    result-langu    = sy-langu.
+    result-timezone = time_get_user_timezone( ).
+
+    IF context_check_abap_cloud( ) = abap_true.
+
+      lv_class = `CL_ABAP_CONTEXT_INFO`.
+      TRY.
+          CALL METHOD (lv_class)=>(`GET_USER_FORMATTED_NAME`)
+            RECEIVING
+              rv_formatted_name = result-name_formatted.
+        CATCH cx_root ##NO_HANDLER.
+      ENDTRY.
+      TRY.
+          CALL METHOD (lv_class)=>(`GET_USER_DATE_FORMAT`)
+            RECEIVING
+              rv_date_format = result-date_format.
+        CATCH cx_root ##NO_HANDLER.
+      ENDTRY.
+      TRY.
+          CALL METHOD (lv_class)=>(`GET_USER_DECIMAL_FORMAT`)
+            RECEIVING
+              rv_decimal_format = result-decimal_format.
+        CATCH cx_root ##NO_HANDLER.
+      ENDTRY.
+
+    ELSE.
+
+      TRY.
+          lv_tab = `USER_ADDR`.
+          SELECT SINGLE name_textc FROM (lv_tab) WHERE bname = @lv_uname INTO @result-name_formatted.
+        CATCH cx_root ##NO_HANDLER.
+      ENDTRY.
+
+      TRY.
+          lv_tab = `USR01`.
+          SELECT SINGLE datfm FROM (lv_tab) WHERE bname = @lv_uname INTO @result-date_format.
+          SELECT SINGLE dcpfm FROM (lv_tab) WHERE bname = @lv_uname INTO @result-decimal_format.
+        CATCH cx_root ##NO_HANDLER.
+      ENDTRY.
+
+      TRY.
+          DATA lv_persnumber TYPE c LENGTH 10.
+          DATA lv_addrnumber TYPE c LENGTH 10.
+          lv_tab = `USR21`.
+          SELECT SINGLE persnumber FROM (lv_tab) WHERE bname = @lv_uname INTO @lv_persnumber.
+          SELECT SINGLE addrnumber FROM (lv_tab) WHERE bname = @lv_uname INTO @lv_addrnumber.
+          IF sy-subrc = 0.
+            lv_tab = `ADR6`.
+            SELECT SINGLE smtp_addr FROM (lv_tab) WHERE persnumber = @lv_persnumber AND addrnumber = @lv_addrnumber INTO @result-email.
+          ENDIF.
+        CATCH cx_root ##NO_HANDLER.
+      ENDTRY.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD cur_get_decimals.
+
+    DATA lv_tab TYPE string.
+
+    DATA(lv_curr) = to_upper( c_trim( val ) ).
+    result = 2.
+
+    TRY.
+        lv_tab = `TCURX`.
+        SELECT SINGLE currdec FROM (lv_tab) WHERE currkey = @lv_curr INTO @result.
+        IF sy-subrc <> 0.
+          result = 2.
+        ENDIF.
+      CATCH cx_root.
+        TRY.
+            lv_tab = `I_CURRENCY`.
+            SELECT SINGLE decimals FROM (lv_tab) WHERE currency = @lv_curr INTO @result.
+            IF sy-subrc <> 0.
+              result = 2.
+            ENDIF.
+          CATCH cx_root.
+            result = 2.
+        ENDTRY.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD cur_amount_to_external.
+
+    DATA(lv_dec) = decimals.
+    IF lv_dec < 0.
+      lv_dec = cur_get_decimals( currency ).
+    ENDIF.
+
+    DATA lv_factor TYPE decfloat34 VALUE 1.
+
+    IF lv_dec < 2.
+      DO 2 - lv_dec TIMES.
+        lv_factor = lv_factor * 10.
+      ENDDO.
+      result = val * lv_factor.
+    ELSEIF lv_dec > 2.
+      DO lv_dec - 2 TIMES.
+        lv_factor = lv_factor * 10.
+      ENDDO.
+      result = val / lv_factor.
+    ELSE.
+      result = val * lv_factor.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD cur_amount_to_internal.
+
+    DATA(lv_dec) = decimals.
+    IF lv_dec < 0.
+      lv_dec = cur_get_decimals( currency ).
+    ENDIF.
+
+    DATA lv_factor TYPE decfloat34 VALUE 1.
+
+    IF lv_dec < 2.
+      DO 2 - lv_dec TIMES.
+        lv_factor = lv_factor * 10.
+      ENDDO.
+      result = val / lv_factor.
+    ELSEIF lv_dec > 2.
+      DO lv_dec - 2 TIMES.
+        lv_factor = lv_factor * 10.
+      ENDDO.
+      result = val * lv_factor.
+    ELSE.
+      result = val * lv_factor.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD unit_convert.
+
+    DATA lv_fm  TYPE string.
+    DATA lv_tab TYPE string.
+
+    IF unit_from = unit_to.
+      result = val.
+      RETURN.
+    ENDIF.
+
+    IF context_check_abap_cloud( ) = abap_false.
+
+      DATA lv_in  TYPE f.
+      DATA lv_out TYPE f.
+      DATA lv_ui  TYPE c LENGTH 3.
+      DATA lv_uo  TYPE c LENGTH 3.
+
+      lv_in = val.
+      lv_ui = to_upper( c_trim( unit_from ) ).
+      lv_uo = to_upper( c_trim( unit_to ) ).
+
+      lv_fm = `UNIT_CONVERSION_SIMPLE`.
+      CALL FUNCTION lv_fm
+        EXPORTING
+          input         = lv_in
+          unit_in       = lv_ui
+          unit_out      = lv_uo
+        IMPORTING
+          output        = lv_out
+        EXCEPTIONS
+          error_message = 1
+          OTHERS        = 2.
+      IF sy-subrc <> 0.
+        x_raise( `UNIT_CONVERSION_FAILED` ).
+      ENDIF.
+
+      result = lv_out.
+
+    ELSE.
+
+      TRY.
+          TYPES:
+            BEGIN OF ty_s_uom,
+              unitofmeasuresinumerator   TYPE decfloat34,
+              unitofmeasuresidenominator TYPE decfloat34,
+              unitofmeasuresiexponent    TYPE i,
+            END OF ty_s_uom.
+          DATA ls_uom_from TYPE ty_s_uom.
+          DATA ls_uom_to   TYPE ty_s_uom.
+          DATA lv_num_from TYPE decfloat34.
+          DATA lv_den_from TYPE decfloat34.
+          DATA lv_exp_from TYPE i.
+          DATA lv_num_to   TYPE decfloat34.
+          DATA lv_den_to   TYPE decfloat34.
+          DATA lv_exp_to   TYPE i.
+
+          DATA(lv_from) = to_upper( c_trim( unit_from ) ).
+          DATA(lv_to) = to_upper( c_trim( unit_to ) ).
+
+          lv_tab = `I_UNITOFMEASURE`.
+          SELECT SINGLE unitofmeasuresinumerator, unitofmeasuresidenominator, unitofmeasuresiexponent
+            FROM (lv_tab)
+            WHERE unitofmeasure = @lv_from
+            INTO CORRESPONDING FIELDS OF @ls_uom_from.
+          IF sy-subrc <> 0.
+            x_raise( `UNIT_CONVERSION_FAILED` ).
+          ENDIF.
+          SELECT SINGLE unitofmeasuresinumerator, unitofmeasuresidenominator, unitofmeasuresiexponent
+            FROM (lv_tab)
+            WHERE unitofmeasure = @lv_to
+            INTO CORRESPONDING FIELDS OF @ls_uom_to.
+          IF sy-subrc <> 0.
+            x_raise( `UNIT_CONVERSION_FAILED` ).
+          ENDIF.
+
+          lv_num_from = ls_uom_from-unitofmeasuresinumerator.
+          lv_den_from = ls_uom_from-unitofmeasuresidenominator.
+          lv_exp_from = ls_uom_from-unitofmeasuresiexponent.
+          lv_num_to   = ls_uom_to-unitofmeasuresinumerator.
+          lv_den_to   = ls_uom_to-unitofmeasuresidenominator.
+          lv_exp_to   = ls_uom_to-unitofmeasuresiexponent.
+
+          DATA lv_factor_from TYPE decfloat34.
+          DATA lv_factor_to   TYPE decfloat34.
+          DATA lv_ten         TYPE decfloat34 VALUE 10.
+
+          lv_factor_from = lv_num_from / lv_den_from.
+          DO lv_exp_from TIMES.
+            lv_factor_from = lv_factor_from * lv_ten.
+          ENDDO.
+          DO lv_exp_from * -1 TIMES.
+            lv_factor_from = lv_factor_from / lv_ten.
+          ENDDO.
+
+          lv_factor_to = lv_num_to / lv_den_to.
+          DO lv_exp_to TIMES.
+            lv_factor_to = lv_factor_to * lv_ten.
+          ENDDO.
+          DO lv_exp_to * -1 TIMES.
+            lv_factor_to = lv_factor_to / lv_ten.
+          ENDDO.
+
+          result = val * lv_factor_from / lv_factor_to.
+
+        CATCH cx_root.
+          x_raise( `UNIT_CONVERSION_FAILED` ).
+      ENDTRY.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD hash_calculate.
+
+    DATA lv_class TYPE string.
+    DATA lv_alg   TYPE c LENGTH 10.
+    DATA lv_data  TYPE string.
+
+    lv_alg = to_upper( c_trim( algorithm ) ).
+    lv_data = val.
+
+    TRY.
+        lv_class = `CL_ABAP_MESSAGE_DIGEST`.
+        CALL METHOD (lv_class)=>(`CALCULATE_HASH_FOR_CHAR`)
+          EXPORTING
+            if_algorithm  = lv_alg
+            if_data       = lv_data
+          IMPORTING
+            ef_hashstring = result.
+      CATCH cx_root.
+        x_raise( `HASH_CALCULATION_FAILED` ).
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD hash_hmac.
+
+    DATA lv_class TYPE string.
+    DATA lv_alg   TYPE c LENGTH 10.
+    DATA lv_data  TYPE string.
+
+    lv_alg = to_upper( c_trim( algorithm ) ).
+    lv_data = val.
+    DATA(lv_key) = conv_get_xstring_by_string( CONV string( key ) ).
+
+    TRY.
+        lv_class = `CL_ABAP_HMAC`.
+        CALL METHOD (lv_class)=>(`CALCULATE_HMAC_FOR_CHAR`)
+          EXPORTING
+            if_algorithm  = lv_alg
+            if_key        = lv_key
+            if_data       = lv_data
+          IMPORTING
+            ef_hmacstring = result.
+      CATCH cx_root.
+        x_raise( `HMAC_CALCULATION_FAILED` ).
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD http_get.
+
+    result = http_execute( method       = `GET`
+                           url          = CONV string( url )
+                           body         = ``
+                           content_type = ``
+                           t_header     = t_header ).
+
+  ENDMETHOD.
+
+  METHOD http_post.
+
+    result = http_execute( method       = `POST`
+                           url          = CONV string( url )
+                           body         = CONV string( body )
+                           content_type = CONV string( content_type )
+                           t_header     = t_header ).
+
+  ENDMETHOD.
+
+  METHOD http_execute.
+
+    IF context_check_abap_cloud( ) = abap_true.
+      result = http_execute_cloud( method       = method
+                                   url          = url
+                                   body         = body
+                                   content_type = content_type
+                                   t_header     = t_header ).
+    ELSE.
+      result = http_execute_std( method       = method
+                                 url          = url
+                                 body         = body
+                                 content_type = content_type
+                                 t_header     = t_header ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD http_execute_cloud.
+
+    DATA lo_dest   TYPE REF TO object.
+    DATA lo_client TYPE REF TO object.
+    DATA lo_req    TYPE REF TO object.
+    DATA lo_resp   TYPE REF TO object.
+    DATA lr_status TYPE REF TO data.
+    DATA lv_class  TYPE string.
+    FIELD-SYMBOLS <status> TYPE any.
+
+    TRY.
+
+        lv_class = `CL_HTTP_DESTINATION_PROVIDER`.
+        CALL METHOD (lv_class)=>(`CREATE_BY_URL`)
+          EXPORTING
+            i_url              = url
+          RECEIVING
+            r_http_destination = lo_dest.
+
+        lv_class = `CL_WEB_HTTP_CLIENT_MANAGER`.
+        CALL METHOD (lv_class)=>(`CREATE_BY_HTTP_DESTINATION`)
+          EXPORTING
+            i_destination = lo_dest
+          RECEIVING
+            r_client      = lo_client.
+
+        CALL METHOD lo_client->(`IF_WEB_HTTP_CLIENT~GET_HTTP_REQUEST`)
+          RECEIVING
+            r_value = lo_req.
+
+        LOOP AT t_header INTO DATA(ls_header).
+          CALL METHOD lo_req->(`IF_WEB_HTTP_REQUEST~SET_HEADER_FIELD`)
+            EXPORTING
+              i_name  = ls_header-n
+              i_value = ls_header-v.
+        ENDLOOP.
+
+        IF content_type IS NOT INITIAL.
+          CALL METHOD lo_req->(`IF_WEB_HTTP_REQUEST~SET_HEADER_FIELD`)
+            EXPORTING
+              i_name  = `Content-Type`
+              i_value = content_type.
+        ENDIF.
+
+        IF body IS NOT INITIAL.
+          CALL METHOD lo_req->(`IF_WEB_HTTP_REQUEST~SET_TEXT`)
+            EXPORTING
+              i_text = body.
+        ENDIF.
+
+        CALL METHOD lo_client->(`IF_WEB_HTTP_CLIENT~EXECUTE`)
+          EXPORTING
+            i_method   = method
+          RECEIVING
+            r_response = lo_resp.
+
+        CALL METHOD lo_resp->(`IF_WEB_HTTP_RESPONSE~GET_TEXT`)
+          RECEIVING
+            r_value = result-body.
+
+        CREATE DATA lr_status TYPE (`IF_WEB_HTTP_RESPONSE=>HTTP_STATUS`).
+        ASSIGN lr_status->* TO <status>.
+        CALL METHOD lo_resp->(`IF_WEB_HTTP_RESPONSE~GET_STATUS`)
+          RECEIVING
+            r_value = <status>.
+
+        ASSIGN COMPONENT `CODE` OF STRUCTURE <status> TO FIELD-SYMBOL(<code>).
+        IF sy-subrc = 0.
+          result-code = <code>.
+        ENDIF.
+        ASSIGN COMPONENT `REASON` OF STRUCTURE <status> TO FIELD-SYMBOL(<reason>).
+        IF sy-subrc = 0.
+          result-reason = <reason>.
+        ENDIF.
+
+        CALL METHOD lo_client->(`IF_WEB_HTTP_CLIENT~CLOSE`).
+
+      CATCH cx_root INTO DATA(lx_error).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = lx_error.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD http_execute_std.
+
+    DATA lo_client TYPE REF TO object.
+    DATA lo_req    TYPE REF TO object.
+    DATA lo_resp   TYPE REF TO object.
+    DATA lv_class  TYPE string.
+    FIELD-SYMBOLS <obj> TYPE any.
+
+    TRY.
+
+        lv_class = `CL_HTTP_CLIENT`.
+        CALL METHOD (lv_class)=>(`CREATE_BY_URL`)
+          EXPORTING
+            url    = url
+          IMPORTING
+            client = lo_client.
+
+        ASSIGN lo_client->(`IF_HTTP_CLIENT~REQUEST`) TO <obj>.
+        IF sy-subrc <> 0.
+          x_raise( `HTTP_REQUEST_FAILED` ).
+        ENDIF.
+        lo_req = <obj>.
+
+        CALL METHOD lo_req->(`IF_HTTP_REQUEST~SET_METHOD`)
+          EXPORTING
+            method = method.
+
+        LOOP AT t_header INTO DATA(ls_header).
+          CALL METHOD lo_req->(`IF_HTTP_ENTITY~SET_HEADER_FIELD`)
+            EXPORTING
+              name  = ls_header-n
+              value = ls_header-v.
+        ENDLOOP.
+
+        IF content_type IS NOT INITIAL.
+          CALL METHOD lo_req->(`IF_HTTP_ENTITY~SET_CONTENT_TYPE`)
+            EXPORTING
+              content_type = content_type.
+        ENDIF.
+
+        IF body IS NOT INITIAL.
+          CALL METHOD lo_req->(`IF_HTTP_ENTITY~SET_CDATA`)
+            EXPORTING
+              data = body.
+        ENDIF.
+
+        CALL METHOD lo_client->(`IF_HTTP_CLIENT~SEND`)
+          EXCEPTIONS
+            OTHERS = 1.
+        IF sy-subrc <> 0.
+          x_raise( `HTTP_SEND_FAILED` ).
+        ENDIF.
+
+        CALL METHOD lo_client->(`IF_HTTP_CLIENT~RECEIVE`)
+          EXCEPTIONS
+            OTHERS = 1.
+        IF sy-subrc <> 0.
+          x_raise( `HTTP_RECEIVE_FAILED` ).
+        ENDIF.
+
+        ASSIGN lo_client->(`IF_HTTP_CLIENT~RESPONSE`) TO <obj>.
+        IF sy-subrc <> 0.
+          x_raise( `HTTP_RECEIVE_FAILED` ).
+        ENDIF.
+        lo_resp = <obj>.
+
+        CALL METHOD lo_resp->(`IF_HTTP_RESPONSE~GET_STATUS`)
+          IMPORTING
+            code   = result-code
+            reason = result-reason.
+
+        CALL METHOD lo_resp->(`IF_HTTP_ENTITY~GET_CDATA`)
+          RECEIVING
+            data = result-body.
+
+        CALL METHOD lo_client->(`IF_HTTP_CLIENT~CLOSE`)
+          EXCEPTIONS
+            OTHERS = 1.
+
+      CATCH cx_root INTO DATA(lx_error).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = lx_error.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD db_check_table_exists.
+
+    DATA lr_data TYPE REF TO data.
+
+    DATA(lv_name) = to_upper( c_trim( val ) ).
+
+    TRY.
+        CREATE DATA lr_data TYPE (lv_name).
+        result = abap_true.
+      CATCH cx_root.
+        result = abap_false.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD db_select_by_name.
+
+    DATA(lv_tab) = to_upper( c_trim( tabname ) ).
+    DATA(lv_where) = CONV string( where ).
+
+    result = rtti_create_tab_by_name( lv_tab ).
+    FIELD-SYMBOLS <tab> TYPE STANDARD TABLE.
+    ASSIGN result->* TO <tab>.
+
+    TRY.
+        IF max_rows > 0.
+          SELECT * FROM (lv_tab) WHERE (lv_where) INTO TABLE @<tab> UP TO @max_rows ROWS.
+        ELSE.
+          SELECT * FROM (lv_tab) WHERE (lv_where) INTO TABLE @<tab>.
+        ENDIF.
+      CATCH cx_root INTO DATA(lx_error).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = lx_error.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD db_count_by_name.
+
+    DATA(lv_tab) = to_upper( c_trim( tabname ) ).
+    DATA(lv_where) = CONV string( where ).
+
+    TRY.
+        SELECT COUNT(*) FROM (lv_tab) WHERE (lv_where) INTO @result.
+      CATCH cx_root INTO DATA(lx_error).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = lx_error.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD param_get_user_default.
+
+    DATA lv_tab TYPE string.
+
+    DATA(lv_uname) = COND string( WHEN uname IS NOT INITIAL
+                                  THEN to_upper( c_trim( uname ) )
+                                  ELSE CONV string( sy-uname ) ).
+    DATA(lv_parid) = to_upper( c_trim( val ) ).
+
+    TRY.
+        lv_tab = `USR05`.
+        SELECT SINGLE parva FROM (lv_tab) WHERE bname = @lv_uname AND parid = @lv_parid INTO @result.
+        IF sy-subrc <> 0.
+          CLEAR result.
+        ENDIF.
+      CATCH cx_root.
+        CLEAR result.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD job_get_status.
+
+    DATA lv_tab TYPE string.
+
+    DATA(lv_jobname) = to_upper( c_trim( jobname ) ).
+    DATA(lv_jobcount) = c_trim( jobcount ).
+
+    TRY.
+        lv_tab = `TBTCO`.
+        SELECT SINGLE status FROM (lv_tab) WHERE jobname = @lv_jobname AND jobcount = @lv_jobcount INTO @result.
+        IF sy-subrc <> 0.
+          CLEAR result.
+        ENDIF.
+      CATCH cx_root.
+        CLEAR result.
+    ENDTRY.
+
+  ENDMETHOD.
+
 
 ENDCLASS.
