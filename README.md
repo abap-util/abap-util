@@ -37,7 +37,7 @@ abap-util is designed to be consumed **as a vendored copy, not as an installed d
 
 | Project | Vendored Copy | Scope |
 |---|---|---|
-| [abap2UI5](https://github.com/abap2UI5/abap2UI5) | `z2ui5_cl_abap2ui5_context` (`src/00/03/`) | methods used by the core framework |
+| [abap2UI5](https://github.com/abap2UI5/abap2UI5) | `z2ui5_cl_a2ui5_context` (`src/00/03/`) | methods used by the core framework |
 | [popups](https://github.com/abap2UI5-addons/popups) | `z2ui5_cl_popup_context` (`src/00/`) | methods used by the popup apps |
 
 This gives every consumer a zero-dependency installation ("clone and go"), full namespace isolation (several projects — even on different versions — can coexist in one system with their own copy), while the logic itself is developed, tested and maintained in exactly one place: this repository.

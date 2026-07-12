@@ -23,7 +23,7 @@ abap-util (master, this repo)                     Downstream projects (vendored 
 ┌──────────────────────────────┐
 │ zabaputil_cl_util_context    │  copy + rename   ┌────────────────────────────────────┐
 │  (all utility methods,       │ ───────────────→ │ abap2UI5:                          │
-│   full unit test coverage,   │  trim to used    │  z2ui5_cl_abap2ui5_context         │
+│   full unit test coverage,   │  trim to used    │  z2ui5_cl_a2ui5_context         │
 │   linted for 7.02/Standard/  │  methods         │  (src/00/03/, framework subset)    │
 │   Cloud)                     │                  ├────────────────────────────────────┤
 │ zabaputil_cl_util_http       │ ───────────────→ │ popups:                            │
@@ -39,7 +39,7 @@ abap-util (master, this repo)                     Downstream projects (vendored 
 
 **Rules:**
 1. **All development happens here first.** Bug fixes and new functionality are implemented and unit-tested in this repository, then propagated to the downstream copies. Never accept a change that only exists in a copy.
-2. **A copy may differ from the master in exactly two ways:** the class name (project namespace, e.g. `z2ui5_cl_abap2ui5_context`) and the set of methods (trimmed to what the project uses). Method implementations must stay textually identical to the master.
+2. **A copy may differ from the master in exactly two ways:** the class name (project namespace, e.g. `z2ui5_cl_a2ui5_context`) and the set of methods (trimmed to what the project uses). Method implementations must stay textually identical to the master.
 3. **Trimming must include the closure:** when a public method is copied, every private/protected helper it calls (transitively) must be copied with it.
 4. **When a consumer needs a method that is not in its copy yet,** copy it (with its helper closure) from the current master state here — do not re-implement it downstream.
 5. **Multi-environment compatibility is non-negotiable:** every method must work on NW 7.02, Standard ABAP, and ABAP Cloud, because any consumer may run on any of these targets. Environment-specific behavior is branched via `context_check_abap_cloud( )` and dynamic calls so the code compiles everywhere.
