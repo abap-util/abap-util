@@ -31,6 +31,22 @@ Utility Functions for ABAP Cloud & Standard ABAP
 #### Installation
 Install via [abapGit](https://abapgit.org) - clone this repository into your SAP system.
 
+#### Consumption Model — Copy, Don't Depend
+
+abap-util is designed to be consumed **as a vendored copy, not as an installed dependency**. abapGit has no dependency management, so a hard dependency between repositories would force users to install packages in the correct order and keep versions in sync. Instead, downstream projects embed a **renamed copy** of `zabaputil_cl_util_context` (and, where needed, further classes such as `zabaputil_cl_util_http` or `zabaputil_cx_error`), **reduced to the methods the project actually uses**:
+
+| Project | Vendored Copy | Scope |
+|---|---|---|
+| [abap2UI5](https://github.com/abap2UI5/abap2UI5) | `z2ui5_cl_abap2ui5_context` (`src/00/03/`) | methods used by the core framework |
+| [popups](https://github.com/abap2UI5-addons/popups) | `z2ui5_cl_popup_context` (`src/00/`) | methods used by the popup apps |
+
+This gives every consumer a zero-dependency installation ("clone and go"), full namespace isolation (several projects — even on different versions — can coexist in one system with their own copy), while the logic itself is developed, tested and maintained in exactly one place: this repository.
+
+**Rules that make this work:**
+* This repository is the **single source of truth**. Bug fixes and new functionality are implemented and tested here first, then propagated to the downstream copies.
+* A copy may differ from the master in exactly two ways: the **class name** (project namespace) and the **set of methods** (trimmed to what the project uses, including the private helpers those methods need). Method implementations must stay identical to the master.
+* Never fix a bug only in a downstream copy — it will be overwritten by the next sync and the fix is lost for all other consumers. Fix it here, then update the copies.
+
 #### Usage
 
 ###### Strings
