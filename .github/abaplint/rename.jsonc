@@ -1,6 +1,6 @@
 {
     "global": {
-      "files": "/../../input/abap2UI5/src/00/**/*.*"
+      "files": "/../../input/abap2UI5/src/{00,99/01}/**/*.*"
     },
     "dependencies": [
       {
@@ -11,6 +11,16 @@
     "rename": {
       "output": "output",
       "patterns": [
+        {
+          "type": "CLAS",
+          "oldName": "z2ui5_cl_abap2ui5_(.*)",
+          "newName": "ZABAPUTIL_CL_$1"
+        },
+        {
+          "type": "CLAS",
+          "oldName": "z2ui5_cx_abap2ui5_(.*)",
+          "newName": "ZABAPUTIL_CX_$1"
+        },
         {
           "type": "CLAS|INTF|TABL",
           "oldName": "z2ui5_(.*)",

@@ -27,14 +27,14 @@ CLASS zabaputil_cl_util_range DEFINITION PUBLIC
         val           TYPE clike
         sign          TYPE clike DEFAULT `I`
       RETURNING
-        VALUE(result) TYPE zabaputil_cl_util=>ty_s_range.
+        VALUE(result) TYPE zabaputil_cl_util_context=>ty_s_range.
 
     CLASS-METHODS ne
       IMPORTING
         val           TYPE clike
         sign          TYPE clike DEFAULT `I`
       RETURNING
-        VALUE(result) TYPE zabaputil_cl_util=>ty_s_range.
+        VALUE(result) TYPE zabaputil_cl_util_context=>ty_s_range.
 
     CLASS-METHODS bt
       IMPORTING
@@ -42,42 +42,42 @@ CLASS zabaputil_cl_util_range DEFINITION PUBLIC
         high          TYPE clike
         sign          TYPE clike DEFAULT `I`
       RETURNING
-        VALUE(result) TYPE zabaputil_cl_util=>ty_s_range.
+        VALUE(result) TYPE zabaputil_cl_util_context=>ty_s_range.
 
     CLASS-METHODS cp
       IMPORTING
         val           TYPE clike
         sign          TYPE clike DEFAULT `I`
       RETURNING
-        VALUE(result) TYPE zabaputil_cl_util=>ty_s_range.
+        VALUE(result) TYPE zabaputil_cl_util_context=>ty_s_range.
 
     CLASS-METHODS gt
       IMPORTING
         val           TYPE clike
         sign          TYPE clike DEFAULT `I`
       RETURNING
-        VALUE(result) TYPE zabaputil_cl_util=>ty_s_range.
+        VALUE(result) TYPE zabaputil_cl_util_context=>ty_s_range.
 
     CLASS-METHODS ge
       IMPORTING
         val           TYPE clike
         sign          TYPE clike DEFAULT `I`
       RETURNING
-        VALUE(result) TYPE zabaputil_cl_util=>ty_s_range.
+        VALUE(result) TYPE zabaputil_cl_util_context=>ty_s_range.
 
     CLASS-METHODS lt
       IMPORTING
         val           TYPE clike
         sign          TYPE clike DEFAULT `I`
       RETURNING
-        VALUE(result) TYPE zabaputil_cl_util=>ty_s_range.
+        VALUE(result) TYPE zabaputil_cl_util_context=>ty_s_range.
 
     CLASS-METHODS le
       IMPORTING
         val           TYPE clike
         sign          TYPE clike DEFAULT `I`
       RETURNING
-        VALUE(result) TYPE zabaputil_cl_util=>ty_s_range.
+        VALUE(result) TYPE zabaputil_cl_util_context=>ty_s_range.
 
     CLASS-METHODS get_sql_multi
       IMPORTING

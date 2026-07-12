@@ -69,14 +69,14 @@ CLASS zabaputil_cl_util_log DEFINITION
 
     METHODS to_msg
       RETURNING
-        VALUE(result) TYPE zabaputil_cl_util=>ty_t_msg.
+        VALUE(result) TYPE zabaputil_cl_util_context=>ty_t_msg.
 
     METHODS to_string
       RETURNING
         VALUE(result) TYPE string.
 
   PROTECTED SECTION.
-    DATA mt_log TYPE zabaputil_cl_util=>ty_t_msg.
+    DATA mt_log TYPE zabaputil_cl_util_context=>ty_t_msg.
 
   PRIVATE SECTION.
 ENDCLASS.
@@ -86,7 +86,7 @@ CLASS zabaputil_cl_util_log IMPLEMENTATION.
 
   METHOD add.
 
-    DATA(lt_msg) = zabaputil_cl_util=>msg_get_t( val ).
+    DATA(lt_msg) = zabaputil_cl_util_context=>msg_get_t( val ).
     INSERT LINES OF lt_msg INTO TABLE mt_log.
     result = me.
 
@@ -141,7 +141,7 @@ CLASS zabaputil_cl_util_log IMPLEMENTATION.
 
   METHOD bal_read.
 
-    DATA(lt_msg) = zabaputil_cl_util=>bal_read(
+    DATA(lt_msg) = zabaputil_cl_util_context=>bal_read(
          object    = object
          subobject = subobject
          id        = id ).
@@ -151,7 +151,7 @@ CLASS zabaputil_cl_util_log IMPLEMENTATION.
 
   METHOD bal_save.
 
-    zabaputil_cl_util=>bal_create(
+    zabaputil_cl_util_context=>bal_create(
         object    = object
         subobject = subobject
         id        = id
@@ -161,13 +161,13 @@ CLASS zabaputil_cl_util_log IMPLEMENTATION.
 
   METHOD to_csv.
 
-    result = zabaputil_cl_util=>itab_get_csv_by_itab( mt_log ).
+    result = zabaputil_cl_util_context=>itab_get_csv_by_itab( mt_log ).
 
   ENDMETHOD.
 
   METHOD to_xlsx.
 
-    result = zabaputil_cl_util=>conv_get_xlsx_by_itab( mt_log ).
+    result = zabaputil_cl_util_context=>conv_get_xlsx_by_itab( mt_log ).
 
   ENDMETHOD.
 

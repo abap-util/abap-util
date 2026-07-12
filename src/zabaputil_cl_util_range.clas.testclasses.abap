@@ -38,7 +38,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_empty_range.
 
-    DATA lt_range TYPE zabaputil_cl_util=>ty_t_range.
+    DATA lt_range TYPE zabaputil_cl_util_context=>ty_t_range.
 
     DATA(lo_range) = NEW zabaputil_cl_util_range(
       iv_fieldname = `CARRID`
@@ -50,7 +50,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_eq_include.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util=>ty_t_range(
+    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
       ( sign = `I` option = `EQ` low = `AA` high = `` ) ).
 
     DATA(lo_range) = NEW zabaputil_cl_util_range(
@@ -65,7 +65,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_ne_include.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util=>ty_t_range(
+    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
       ( sign = `I` option = `NE` low = `BB` high = `` ) ).
 
     DATA(lo_range) = NEW zabaputil_cl_util_range(
@@ -80,7 +80,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_gt_include.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util=>ty_t_range(
+    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
       ( sign = `I` option = `GT` low = `100` high = `` ) ).
 
     DATA(lo_range) = NEW zabaputil_cl_util_range(
@@ -95,7 +95,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_ge_include.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util=>ty_t_range(
+    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
       ( sign = `I` option = `GE` low = `50` high = `` ) ).
 
     DATA(lo_range) = NEW zabaputil_cl_util_range(
@@ -110,7 +110,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_lt_include.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util=>ty_t_range(
+    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
       ( sign = `I` option = `LT` low = `200` high = `` ) ).
 
     DATA(lo_range) = NEW zabaputil_cl_util_range(
@@ -125,7 +125,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_le_include.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util=>ty_t_range(
+    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
       ( sign = `I` option = `LE` low = `300` high = `` ) ).
 
     DATA(lo_range) = NEW zabaputil_cl_util_range(
@@ -140,7 +140,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_bt_include.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util=>ty_t_range(
+    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
       ( sign = `I` option = `BT` low = `100` high = `500` ) ).
 
     DATA(lo_range) = NEW zabaputil_cl_util_range(
@@ -155,7 +155,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_nb_include.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util=>ty_t_range(
+    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
       ( sign = `I` option = `NB` low = `100` high = `500` ) ).
 
     DATA(lo_range) = NEW zabaputil_cl_util_range(
@@ -170,7 +170,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_cp_include.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util=>ty_t_range(
+    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
       ( sign = `I` option = `CP` low = `*test*` high = `` ) ).
 
     DATA(lo_range) = NEW zabaputil_cl_util_range(
@@ -185,7 +185,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_np_include.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util=>ty_t_range(
+    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
       ( sign = `I` option = `NP` low = `*test*` high = `` ) ).
 
     DATA(lo_range) = NEW zabaputil_cl_util_range(
@@ -200,7 +200,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_exclude_sign.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util=>ty_t_range(
+    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
       ( sign = `E` option = `EQ` low = `XX` high = `` ) ).
 
     DATA(lo_range) = NEW zabaputil_cl_util_range(
@@ -215,7 +215,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_multiple_entries.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util=>ty_t_range(
+    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
       ( sign = `I` option = `EQ` low = `AA` high = `` )
       ( sign = `I` option = `EQ` low = `BB` high = `` ) ).
 
@@ -231,7 +231,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_quote_escape.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util=>ty_t_range(
+    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
       ( sign = `I` option = `EQ` low = `O'Brien` high = `` ) ).
 
     DATA(lo_range) = NEW zabaputil_cl_util_range(
@@ -246,7 +246,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_fieldname_upper.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util=>ty_t_range(
+    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
       ( sign = `I` option = `EQ` low = `test` high = `` ) ).
 
     DATA(lo_range) = NEW zabaputil_cl_util_range(
@@ -362,7 +362,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_factory_with_sql.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util=>ty_t_range(
+    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
       ( zabaputil_cl_util_range=>eq( `AA` ) )
       ( zabaputil_cl_util_range=>eq( `BB` ) ) ).
 
@@ -378,8 +378,8 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_get_sql_multi.
 
-    DATA(lt_r1) = VALUE zabaputil_cl_util=>ty_t_range( ( zabaputil_cl_util_range=>eq( `LH` ) ) ).
-    DATA(lt_r2) = VALUE zabaputil_cl_util=>ty_t_range( ( zabaputil_cl_util_range=>bt( low = `100` high = `500` ) ) ).
+    DATA(lt_r1) = VALUE zabaputil_cl_util_context=>ty_t_range( ( zabaputil_cl_util_range=>eq( `LH` ) ) ).
+    DATA(lt_r2) = VALUE zabaputil_cl_util_context=>ty_t_range( ( zabaputil_cl_util_range=>bt( low = `100` high = `500` ) ) ).
 
     DATA(lv_sql1) = NEW zabaputil_cl_util_range( iv_fieldname = `CARRID` ir_range = REF #( lt_r1 ) )->get_sql( ).
     DATA(lv_sql2) = NEW zabaputil_cl_util_range( iv_fieldname = `CONNID` ir_range = REF #( lt_r2 ) )->get_sql( ).
