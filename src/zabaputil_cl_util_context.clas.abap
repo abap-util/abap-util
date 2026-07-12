@@ -10847,7 +10847,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
       TRY.
           lv_tab = `USR01`.
-          SELECT SINGLE datfm, dcpfm FROM (lv_tab) WHERE bname = @lv_uname INTO ( @result-date_format, @result-decimal_format ).
+          SELECT SINGLE datfm FROM (lv_tab) WHERE bname = @lv_uname INTO @result-date_format.
+          SELECT SINGLE dcpfm FROM (lv_tab) WHERE bname = @lv_uname INTO @result-decimal_format.
         CATCH cx_root ##NO_HANDLER.
       ENDTRY.
 
@@ -10855,7 +10856,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           DATA lv_persnumber TYPE c LENGTH 10.
           DATA lv_addrnumber TYPE c LENGTH 10.
           lv_tab = `USR21`.
-          SELECT SINGLE persnumber, addrnumber FROM (lv_tab) WHERE bname = @lv_uname INTO ( @lv_persnumber, @lv_addrnumber ).
+          SELECT SINGLE persnumber FROM (lv_tab) WHERE bname = @lv_uname INTO @lv_persnumber.
+          SELECT SINGLE addrnumber FROM (lv_tab) WHERE bname = @lv_uname INTO @lv_addrnumber.
           IF sy-subrc = 0.
             lv_tab = `ADR6`.
             SELECT SINGLE smtp_addr FROM (lv_tab) WHERE persnumber = @lv_persnumber AND addrnumber = @lv_addrnumber INTO @result-email.
@@ -10985,6 +10987,14 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ELSE.
 
       TRY.
+          TYPES:
+            BEGIN OF ty_s_uom,
+              unitofmeasuresinumerator   TYPE decfloat34,
+              unitofmeasuresidenominator TYPE decfloat34,
+              unitofmeasuresiexponent    TYPE i,
+            END OF ty_s_uom.
+          DATA ls_uom_from TYPE ty_s_uom.
+          DATA ls_uom_to   TYPE ty_s_uom.
           DATA lv_num_from TYPE decfloat34.
           DATA lv_den_from TYPE decfloat34.
           DATA lv_exp_from TYPE i.
@@ -10999,17 +11009,24 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           SELECT SINGLE unitofmeasuresinumerator, unitofmeasuresidenominator, unitofmeasuresiexponent
             FROM (lv_tab)
             WHERE unitofmeasure = @lv_from
-            INTO ( @lv_num_from, @lv_den_from, @lv_exp_from ).
+            INTO CORRESPONDING FIELDS OF @ls_uom_from.
           IF sy-subrc <> 0.
             x_raise( `UNIT_CONVERSION_FAILED` ).
           ENDIF.
           SELECT SINGLE unitofmeasuresinumerator, unitofmeasuresidenominator, unitofmeasuresiexponent
             FROM (lv_tab)
             WHERE unitofmeasure = @lv_to
-            INTO ( @lv_num_to, @lv_den_to, @lv_exp_to ).
+            INTO CORRESPONDING FIELDS OF @ls_uom_to.
           IF sy-subrc <> 0.
             x_raise( `UNIT_CONVERSION_FAILED` ).
           ENDIF.
+
+          lv_num_from = ls_uom_from-unitofmeasuresinumerator.
+          lv_den_from = ls_uom_from-unitofmeasuresidenominator.
+          lv_exp_from = ls_uom_from-unitofmeasuresiexponent.
+          lv_num_to   = ls_uom_to-unitofmeasuresinumerator.
+          lv_den_to   = ls_uom_to-unitofmeasuresidenominator.
+          lv_exp_to   = ls_uom_to-unitofmeasuresiexponent.
 
           DATA lv_factor_from TYPE decfloat34.
           DATA lv_factor_to   TYPE decfloat34.
