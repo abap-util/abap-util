@@ -1316,6 +1316,13 @@ CLASS zabaputil_cl_util DEFINITION
       END OF ty_s_dfies,
       ty_t_dfies TYPE STANDARD TABLE OF ty_s_dfies WITH DEFAULT KEY.
 
+    CLASS-METHODS convexit_ext
+      IMPORTING
+        name   TYPE ty_s_dfies
+        val    TYPE data
+      CHANGING
+        result TYPE data.
+
     CLASS-METHODS rtti_get_t_dfies_by_table_name
       IMPORTING
         table_name    TYPE string
@@ -2921,6 +2928,40 @@ CLASS zabaputil_cl_util IMPLEMENTATION.
 
       CATCH cx_root ##NO_HANDLER.
     ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD convexit_ext.
+
+    IF context_check_abap_cloud( ).
+
+    ELSE.
+
+      DATA(conv) = |CONVERSION_EXIT_{ name-convexit }_INPUT|.
+      DATA conex TYPE c LENGTH 30.
+      DATA(lv_tab) = 'TFDIR'.
+
+      SELECT SINGLE funcname FROM (lv_tab)
+        WHERE funcname = @conv
+        INTO @conex.
+
+      IF sy-subrc = 0.
+
+        CALL FUNCTION conex
+          EXPORTING
+            input         = val
+          IMPORTING
+            output        = result
+          EXCEPTIONS
+            error_message = 1
+            OTHERS        = 2.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error.
+        ENDIF.
+
+      ENDIF.
+
+    ENDIF.
 
   ENDMETHOD.
 
