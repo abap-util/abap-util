@@ -1,4 +1,4 @@
-CLASS zabaputil_cl_util_json_fltr DEFINITION
+CLASS zabaputil_cl_json_fltr DEFINITION
   PUBLIC FINAL
   CREATE PUBLIC.
 
@@ -14,11 +14,11 @@ CLASS zabaputil_cl_util_json_fltr DEFINITION
 ENDCLASS.
 
 
-CLASS zabaputil_cl_util_json_fltr IMPLEMENTATION.
+CLASS zabaputil_cl_json_fltr IMPLEMENTATION.
 
   METHOD create_no_empty_values.
 
-    result = NEW zabaputil_cl_util_json_fltr( ).
+    result = NEW zabaputil_cl_json_fltr( ).
 
   ENDMETHOD.
 

@@ -286,7 +286,7 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
 
     result = concat_lines_of(
       table = VALUE string_table( FOR <r> IN msg_get( val = val val2 = val2 ) ( |- { <r>-text }| ) )
-      sep   = cl_abap_char_utilities=>newline ).
+      sep   = zabaputil_cl_util=>cv_char_util_newline ).
 
   ENDMETHOD.
 

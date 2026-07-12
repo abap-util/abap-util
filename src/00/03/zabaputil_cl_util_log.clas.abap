@@ -141,7 +141,7 @@ CLASS zabaputil_cl_util_log IMPLEMENTATION.
 
   METHOD bal_read.
 
-    DATA(lt_msg) = zabaputil_cl_util=>bal_read(
+    DATA(lt_msg) = zabaputil_cl_util_ext=>bal_read(
          object    = object
          subobject = subobject
          id        = id ).
@@ -151,7 +151,7 @@ CLASS zabaputil_cl_util_log IMPLEMENTATION.
 
   METHOD bal_save.
 
-    zabaputil_cl_util=>bal_create(
+    zabaputil_cl_util_ext=>bal_create(
         object    = object
         subobject = subobject
         id        = id
@@ -167,7 +167,7 @@ CLASS zabaputil_cl_util_log IMPLEMENTATION.
 
   METHOD to_xlsx.
 
-    result = zabaputil_cl_util=>conv_get_xlsx_by_itab( mt_log ).
+    result = zabaputil_cl_util_ext=>conv_get_xlsx_by_itab( mt_log ).
 
   ENDMETHOD.
 

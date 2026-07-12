@@ -1,4 +1,4 @@
-CLASS zabaputil_cl_util_http DEFINITION PUBLIC.
+CLASS zabaputil_cl_http DEFINITION PUBLIC.
 
   PUBLIC SECTION.
 
@@ -7,7 +7,7 @@ CLASS zabaputil_cl_util_http DEFINITION PUBLIC.
         method   TYPE string,
         body     TYPE string,
         path     TYPE string,
-        t_params TYPE zabaputil_cl_util=>ty_t_name_value,
+        t_params TYPE zabaputil_cl_context=>ty_t_name_value,
       END OF ty_s_http_req.
 
     TYPES:
@@ -37,14 +37,14 @@ CLASS zabaputil_cl_util_http DEFINITION PUBLIC.
       IMPORTING
         server        TYPE REF TO object
       RETURNING
-        VALUE(result) TYPE REF TO zabaputil_cl_util_http.
+        VALUE(result) TYPE REF TO zabaputil_cl_http.
 
     CLASS-METHODS factory_cloud
       IMPORTING
         req           TYPE REF TO object
         res           TYPE REF TO object
       RETURNING
-        VALUE(result) TYPE REF TO zabaputil_cl_util_http.
+        VALUE(result) TYPE REF TO zabaputil_cl_http.
 
     METHODS get_req_info
       RETURNING
@@ -102,7 +102,7 @@ CLASS zabaputil_cl_util_http DEFINITION PUBLIC.
 ENDCLASS.
 
 
-CLASS zabaputil_cl_util_http IMPLEMENTATION.
+CLASS zabaputil_cl_http IMPLEMENTATION.
 
   METHOD client_create.
 
@@ -150,12 +150,12 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
         ENDIF.
 
       CATCH cx_root INTO DATA(x).
-        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        RAISE EXCEPTION TYPE zabaputil_cx_error
           EXPORTING val = x.
     ENDTRY.
 
     IF result IS NOT BOUND.
-      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+      RAISE EXCEPTION TYPE zabaputil_cx_error
         EXPORTING val = `HTTP_CLIENT_CREATE_ERROR - check the destination/url configuration`.
     ENDIF.
 
@@ -174,6 +174,7 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     TRY.
 
         ASSIGN lo_client->(`REQUEST`) TO <any>.
+        ASSERT sy-subrc = 0.
         lo_request = <any>.
 
         DATA(lv_method) = CONV string( method ).
@@ -210,11 +211,12 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
           CALL METHOD lo_client->(`CLOSE`)
             EXCEPTIONS
               OTHERS = 1.
-          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          RAISE EXCEPTION TYPE zabaputil_cx_error
             EXPORTING val = |HTTP_COMMUNICATION_ERROR - { lv_message }|.
         ENDIF.
 
         ASSIGN lo_client->(`RESPONSE`) TO <any>.
+        ASSERT sy-subrc = 0.
         lo_response = <any>.
 
         CALL METHOD lo_response->(`GET_CDATA`)
@@ -231,7 +233,7 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
             OTHERS = 1.
 
       CATCH cx_root INTO DATA(x).
-        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        RAISE EXCEPTION TYPE zabaputil_cx_error
           EXPORTING val = x.
     ENDTRY.
 
@@ -247,17 +249,12 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
       FIELD-SYMBOLS <any> TYPE any.
 
       ASSIGN mo_server_onprem->(`RESPONSE`) TO <any>.
+      ASSERT sy-subrc = 0.
       object = <any>.
 
       CALL METHOD object->(`DELETE_COOKIE`)
         EXPORTING
           name = lv_val.
-
-    ELSE.
-
-*      CALL METHOD mo_response_cloud->(`DELETE_COOKIE_AT_CLIENT`)
-*        EXPORTING
-*          name = lv_val.
 
     ENDIF.
 
@@ -273,6 +270,7 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     IF mo_server_onprem IS BOUND.
 
       ASSIGN mo_server_onprem->(`RESPONSE`) TO <any>.
+      ASSERT sy-subrc = 0.
       object = <any>.
 
       CALL METHOD object->(`GET_COOKIE`)
@@ -280,14 +278,6 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
           name  = lv_val
         IMPORTING
           value = result.
-
-    ELSE.
-
-*      CALL METHOD mo_request_cloud->(`GET_COOKIE`)
-*        EXPORTING
-*          i_name  = lv_val
-*        RECEIVING
-*          r_value = result.
 
     ENDIF.
 
@@ -303,6 +293,7 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     IF mo_server_onprem IS BOUND.
 
       ASSIGN mo_server_onprem->(`REQUEST`) TO <any>.
+      ASSERT sy-subrc = 0.
       object = <any>.
 
       CALL METHOD object->(`GET_HEADER_FIELD`)
@@ -333,6 +324,7 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     IF mo_server_onprem IS BOUND.
 
       ASSIGN mo_server_onprem->(`RESPONSE`) TO <any>.
+      ASSERT sy-subrc = 0.
       object = <any>.
 
       CALL METHOD object->(`SET_HEADER_FIELD`)
@@ -374,6 +366,7 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     IF mo_server_onprem IS BOUND.
 
       ASSIGN mo_server_onprem->(`REQUEST`) TO <any>.
+      ASSERT sy-subrc = 0.
       object = <any>.
 
       CALL METHOD object->(`GET_CDATA`)
@@ -398,6 +391,7 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     IF mo_server_onprem IS BOUND.
 
       ASSIGN mo_server_onprem->(`REQUEST`) TO <any>.
+      ASSERT sy-subrc = 0.
       object = <any>.
 
       CALL METHOD object->(`IF_HTTP_REQUEST~GET_METHOD`)
@@ -422,6 +416,7 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     IF mo_server_onprem IS BOUND.
 
       ASSIGN mo_server_onprem->(`RESPONSE`) TO <any>.
+      ASSERT sy-subrc = 0.
       object = <any>.
 
       CALL METHOD object->(`SET_CDATA`)
@@ -448,6 +443,7 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     IF mo_server_onprem IS BOUND.
 
       ASSIGN mo_server_onprem->(`RESPONSE`) TO <any>.
+      ASSERT sy-subrc = 0.
       object = <any>.
 
       CALL METHOD object->(`IF_HTTP_RESPONSE~SET_STATUS`)
@@ -474,11 +470,7 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
         EXPORTING
           stateful = val.
 
-    ELSE.
-
-      "FEATURE IN CLOUD NOT RELEASED
-*      ASSERT 1 = `NO_STATEFUL_FEATURE_IN_CLOUD_ERROR`.
-
+      " stateful sessions are not released in ABAP Cloud - no-op there
     ENDIF.
 
   ENDMETHOD.
@@ -488,7 +480,7 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     result-body     = get_cdata( ).
     result-method   = get_method( ).
     result-path     = get_header_field( `~path` ).
-    result-t_params = zabaputil_cl_util=>url_param_get_tab( get_header_field( `~request_uri` ) ).
+    result-t_params = zabaputil_cl_context=>url_param_get_tab( get_header_field( `~request_uri` ) ).
 
   ENDMETHOD.
 

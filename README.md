@@ -154,10 +154,10 @@ DATA(lr_itab) = zabaputil_cl_util=>itab_get_itab_by_csv( lv_csv ).
 ###### XLSX / Excel
 ```abap
 " Internal table to Excel
-DATA(lv_xlsx) = zabaputil_cl_util=>conv_get_xlsx_by_itab( lt_flights ).
+DATA(lv_xlsx) = zabaputil_cl_util_ext=>conv_get_xlsx_by_itab( lt_flights ).
 
 " Excel to internal table
-zabaputil_cl_util=>conv_get_itab_by_xlsx(
+zabaputil_cl_util_ext=>conv_get_itab_by_xlsx(
     EXPORTING val    = lv_xlsx
     IMPORTING result = lr_data ).
 ```
@@ -242,7 +242,7 @@ DATA(lt_msg)  = zabaputil_cl_util_msg=>msg_get_by_sy( ).
 DATA(lv_mapped) = zabaputil_cl_util_msg=>msg_map( name = `STATUS` ).
 
 " Resolve a T100 message with placeholders
-DATA(lv_t100) = zabaputil_cl_util=>text_get( msgid = `ZMY_MESSAGES`  msgno = `001`  v1 = `42` ).
+DATA(lv_t100) = zabaputil_cl_util_ext=>text_get( msgid = `ZMY_MESSAGES`  msgno = `001`  v1 = `42` ).
 
 " Domain fixed values as text (enum-style)
 DATA(lv_text) = zabaputil_cl_util=>enum_to_text( domain = `ZSTATUS`  value = `A` ). " => 'Active'
@@ -275,13 +275,13 @@ DATA(lv_ms)    = zabaputil_cl_util=>time_measure_stop( lv_start ).
 
 ###### Calendar & Workdays
 ```abap
-DATA(lv_wd)   = zabaputil_cl_util=>cal_get_weekday( sy-datum ).  " 1 = Monday ... 7 = Sunday
-DATA(lv_we)   = zabaputil_cl_util=>cal_is_weekend(  sy-datum ).
-DATA(lv_work) = zabaputil_cl_util=>cal_is_workday(  sy-datum ).  " optional: calendar_id for factory calendars
+DATA(lv_wd)   = zabaputil_cl_util_ext=>cal_get_weekday( sy-datum ).  " 1 = Monday ... 7 = Sunday
+DATA(lv_we)   = zabaputil_cl_util_ext=>cal_is_weekend(  sy-datum ).
+DATA(lv_work) = zabaputil_cl_util_ext=>cal_is_workday(  sy-datum ).  " optional: calendar_id for factory calendars
 
 " Workday arithmetic
-DATA(lv_due)  = zabaputil_cl_util=>cal_add_workdays(   date = sy-datum  days = 5 ).
-DATA(lv_days) = zabaputil_cl_util=>cal_count_workdays( date_from = lv_start_date  date_to = lv_end_date ).
+DATA(lv_due)  = zabaputil_cl_util_ext=>cal_add_workdays(   date = sy-datum  days = 5 ).
+DATA(lv_days) = zabaputil_cl_util_ext=>cal_count_workdays( date_from = lv_start_date  date_to = lv_end_date ).
 ```
 
 ###### Error Handling
@@ -351,53 +351,53 @@ DATA(lv_text)     = lo_log->to_string( ).
 ###### Application Log (BAL)
 ```abap
 " Search application logs
-DATA(lt_logs) = zabaputil_cl_util=>bal_search(
+DATA(lt_logs) = zabaputil_cl_util_ext=>bal_search(
     object    = `ZMY_APP`
     date_from = lv_start_date ).
 
 " Read the latest message / messages of a specific type
-DATA(ls_last)   = zabaputil_cl_util=>bal_read_latest(  object = `ZMY_APP`  subobject = `IMPORT`  id = `RUN1` ).
-DATA(lt_errors) = zabaputil_cl_util=>bal_read_by_type( object = `ZMY_APP`  subobject = `IMPORT`  id = `RUN1`  msg_type = `E` ).
-DATA(lv_count)  = zabaputil_cl_util=>bal_count(        object = `ZMY_APP`  subobject = `IMPORT`  id = `RUN1` ).
+DATA(ls_last)   = zabaputil_cl_util_ext=>bal_read_latest(  object = `ZMY_APP`  subobject = `IMPORT`  id = `RUN1` ).
+DATA(lt_errors) = zabaputil_cl_util_ext=>bal_read_by_type( object = `ZMY_APP`  subobject = `IMPORT`  id = `RUN1`  msg_type = `E` ).
+DATA(lv_count)  = zabaputil_cl_util_ext=>bal_count(        object = `ZMY_APP`  subobject = `IMPORT`  id = `RUN1` ).
 
 " Housekeeping: delete logs older than N days
-zabaputil_cl_util=>bal_delete_before( object = `ZMY_APP`  days = 30 ).
+zabaputil_cl_util_ext=>bal_delete_before( object = `ZMY_APP`  days = 30 ).
 ```
 
 ###### Locks (Enqueue/Dequeue)
 ```abap
 " Set / check / release a lock
-DATA(lv_locked) = zabaputil_cl_util=>lock_set( `ZMY_LOCK_OBJECT` ).
-DATA(lv_is)     = zabaputil_cl_util=>lock_is_locked( `ZMY_LOCK_OBJECT` ).
-DATA(lv_owner)  = zabaputil_cl_util=>lock_get_owner( `ZMY_LOCK_OBJECT` ).
-zabaputil_cl_util=>lock_delete( `ZMY_LOCK_OBJECT` ).
+DATA(lv_locked) = zabaputil_cl_util_ext=>lock_set( `ZMY_LOCK_OBJECT` ).
+DATA(lv_is)     = zabaputil_cl_util_ext=>lock_is_locked( `ZMY_LOCK_OBJECT` ).
+DATA(lv_owner)  = zabaputil_cl_util_ext=>lock_get_owner( `ZMY_LOCK_OBJECT` ).
+zabaputil_cl_util_ext=>lock_delete( `ZMY_LOCK_OBJECT` ).
 
 " Retry until the lock is available (5 retries, 500 ms delay by default)
-DATA(lv_got_it) = zabaputil_cl_util=>lock_set_wait( val = `ZMY_LOCK_OBJECT`  retries = 10 ).
+DATA(lv_got_it) = zabaputil_cl_util_ext=>lock_set_wait( val = `ZMY_LOCK_OBJECT`  retries = 10 ).
 
 " Read current lock entries
-DATA(lt_locks) = zabaputil_cl_util=>lock_read( lock_object = `ZMY_LOCK_OBJECT` ).
+DATA(lt_locks) = zabaputil_cl_util_ext=>lock_read( lock_object = `ZMY_LOCK_OBJECT` ).
 ```
 
 ###### ZIP
 ```abap
 " Pack files into a ZIP archive
-DATA(lv_zip) = zabaputil_cl_util=>zip_pack( VALUE #(
+DATA(lv_zip) = zabaputil_cl_util_ext=>zip_pack( VALUE #(
     ( name = `data.json`  content = lv_json_x )
     ( name = `readme.txt` content = lv_text_x ) ) ).
 
 " Unpack a ZIP archive
-DATA(lt_files) = zabaputil_cl_util=>zip_unpack( lv_zip ). " => name + content per file
+DATA(lt_files) = zabaputil_cl_util_ext=>zip_unpack( lv_zip ). " => name + content per file
 ```
 
 ###### Transport Requests
 ```abap
-DATA(lt_requests) = zabaputil_cl_util=>tr_get_user_requests( ).             " my open requests
-DATA(lt_objects)  = zabaputil_cl_util=>tr_get_objects( `DEVK900123` ).
-DATA(lv_descr)    = zabaputil_cl_util=>tr_get_description( `DEVK900123` ).
-DATA(lv_released) = zabaputil_cl_util=>tr_is_released( `DEVK900123` ).
+DATA(lt_requests) = zabaputil_cl_util_ext=>tr_get_user_requests( ).             " my open requests
+DATA(lt_objects)  = zabaputil_cl_util_ext=>tr_get_objects( `DEVK900123` ).
+DATA(lv_descr)    = zabaputil_cl_util_ext=>tr_get_description( `DEVK900123` ).
+DATA(lv_released) = zabaputil_cl_util_ext=>tr_is_released( `DEVK900123` ).
 
-zabaputil_cl_util=>tr_add_object(
+zabaputil_cl_util_ext=>tr_add_object(
     trkorr   = `DEVK900123`
     object   = `CLAS`
     obj_name = `ZCL_MY_CLASS` ).
@@ -406,23 +406,23 @@ zabaputil_cl_util=>tr_add_object(
 ###### System Utilities
 ```abap
 " Authorization check
-IF zabaputil_cl_util=>auth_check( object = `S_TCODE`  field = `TCD`  value = `SE38` ) = abap_true.
+IF zabaputil_cl_util_ext=>auth_check( object = `S_TCODE`  field = `TCD`  value = `SE38` ) = abap_true.
   " ...
 ENDIF.
 
 " Next number from a number range
-DATA(lv_number) = zabaputil_cl_util=>numrange_get_next( object = `ZMY_NR` ).
+DATA(lv_number) = zabaputil_cl_util_ext=>numrange_get_next( object = `ZMY_NR` ).
 
 " Read change documents
-DATA(lt_changes) = zabaputil_cl_util=>changdoc_read(
+DATA(lt_changes) = zabaputil_cl_util_ext=>changdoc_read(
     objectclass = `ZMY_OBJECT`
     objectid    = lv_object_id ).
 
 " Submit a report as background job
-DATA(lv_job) = zabaputil_cl_util=>job_submit_report( report = `ZMY_REPORT`  variant = `DEFAULT` ).
+DATA(lv_job) = zabaputil_cl_util_ext=>job_submit_report( report = `ZMY_REPORT`  variant = `DEFAULT` ).
 
 " Send an e-mail
-zabaputil_cl_util=>mail_send(
+zabaputil_cl_util_ext=>mail_send(
     to      = `mail@example.com`
     subject = `Import finished`
     body    = `<h1>Done!</h1>`

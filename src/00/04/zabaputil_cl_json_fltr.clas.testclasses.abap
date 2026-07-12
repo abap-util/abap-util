@@ -35,7 +35,7 @@ CLASS ltcl_test IMPLEMENTATION.
 
   METHOD setup.
 
-    mi_filter = zabaputil_cl_util_json_fltr=>create_no_empty_values( ).
+    mi_filter = zabaputil_cl_json_fltr=>create_no_empty_values( ).
 
   ENDMETHOD.
 
