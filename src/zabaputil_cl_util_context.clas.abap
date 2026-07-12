@@ -1994,7 +1994,7 @@ CLASS zabaputil_cl_util_context DEFINITION
       IMPORTING
         val           TYPE clike
         regex         TYPE clike
-        with          TYPE clike
+        new_val       TYPE clike
       RETURNING
         VALUE(result) TYPE string.
 
@@ -4066,11 +4066,16 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD ui5_get_msg_type.
 
-    result = SWITCH #( val
-                       WHEN `E` THEN cs_ui5_msg_type-e
-                       WHEN `S` THEN cs_ui5_msg_type-s
-                       WHEN `W` THEN cs_ui5_msg_type-w
-                       ELSE cs_ui5_msg_type-i ).
+    CASE val.
+      WHEN `E`.
+        result = cs_ui5_msg_type-e.
+      WHEN `S`.
+        result = cs_ui5_msg_type-s.
+      WHEN `W`.
+        result = cs_ui5_msg_type-w.
+      WHEN OTHERS.
+        result = cs_ui5_msg_type-i.
+    ENDCASE.
 
   ENDMETHOD.
 
@@ -10366,7 +10371,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
       result = result && substring( val = lv_val
                                     off = lv_pos
-                                    len = lv_off - lv_pos ) && with.
+                                    len = lv_off - lv_pos ) && new_val.
       lv_pos = lv_off + lv_len.
     ENDDO.
 
@@ -10613,7 +10618,6 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD num_round.
 
-    DATA lv_half TYPE decfloat34 VALUE '0.5'.
     DATA lv_factor TYPE decfloat34 VALUE 1.
 
     DO decimals TIMES.
@@ -10627,14 +10631,22 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     DATA(lv_abs) = val * lv_sign * lv_factor.
     DATA lv_rounded TYPE decfloat34.
+    DATA lv_half TYPE decfloat34 VALUE '0.5'.
+    DATA(lv_mode) = to_upper( CONV string( mode ) ).
 
-    CASE to_upper( mode ).
+    lv_rounded = trunc( lv_abs ).
+
+    CASE lv_mode.
       WHEN `UP`.
-        lv_rounded = ceil( lv_abs ).
+        IF frac( lv_abs ) > 0.
+          lv_rounded = lv_rounded + 1.
+        ENDIF.
       WHEN `DOWN`.
-        lv_rounded = floor( lv_abs ).
+        " truncation is already rounding toward zero
       WHEN OTHERS.
-        lv_rounded = floor( lv_abs + lv_half ).
+        IF frac( lv_abs ) >= lv_half.
+          lv_rounded = lv_rounded + 1.
+        ENDIF.
     ENDCASE.
 
     result = lv_rounded * lv_sign / lv_factor.
@@ -10916,7 +10928,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       ENDDO.
       result = val / lv_factor.
     ELSE.
-      result = val.
+      result = val * lv_factor.
     ENDIF.
 
   ENDMETHOD.
@@ -10941,7 +10953,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       ENDDO.
       result = val * lv_factor.
     ELSE.
-      result = val.
+      result = val * lv_factor.
     ENDIF.
 
   ENDMETHOD.
