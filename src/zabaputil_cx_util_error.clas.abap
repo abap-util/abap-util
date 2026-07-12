@@ -37,7 +37,7 @@ CLASS zabaputil_cx_util_error IMPLEMENTATION.
       CATCH cx_root.
         ms_error-text = val.
     ENDTRY.
-    ms_error-uuid = zabaputil_cl_util=>uuid_get_c32( ).
+    ms_error-uuid = zabaputil_cl_util_context=>uuid_get_c32( ).
 
   ENDMETHOD.
 
@@ -55,7 +55,7 @@ CLASS zabaputil_cx_util_error IMPLEMENTATION.
     IF previous IS BOUND.
       DATA(lo_x) = previous.
       WHILE lo_x IS BOUND.
-        result = result && zabaputil_cl_util=>cv_char_util_newline && lo_x->get_text( ).
+        result = result && zabaputil_cl_util_context=>cv_char_util_newline && lo_x->get_text( ).
         lo_x = lo_x->previous.
       ENDWHILE.
     ENDIF.

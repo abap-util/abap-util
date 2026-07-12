@@ -3,7 +3,7 @@
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
   <asx:values>
    <VSEOCLASS>
-    <CLSNAME>ZABAPUTIL_CL_UTIL</CLSNAME>
+    <CLSNAME>ZABAPUTIL_CL_UTIL_CONTEXT</CLSNAME>
     <LANGU>E</LANGU>
     <DESCRIPT>util</DESCRIPT>
     <STATE>1</STATE>

@@ -13,20 +13,20 @@ CLASS zabaputil_cl_util_msg DEFINITION PUBLIC
       IMPORTING
         name          TYPE clike
         val           TYPE data
-        is_msg        TYPE zabaputil_cl_util=>ty_s_msg
+        is_msg        TYPE zabaputil_cl_util_context=>ty_s_msg
       RETURNING
-        VALUE(result) TYPE zabaputil_cl_util=>ty_s_msg.
+        VALUE(result) TYPE zabaputil_cl_util_context=>ty_s_msg.
 
     CLASS-METHODS msg_get
       IMPORTING
         val           TYPE any
         val2          TYPE any OPTIONAL
       RETURNING
-        VALUE(result) TYPE zabaputil_cl_util=>ty_t_msg.
+        VALUE(result) TYPE zabaputil_cl_util_context=>ty_t_msg.
 
     CLASS-METHODS msg_get_by_sy
       RETURNING
-        VALUE(result) TYPE zabaputil_cl_util=>ty_t_msg.
+        VALUE(result) TYPE zabaputil_cl_util_context=>ty_t_msg.
 
     CLASS-METHODS msg_get_collect
       IMPORTING
@@ -41,7 +41,7 @@ CLASS zabaputil_cl_util_msg DEFINITION PUBLIC
       IMPORTING
         val           TYPE any
       RETURNING
-        VALUE(result) TYPE zabaputil_cl_util=>ty_t_msg.
+        VALUE(result) TYPE zabaputil_cl_util_context=>ty_t_msg.
 
     CLASS-METHODS check_is_rap_struct
       IMPORTING
@@ -54,7 +54,7 @@ CLASS zabaputil_cl_util_msg DEFINITION PUBLIC
         val           TYPE any
         entity_name   TYPE string OPTIONAL
       RETURNING
-        VALUE(result) TYPE zabaputil_cl_util=>ty_t_msg.
+        VALUE(result) TYPE zabaputil_cl_util_context=>ty_t_msg.
 
     CLASS-METHODS msg_get_rap_element
       IMPORTING
@@ -102,7 +102,7 @@ CLASS zabaputil_cl_util_msg DEFINITION PUBLIC
       IMPORTING
         val           TYPE any
       RETURNING
-        VALUE(result) TYPE zabaputil_cl_util=>ty_t_name_value.
+        VALUE(result) TYPE zabaputil_cl_util_context=>ty_t_name_value.
 
     CLASS-METHODS msg_get_rap_fail_text
       IMPORTING
@@ -137,7 +137,7 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
 
   METHOD msg_get_internal.
 
-    DATA(lv_kind) = zabaputil_cl_util=>rtti_get_type_kind( val ).
+    DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( val ).
     CASE lv_kind.
 
       WHEN cl_abap_datadescr=>typekind_table.
@@ -159,9 +159,9 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
           RETURN.
         ENDIF.
 
-        DATA(lt_attri) = zabaputil_cl_util=>rtti_get_t_attri_by_any( val ).
+        DATA(lt_attri) = zabaputil_cl_util_context=>rtti_get_t_attri_by_any( val ).
 
-        DATA(ls_result) = VALUE zabaputil_cl_util=>ty_s_msg( ).
+        DATA(ls_result) = VALUE zabaputil_cl_util_context=>ty_s_msg( ).
         LOOP AT lt_attri REFERENCE INTO DATA(ls_attri).
           ASSIGN COMPONENT ls_attri->name OF STRUCTURE val TO FIELD-SYMBOL(<comp>).
 
@@ -186,7 +186,7 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
         TRY.
             DATA(lx) = CAST cx_root( val ).
             ls_result = VALUE #( type = `E` text = lx->get_text( ) ).
-            DATA(lt_attri_o) = zabaputil_cl_util=>rtti_get_t_attri_by_oref( val ).
+            DATA(lt_attri_o) = zabaputil_cl_util_context=>rtti_get_t_attri_by_oref( val ).
             LOOP AT lt_attri_o REFERENCE INTO DATA(ls_attri_o)
                  WHERE visibility = `U`.
               DATA(lv_name) = ls_attri_o->name.
@@ -228,7 +228,7 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
 
                   CATCH cx_root INTO DATA(lx2).
 
-                    lt_attri_o = zabaputil_cl_util=>rtti_get_t_attri_by_oref( val ).
+                    lt_attri_o = zabaputil_cl_util_context=>rtti_get_t_attri_by_oref( val ).
                     LOOP AT lt_attri_o REFERENCE INTO ls_attri_o
                          WHERE visibility = `U`.
                       lv_name = ls_attri_o->name.
@@ -243,7 +243,7 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
 
       WHEN OTHERS.
 
-        IF zabaputil_cl_util=>rtti_check_clike( val ).
+        IF zabaputil_cl_util_context=>rtti_check_clike( val ).
           INSERT VALUE #( text = val ) INTO TABLE result.
         ENDIF.
     ENDCASE.
@@ -278,7 +278,7 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
 
   METHOD msg_get_by_sy.
 
-    result = msg_get( zabaputil_cl_util=>context_get_sy( ) ).
+    result = msg_get( zabaputil_cl_util_context=>context_get_sy( ) ).
 
   ENDMETHOD.
 
@@ -286,13 +286,13 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
 
     result = concat_lines_of(
       table = VALUE string_table( FOR <r> IN msg_get( val = val val2 = val2 ) ( |- { <r>-text }| ) )
-      sep   = zabaputil_cl_util=>cv_char_util_newline ).
+      sep   = zabaputil_cl_util_context=>cv_char_util_newline ).
 
   ENDMETHOD.
 
   METHOD check_is_rap_struct.
 
-    DATA(lt_attri) = zabaputil_cl_util=>rtti_get_t_attri_by_any( val ).
+    DATA(lt_attri) = zabaputil_cl_util_context=>rtti_get_t_attri_by_any( val ).
 
     LOOP AT lt_attri REFERENCE INTO DATA(ls_attri).
       CASE ls_attri->name.
@@ -305,7 +305,7 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
     LOOP AT lt_attri REFERENCE INTO ls_attri.
       ASSIGN COMPONENT ls_attri->name OF STRUCTURE val TO FIELD-SYMBOL(<tab>).
       CHECK sy-subrc = 0.
-      CHECK zabaputil_cl_util=>rtti_get_type_kind( <tab> ) = cl_abap_datadescr=>typekind_table.
+      CHECK zabaputil_cl_util_context=>rtti_get_type_kind( <tab> ) = cl_abap_datadescr=>typekind_table.
 
       TRY.
           DATA(lo_tab) = CAST cl_abap_tabledescr( cl_abap_typedescr=>describe_by_data( <tab> ) ).
@@ -326,7 +326,7 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
 
   METHOD msg_get_rap.
 
-    DATA(lv_kind) = zabaputil_cl_util=>rtti_get_type_kind( val ).
+    DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( val ).
     IF lv_kind <> cl_abap_datadescr=>typekind_struct1
        AND lv_kind <> cl_abap_datadescr=>typekind_struct2.
       RETURN.
@@ -372,17 +372,17 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    DATA(lt_attri) = zabaputil_cl_util=>rtti_get_t_attri_by_any( val ).
+    DATA(lt_attri) = zabaputil_cl_util_context=>rtti_get_t_attri_by_any( val ).
     LOOP AT lt_attri REFERENCE INTO DATA(ls_attri).
       ASSIGN COMPONENT ls_attri->name OF STRUCTURE val TO FIELD-SYMBOL(<tab>).
       CHECK sy-subrc = 0.
-      CHECK zabaputil_cl_util=>rtti_get_type_kind( <tab> ) = cl_abap_datadescr=>typekind_table.
+      CHECK zabaputil_cl_util_context=>rtti_get_type_kind( <tab> ) = cl_abap_datadescr=>typekind_table.
 
       FIELD-SYMBOLS <ftab> TYPE ANY TABLE.
       ASSIGN <tab> TO <ftab>.
 
       LOOP AT <ftab> ASSIGNING FIELD-SYMBOL(<row>).
-        IF zabaputil_cl_util=>rtti_get_type_kind( <row> ) = cl_abap_datadescr=>typekind_oref.
+        IF zabaputil_cl_util_context=>rtti_get_type_kind( <row> ) = cl_abap_datadescr=>typekind_oref.
           IF <row> IS NOT INITIAL.
             TRY.
                 INSERT LINES OF msg_get( <row> ) INTO TABLE result.
@@ -400,7 +400,7 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
 
   METHOD msg_get_rap_element.
 
-    DATA(lt_attri) = zabaputil_cl_util=>rtti_get_t_attri_by_any( val ).
+    DATA(lt_attri) = zabaputil_cl_util_context=>rtti_get_t_attri_by_any( val ).
     LOOP AT lt_attri REFERENCE INTO DATA(ls_attri).
       CHECK strlen( ls_attri->name ) > 9.
       CHECK ls_attri->name(9) = `%ELEMENT-`.
@@ -428,7 +428,7 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
 
   METHOD msg_get_rap_action.
 
-    DATA(lt_attri) = zabaputil_cl_util=>rtti_get_t_attri_by_any( val ).
+    DATA(lt_attri) = zabaputil_cl_util_context=>rtti_get_t_attri_by_any( val ).
     LOOP AT lt_attri REFERENCE INTO DATA(ls_attri).
       CHECK strlen( ls_attri->name ) > 12.
       CHECK ls_attri->name(12) = `%OP-%ACTION-`.
@@ -471,18 +471,18 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
 
   METHOD msg_get_rap_flatten.
 
-    DATA(lv_kind) = zabaputil_cl_util=>rtti_get_type_kind( val ).
+    DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( val ).
     IF lv_kind <> cl_abap_datadescr=>typekind_struct1
        AND lv_kind <> cl_abap_datadescr=>typekind_struct2.
       RETURN.
     ENDIF.
 
-    DATA(lt_attri) = zabaputil_cl_util=>rtti_get_t_attri_by_any( val ).
+    DATA(lt_attri) = zabaputil_cl_util_context=>rtti_get_t_attri_by_any( val ).
     LOOP AT lt_attri REFERENCE INTO DATA(ls_attri).
       ASSIGN COMPONENT ls_attri->name OF STRUCTURE val TO FIELD-SYMBOL(<comp>).
       CHECK sy-subrc = 0.
 
-      DATA(lv_sub_kind) = zabaputil_cl_util=>rtti_get_type_kind( <comp> ).
+      DATA(lv_sub_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( <comp> ).
       IF lv_sub_kind = cl_abap_datadescr=>typekind_struct1
          OR lv_sub_kind = cl_abap_datadescr=>typekind_struct2.
         DATA(lv_sub) = msg_get_rap_flatten( <comp> ).

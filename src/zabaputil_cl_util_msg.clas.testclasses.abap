@@ -124,7 +124,7 @@ CLASS ltcl_unit_test_msg_mapper IMPLEMENTATION.
 
   METHOD test_get_text_empty.
 
-    DATA ls_empty TYPE zabaputil_cl_util=>ty_s_msg.
+    DATA ls_empty TYPE zabaputil_cl_util_context=>ty_s_msg.
     DATA(lv_text) = zabaputil_cl_util_msg=>msg_get_text( ls_empty ).
 
     cl_abap_unit_assert=>assert_initial( lv_text ).

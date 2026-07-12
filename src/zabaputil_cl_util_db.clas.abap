@@ -95,7 +95,7 @@ CLASS zabaputil_cl_util_db IMPLEMENTATION.
           val = `NO_ENTRY_FOR_HANDLE_EXISTS`.
     ENDIF.
 
-    zabaputil_cl_util=>xml_parse(
+    zabaputil_cl_util_context=>xml_parse(
       EXPORTING
         xml = lv_data
       IMPORTING
@@ -147,7 +147,7 @@ CLASS zabaputil_cl_util_db IMPLEMENTATION.
           val = |NO_ENTRY_FOR_ID_EXISTS: { id }|.
     ENDIF.
 
-    zabaputil_cl_util=>xml_parse(
+    zabaputil_cl_util_context=>xml_parse(
       EXPORTING
         xml = lv_data
       IMPORTING
@@ -172,12 +172,12 @@ CLASS zabaputil_cl_util_db IMPLEMENTATION.
         handle  = handle
         handle2 = handle2
         handle3 = handle3
-        data    = zabaputil_cl_util=>xml_stringify( data ) ).
+        data    = zabaputil_cl_util_context=>xml_stringify( data ) ).
 
     IF lv_id IS NOT INITIAL.
       ls_db-id = lv_id.
     ELSE.
-      ls_db-id = zabaputil_cl_util=>uuid_get_c32( ).
+      ls_db-id = zabaputil_cl_util_context=>uuid_get_c32( ).
     ENDIF.
 
     MODIFY zabaputil_t_91 FROM @ls_db.
