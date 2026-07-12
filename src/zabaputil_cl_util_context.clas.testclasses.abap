@@ -2458,3 +2458,442 @@ CLASS ltcl_source_ops IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+CLASS ltcl_escaping DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+
+    METHODS escape_html_special_chars     FOR TESTING.
+    METHODS escape_html_no_special        FOR TESTING.
+    METHODS escape_json_special_chars     FOR TESTING.
+    METHODS url_encode_unreserved         FOR TESTING.
+    METHODS url_encode_special            FOR TESTING.
+    METHODS url_encode_umlaut             FOR TESTING.
+    METHODS url_decode_simple             FOR TESTING.
+    METHODS url_decode_plus_as_space      FOR TESTING.
+    METHODS url_roundtrip                 FOR TESTING.
+
+ENDCLASS.
+
+CLASS ltcl_escaping IMPLEMENTATION.
+
+  METHOD escape_html_special_chars.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>c_escape_html( `<a href="x">Tom & Jerry's</a>` )
+        exp = `&lt;a href=&quot;x&quot;&gt;Tom &amp; Jerry&#39;s&lt;/a&gt;` ).
+  ENDMETHOD.
+
+  METHOD escape_html_no_special.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>c_escape_html( `hello world` )
+        exp = `hello world` ).
+  ENDMETHOD.
+
+  METHOD escape_json_special_chars.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>c_escape_json( `say "hi" \ end` )
+        exp = `say \"hi\" \\ end` ).
+  ENDMETHOD.
+
+  METHOD url_encode_unreserved.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>url_encode( `Hello-World_1.2~x` )
+        exp = `Hello-World_1.2~x` ).
+  ENDMETHOD.
+
+  METHOD url_encode_special.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>url_encode( `a b&c=d` )
+        exp = `a%20b%26c%3Dd` ).
+  ENDMETHOD.
+
+  METHOD url_encode_umlaut.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>url_encode( `ä` )
+        exp = `%C3%A4` ).
+  ENDMETHOD.
+
+  METHOD url_decode_simple.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>url_decode( `a%20b%26c%3Dd` )
+        exp = `a b&c=d` ).
+  ENDMETHOD.
+
+  METHOD url_decode_plus_as_space.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>url_decode( `a+b` )
+        exp = `a b` ).
+  ENDMETHOD.
+
+  METHOD url_roundtrip.
+    DATA(lv_original) = `Straße 5 / Haus?x=1&y=äöü`.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>url_decode( zabaputil_cl_util_context=>url_encode( lv_original ) )
+        exp = lv_original ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+CLASS ltcl_levenshtein DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+
+    METHODS distance_classic              FOR TESTING.
+    METHODS distance_equal                FOR TESTING.
+    METHODS distance_empty_first          FOR TESTING.
+    METHODS distance_empty_second         FOR TESTING.
+    METHODS distance_single_swap          FOR TESTING.
+
+ENDCLASS.
+
+CLASS ltcl_levenshtein IMPLEMENTATION.
+
+  METHOD distance_classic.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>c_levenshtein( val1 = `kitten`
+                                                        val2 = `sitting` )
+        exp = 3 ).
+  ENDMETHOD.
+
+  METHOD distance_equal.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>c_levenshtein( val1 = `abap`
+                                                        val2 = `abap` )
+        exp = 0 ).
+  ENDMETHOD.
+
+  METHOD distance_empty_first.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>c_levenshtein( val1 = ``
+                                                        val2 = `abc` )
+        exp = 3 ).
+  ENDMETHOD.
+
+  METHOD distance_empty_second.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>c_levenshtein( val1 = `abc`
+                                                        val2 = `` )
+        exp = 3 ).
+  ENDMETHOD.
+
+  METHOD distance_single_swap.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>c_levenshtein( val1 = `flaw`
+                                                        val2 = `lawn` )
+        exp = 2 ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+CLASS ltcl_uuid_conv DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+
+    METHODS c32_to_c36                    FOR TESTING.
+    METHODS c36_to_c32                    FOR TESTING.
+    METHODS c32_to_c22_zero               FOR TESTING.
+    METHODS c22_roundtrip                 FOR TESTING.
+    METHODS c22_length                    FOR TESTING.
+
+ENDCLASS.
+
+CLASS ltcl_uuid_conv IMPLEMENTATION.
+
+  METHOD c32_to_c36.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>uuid_conv_c32_to_c36( `550E8400E29B41D4A716446655440000` )
+        exp = `550E8400-E29B-41D4-A716-446655440000` ).
+  ENDMETHOD.
+
+  METHOD c36_to_c32.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>uuid_conv_c36_to_c32( `550e8400-e29b-41d4-a716-446655440000` )
+        exp = `550E8400E29B41D4A716446655440000` ).
+  ENDMETHOD.
+
+  METHOD c32_to_c22_zero.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>uuid_conv_c32_to_c22( `00000000000000000000000000000000` )
+        exp = `AAAAAAAAAAAAAAAAAAAAAA` ).
+  ENDMETHOD.
+
+  METHOD c22_roundtrip.
+    DATA(lv_c32) = `00112233445566778899AABBCCDDEEFF`.
+    DATA(lv_c22) = zabaputil_cl_util_context=>uuid_conv_c32_to_c22( lv_c32 ).
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>uuid_conv_c22_to_c32( lv_c22 )
+        exp = lv_c32 ).
+  ENDMETHOD.
+
+  METHOD c22_length.
+    DATA(lv_c22) = zabaputil_cl_util_context=>uuid_conv_c32_to_c22( `550E8400E29B41D4A716446655440000` ).
+    cl_abap_unit_assert=>assert_equals(
+        act = strlen( lv_c22 )
+        exp = 22 ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+CLASS ltcl_itab_aggregations DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+
+    TYPES:
+      BEGIN OF ty_s_flight,
+        carrid TYPE string,
+        price  TYPE i,
+      END OF ty_s_flight.
+    TYPES ty_t_flight TYPE STANDARD TABLE OF ty_s_flight WITH EMPTY KEY.
+
+    METHODS get_flights
+      RETURNING
+        VALUE(result) TYPE ty_t_flight.
+
+    METHODS sum_by                        FOR TESTING.
+    METHODS sum_by_unknown_field          FOR TESTING.
+    METHODS distinct                      FOR TESTING.
+    METHODS group_sum_by                  FOR TESTING.
+
+ENDCLASS.
+
+CLASS ltcl_itab_aggregations IMPLEMENTATION.
+
+  METHOD get_flights.
+    result = VALUE #( ( carrid = `LH` price = 100 )
+                      ( carrid = `LH` price = 150 )
+                      ( carrid = `AA` price = 200 )
+                      ( carrid = `LH` price = 50 ) ).
+  ENDMETHOD.
+
+  METHOD sum_by.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>itab_sum_by( tab       = get_flights( )
+                                                      fieldname = `PRICE` )
+        exp = CONV decfloat34( 500 ) ).
+  ENDMETHOD.
+
+  METHOD sum_by_unknown_field.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>itab_sum_by( tab       = get_flights( )
+                                                      fieldname = `DOES_NOT_EXIST` )
+        exp = CONV decfloat34( 0 ) ).
+  ENDMETHOD.
+
+  METHOD distinct.
+    DATA(lt_distinct) = zabaputil_cl_util_context=>itab_distinct( tab       = get_flights( )
+                                                                  fieldname = `CARRID` ).
+    cl_abap_unit_assert=>assert_equals(
+        act = lines( lt_distinct )
+        exp = 2 ).
+    cl_abap_unit_assert=>assert_equals(
+        act = lt_distinct[ 1 ]
+        exp = `LH` ).
+    cl_abap_unit_assert=>assert_equals(
+        act = lt_distinct[ 2 ]
+        exp = `AA` ).
+  ENDMETHOD.
+
+  METHOD group_sum_by.
+    DATA(lt_sums) = zabaputil_cl_util_context=>itab_group_sum_by( tab      = get_flights( )
+                                                                  group_by = `CARRID`
+                                                                  sum_by   = `PRICE` ).
+    cl_abap_unit_assert=>assert_equals(
+        act = lines( lt_sums )
+        exp = 2 ).
+    cl_abap_unit_assert=>assert_equals(
+        act = lt_sums[ 1 ]-n
+        exp = `LH` ).
+    cl_abap_unit_assert=>assert_equals(
+        act = lt_sums[ 1 ]-v
+        exp = `300` ).
+    cl_abap_unit_assert=>assert_equals(
+        act = lt_sums[ 2 ]-n
+        exp = `AA` ).
+    cl_abap_unit_assert=>assert_equals(
+        act = lt_sums[ 2 ]-v
+        exp = `200` ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+CLASS ltcl_num_round DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+
+    METHODS round_half_up                 FOR TESTING.
+    METHODS round_half_up_negative        FOR TESTING.
+    METHODS round_up                      FOR TESTING.
+    METHODS round_down                    FOR TESTING.
+    METHODS round_two_decimals            FOR TESTING.
+
+ENDCLASS.
+
+CLASS ltcl_num_round IMPLEMENTATION.
+
+  METHOD round_half_up.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>num_round( CONV decfloat34( '2.5' ) )
+        exp = CONV decfloat34( 3 ) ).
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>num_round( CONV decfloat34( '2.4' ) )
+        exp = CONV decfloat34( 2 ) ).
+  ENDMETHOD.
+
+  METHOD round_half_up_negative.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>num_round( CONV decfloat34( '-2.5' ) )
+        exp = CONV decfloat34( -3 ) ).
+  ENDMETHOD.
+
+  METHOD round_up.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>num_round( val  = CONV decfloat34( '2.1' )
+                                                    mode = `UP` )
+        exp = CONV decfloat34( 3 ) ).
+  ENDMETHOD.
+
+  METHOD round_down.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>num_round( val  = CONV decfloat34( '2.9' )
+                                                    mode = `DOWN` )
+        exp = CONV decfloat34( 2 ) ).
+  ENDMETHOD.
+
+  METHOD round_two_decimals.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>num_round( val      = CONV decfloat34( '2.345' )
+                                                    decimals = 2 )
+        exp = CONV decfloat34( '2.35' ) ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+CLASS ltcl_mimetype_lang DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+
+    METHODS mimetype_json                 FOR TESTING.
+    METHODS mimetype_xlsx                 FOR TESTING.
+    METHODS mimetype_uppercase            FOR TESTING.
+    METHODS mimetype_unknown              FOR TESTING.
+    METHODS lang_sap_to_iso_german        FOR TESTING.
+    METHODS lang_sap_to_iso_lowercase     FOR TESTING.
+    METHODS lang_iso_to_sap_english       FOR TESTING.
+    METHODS lang_iso_to_sap_uppercase     FOR TESTING.
+
+ENDCLASS.
+
+CLASS ltcl_mimetype_lang IMPLEMENTATION.
+
+  METHOD mimetype_json.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>file_get_mimetype( `data.json` )
+        exp = `application/json` ).
+  ENDMETHOD.
+
+  METHOD mimetype_xlsx.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>file_get_mimetype( `report.xlsx` )
+        exp = `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` ).
+  ENDMETHOD.
+
+  METHOD mimetype_uppercase.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>file_get_mimetype( `IMAGE.PNG` )
+        exp = `image/png` ).
+  ENDMETHOD.
+
+  METHOD mimetype_unknown.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>file_get_mimetype( `file.xyz` )
+        exp = `application/octet-stream` ).
+  ENDMETHOD.
+
+  METHOD lang_sap_to_iso_german.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>lang_sap_to_iso( `D` )
+        exp = `de` ).
+  ENDMETHOD.
+
+  METHOD lang_sap_to_iso_lowercase.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>lang_sap_to_iso( `e` )
+        exp = `en` ).
+  ENDMETHOD.
+
+  METHOD lang_iso_to_sap_english.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>lang_iso_to_sap( `en` )
+        exp = `E` ).
+  ENDMETHOD.
+
+  METHOD lang_iso_to_sap_uppercase.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>lang_iso_to_sap( `DE` )
+        exp = `D` ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+CLASS ltcl_cur_amounts DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+
+    METHODS to_external_zero_decimals     FOR TESTING.
+    METHODS to_external_three_decimals    FOR TESTING.
+    METHODS to_external_two_decimals      FOR TESTING.
+    METHODS to_internal_zero_decimals     FOR TESTING.
+    METHODS roundtrip                     FOR TESTING.
+
+ENDCLASS.
+
+CLASS ltcl_cur_amounts IMPLEMENTATION.
+
+  METHOD to_external_zero_decimals.
+    " JPY-style currency: stored 123.45 means 12345
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>cur_amount_to_external( val      = CONV decfloat34( '123.45' )
+                                                                 decimals = 0 )
+        exp = CONV decfloat34( 12345 ) ).
+  ENDMETHOD.
+
+  METHOD to_external_three_decimals.
+    " BHD-style currency: stored 123.45 means 12.345
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>cur_amount_to_external( val      = CONV decfloat34( '123.45' )
+                                                                 decimals = 3 )
+        exp = CONV decfloat34( '12.345' ) ).
+  ENDMETHOD.
+
+  METHOD to_external_two_decimals.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>cur_amount_to_external( val      = CONV decfloat34( '123.45' )
+                                                                 decimals = 2 )
+        exp = CONV decfloat34( '123.45' ) ).
+  ENDMETHOD.
+
+  METHOD to_internal_zero_decimals.
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>cur_amount_to_internal( val      = CONV decfloat34( 12345 )
+                                                                 decimals = 0 )
+        exp = CONV decfloat34( '123.45' ) ).
+  ENDMETHOD.
+
+  METHOD roundtrip.
+    DATA(lv_val) = CONV decfloat34( '987.65' ).
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>cur_amount_to_internal(
+                  val      = zabaputil_cl_util_context=>cur_amount_to_external( val      = lv_val
+                                                                                decimals = 3 )
+                  decimals = 3 )
+        exp = lv_val ).
+  ENDMETHOD.
+
+ENDCLASS.
