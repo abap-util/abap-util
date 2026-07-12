@@ -23,7 +23,7 @@ abap-util (master, this repo)                     Downstream projects (vendored 
 ┌──────────────────────────────┐
 │ zabaputil_cl_util_context    │  copy + rename   ┌────────────────────────────────────┐
 │  (all utility methods,       │ ───────────────→ │ abap2UI5:                          │
-│   full unit test coverage,   │  trim to used    │  z2ui5_cl_a2ui5_context         │
+│   full unit test coverage,   │  trim to used    │  z2ui5_cl_a2ui5_context            │
 │   linted for 7.02/Standard/  │  methods         │  (src/00/03/, framework subset)    │
 │   Cloud)                     │                  ├────────────────────────────────────┤
 │ zabaputil_cl_util_http       │ ───────────────→ │ popups:                            │
