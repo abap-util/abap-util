@@ -108,6 +108,70 @@ zabaputil_cl_util_context=>xml_parse(
 ```abap
 DATA(lv_uuid_32) = zabaputil_cl_util_context=>uuid_get_c32( ). " => '550E8400E29B41D4A716446655440000'
 DATA(lv_uuid_22) = zabaputil_cl_util_context=>uuid_get_c22( ). " => 'VQ6EAOKbQdSnFkRmVU'
+DATA(lv_uuid_36) = zabaputil_cl_util_context=>uuid_get_c36( ). " => '550E8400-E29B-41D4-A716-446655440000'
+
+" Convert between formats
+DATA(lv_c36) = zabaputil_cl_util_context=>uuid_conv_c32_to_c36( lv_uuid_32 ).
+DATA(lv_c32) = zabaputil_cl_util_context=>uuid_conv_c36_to_c32( lv_c36 ).
+DATA(lv_c22) = zabaputil_cl_util_context=>uuid_conv_c32_to_c22( lv_uuid_32 ).
+```
+
+###### Escaping & URL Encoding
+```abap
+DATA(lv_html) = zabaputil_cl_util_context=>c_escape_html( `Tom & <b>Jerry</b>` ). " => 'Tom &amp; &lt;b&gt;Jerry&lt;/b&gt;'
+DATA(lv_json) = zabaputil_cl_util_context=>c_escape_json( `say "hi"` ).           " => 'say \"hi\"'
+
+DATA(lv_enc) = zabaputil_cl_util_context=>url_encode( `a b&c=ä` ). " => 'a%20b%26c%3D%C3%A4'
+DATA(lv_dec) = zabaputil_cl_util_context=>url_decode( lv_enc ).    " => 'a b&c=ä'
+```
+
+###### Regular Expressions
+PCRE on ABAP Cloud, POSIX on Standard ABAP - same API everywhere.
+```abap
+DATA(lv_match) = zabaputil_cl_util_context=>regex_match(    val = `ID-4711`  regex = `^ID-\d+$` ). " => abap_true
+DATA(lt_nums)  = zabaputil_cl_util_context=>regex_find_all( val = `a1 b22 c333`  regex = `\d+` ).  " => ('1' '22' '333')
+DATA(lv_new)   = zabaputil_cl_util_context=>regex_replace_all(
+    val     = `a1b2`
+    regex   = `\d`
+    new_val = `#` ). " => 'a#b#'
+```
+
+###### Hashing & HMAC
+```abap
+DATA(lv_hash) = zabaputil_cl_util_context=>hash_calculate( `Hello World` ).                   " SHA256 hex string
+DATA(lv_sha1) = zabaputil_cl_util_context=>hash_calculate( val = `Hello`  algorithm = `SHA1` ).
+DATA(lv_hmac) = zabaputil_cl_util_context=>hash_hmac( val = `payload`  key = `secret` ).      " HMAC-SHA256
+```
+
+###### Outbound HTTP Client
+Unified API - `cl_web_http_client` on ABAP Cloud, `cl_http_client` on-premise.
+```abap
+DATA(ls_response) = zabaputil_cl_util_context=>http_get( `https://api.example.com/data` ).
+" => ls_response-code = 200, ls_response-body = '...'
+
+DATA(ls_result) = zabaputil_cl_util_context=>http_post(
+    url          = `https://api.example.com/items`
+    body         = lv_json
+    content_type = `application/json`
+    t_header     = VALUE #( ( n = `Authorization`  v = `Bearer ...` ) ) ).
+```
+
+###### Currency & Units
+```abap
+DATA(lv_decimals) = zabaputil_cl_util_context=>cur_get_decimals( `JPY` ). " => 0 (TCURX / I_Currency)
+
+" Shift internal amounts to their display value and back
+DATA(lv_display)  = zabaputil_cl_util_context=>cur_amount_to_external( val = lv_amount  currency = `JPY` ).
+DATA(lv_internal) = zabaputil_cl_util_context=>cur_amount_to_internal( val = lv_display currency = `JPY` ).
+
+" Unit conversion (UNIT_CONVERSION_SIMPLE / I_UnitOfMeasure)
+DATA(lv_meters) = zabaputil_cl_util_context=>unit_convert( val = CONV decfloat34( 2 )  unit_from = `KM`  unit_to = `M` ).
+```
+
+###### Languages
+```abap
+DATA(lv_iso) = zabaputil_cl_util_context=>lang_sap_to_iso( `D` ).  " => 'de'
+DATA(lv_sap) = zabaputil_cl_util_context=>lang_iso_to_sap( `en` ). " => 'E'
 ```
 
 ###### RTTI
@@ -210,6 +274,11 @@ zabaputil_cl_util_context=>itab_paginate(
 " Count rows grouped by a field
 DATA(lt_counts) = zabaputil_cl_util_context=>itab_count_by( tab = lt_flights  fieldname = `CARRID` ).
 " => [ ( n = 'LH' v = '42' ) ( n = 'AA' v = '17' ) ... ]
+
+" Aggregations
+DATA(lv_total)    = zabaputil_cl_util_context=>itab_sum_by(       tab = lt_flights  fieldname = `PRICE` ).
+DATA(lt_carriers) = zabaputil_cl_util_context=>itab_distinct(     tab = lt_flights  fieldname = `CARRID` ).
+DATA(lt_sums)     = zabaputil_cl_util_context=>itab_group_sum_by( tab = lt_flights  group_by = `CARRID`  sum_by = `PRICE` ).
 ```
 
 ###### Data Compare & Access
@@ -287,6 +356,15 @@ DATA(lv_dat)  = zabaputil_cl_util_context=>conv_string_to_date(   val = `2024-03
 DATA(lv_start) = zabaputil_cl_util_context=>time_measure_start( ).
 " ... do work ...
 DATA(lv_ms)    = zabaputil_cl_util_context=>time_measure_stop( lv_start ).
+
+" Time zones
+DATA(lv_tz) = zabaputil_cl_util_context=>time_get_user_timezone( ).
+zabaputil_cl_util_context=>time_stampl_to_tz(
+    EXPORTING val  = lv_now
+              tz   = `CET`
+    IMPORTING date = lv_date
+              time = lv_time ).
+DATA(lv_stamp) = zabaputil_cl_util_context=>time_stampl_from_tz( date = lv_date  time = lv_time  tz = `CET` ).
 ```
 
 ###### Calendar & Workdays
@@ -321,6 +399,10 @@ ENDTRY.
 DATA(lv_user)  = zabaputil_cl_util_context=>context_get_user_tech( ). " => 'DEVELOPER'
 DATA(lv_cloud) = zabaputil_cl_util_context=>context_check_abap_cloud( ). " => abap_true / abap_false
 DATA(lt_stack) = zabaputil_cl_util_context=>context_get_callstack( ).
+
+" User details - cl_abap_context_info on Cloud, USR01/USER_ADDR/ADR6 on-premise
+DATA(ls_user) = zabaputil_cl_util_context=>context_get_user_info( ).
+" => uname, name_formatted, email, langu, timezone, date_format, decimal_format
 ```
 
 ###### HTTP Handler
@@ -443,6 +525,22 @@ zabaputil_cl_util_context=>mail_send(
     subject = `Import finished`
     body    = `<h1>Done!</h1>`
     html    = abap_true ).
+
+" User parameter defaults (SPA/GPA, table USR05)
+DATA(lv_plant) = zabaputil_cl_util_context=>param_get_user_default( `WRK` ).
+
+" Background job status (table TBTCO)
+DATA(lv_status) = zabaputil_cl_util_context=>job_get_status( jobname = `ZMY_JOB`  jobcount = lv_jobcount ).
+
+" Generic DB access by table name
+DATA(lv_exists) = zabaputil_cl_util_context=>db_check_table_exists( `T000` ).
+DATA(lr_rows)   = zabaputil_cl_util_context=>db_select_by_name( tabname = `T000`  max_rows = 10 ).
+DATA(lv_count)  = zabaputil_cl_util_context=>db_count_by_name( tabname = `T000` ).
+
+" Misc helpers
+DATA(lv_dist) = zabaputil_cl_util_context=>c_levenshtein( val1 = `kitten`  val2 = `sitting` ). " => 3
+DATA(lv_mime) = zabaputil_cl_util_context=>file_get_mimetype( `report.xlsx` ).
+DATA(lv_val)  = zabaputil_cl_util_context=>num_round( val = CONV decfloat34( '2.345' )  decimals = 2 ). " => 2.35
 ```
 
 ###### XML Builder
