@@ -1,7 +1,7 @@
 CLASS ltcl_fake_request DEFINITION FINAL.
   PUBLIC SECTION.
     DATA mv_cdata  TYPE string.
-    DATA mt_header TYPE zabaputil_cl_context=>ty_t_name_value.
+    DATA mt_header TYPE zabaputil_cl_util=>ty_t_name_value.
 
     METHODS get_cdata
       RETURNING
@@ -40,8 +40,8 @@ ENDCLASS.
 CLASS ltcl_fake_response DEFINITION FINAL.
   PUBLIC SECTION.
     DATA mv_cdata          TYPE string.
-    DATA mt_header         TYPE zabaputil_cl_context=>ty_t_name_value.
-    DATA mt_cookie         TYPE zabaputil_cl_context=>ty_t_name_value.
+    DATA mt_header         TYPE zabaputil_cl_util=>ty_t_name_value.
+    DATA mt_cookie         TYPE zabaputil_cl_util=>ty_t_name_value.
     DATA mv_cookie_deleted TYPE string.
 
     METHODS set_cdata
