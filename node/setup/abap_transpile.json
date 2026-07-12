@@ -24,7 +24,10 @@
       {"object": "ZABAPUTIL_CL_AJSON", "class": "ltcl_writer_test", "method": "set_timestampl", "note": "JavaScript Date has millisecond precision, TIMESTAMPL microseconds are lost"},
       {"object": "ZABAPUTIL_CL_AJSON", "class": "ltcl_abap_to_json", "method": "set_value_timestampl", "note": "JavaScript Date has millisecond precision, TIMESTAMPL microseconds are lost"},
       {"object": "ZABAPUTIL_CL_UTIL_EXT", "class": "ltcl_zip_ops", "method": "roundtrip", "note": "CL_ABAP_ZIP=>LOAD is not implemented in the open-abap transpiler runtime"},
-      {"object": "ZABAPUTIL_CL_UTIL_EXT", "class": "ltcl_source_ops", "method": "source_get_method_basic", "note": "CL_OO_FACTORY stub lacks the IF_OO_CLIF_SOURCE_FACTORY interface and REPOSRC is not populated in the NodeJS runtime"}
+      {"object": "ZABAPUTIL_CL_UTIL_EXT", "class": "ltcl_source_ops", "method": "source_get_method_basic", "note": "CL_OO_FACTORY stub lacks the IF_OO_CLIF_SOURCE_FACTORY interface and REPOSRC is not populated in the NodeJS runtime"},
+      {"object": "ZABAPUTIL_CL_UTIL_EXT", "class": "ltcl_rtti_ext", "method": "dfies_by_table_basic", "note": "table Z2UI5_T_01 belongs to the abap2UI5 framework and is not part of the abap-util mirror"},
+      {"object": "ZABAPUTIL_CL_UTIL_EXT", "class": "ltcl_rtti_ext", "method": "dfies_by_table_has_fields", "note": "table Z2UI5_T_01 belongs to the abap2UI5 framework and is not part of the abap-util mirror"},
+      {"object": "ZABAPUTIL_CL_UTIL_EXT", "class": "ltcl_rtti_ext", "method": "table_descr_basic", "note": "table Z2UI5_T_01 belongs to the abap2UI5 framework and is not part of the abap-util mirror"}
     ]
   }
 }
