@@ -2067,6 +2067,32 @@ CLASS zabaputil_cl_util_context DEFINITION
 
   PRIVATE SECTION.
 
+    CLASS-METHODS rtti_get_classes_intf_cloud
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE ty_t_classes.
+
+    CLASS-METHODS rtti_get_classes_intf_std
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE ty_t_classes.
+
+    CLASS-METHODS rtti_get_dtel_texts_by_ddic
+      IMPORTING
+        name        TYPE string
+      EXPORTING
+        texts       TYPE ty_s_data_element_text
+        do_fallback TYPE abap_bool.
+
+    CLASS-METHODS rtti_get_dtel_texts_by_xco
+      IMPORTING
+        name        TYPE string
+      EXPORTING
+        texts       TYPE ty_s_data_element_text
+        do_fallback TYPE abap_bool.
+
     TYPES:
       BEGIN OF ty_s_bool_cache,
         absolute_name TYPE string,
@@ -4879,243 +4905,269 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD rtti_get_classes_impl_intf.
 
+    IF context_check_abap_cloud( ).
+      result = rtti_get_classes_intf_cloud( val ).
+    ELSE.
+      result = rtti_get_classes_intf_std( val ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD rtti_get_classes_intf_cloud.
+
     DATA obj TYPE REF TO object.
     FIELD-SYMBOLS <any> TYPE any.
     DATA lt_implementation_names TYPE string_table.
+    DATA BEGIN OF ls_clskey.
+    DATA clsname TYPE c LENGTH 30.
+    DATA END OF ls_clskey.
+    DATA xco_cp_abap         TYPE c LENGTH 11.
+    DATA implementation_name LIKE LINE OF lt_implementation_names.
+    DATA ls_class            LIKE LINE OF result.
+
+    ls_clskey-clsname = val.
+
+    xco_cp_abap = `XCO_CP_ABAP`.
+    CALL METHOD (xco_cp_abap)=>interface
+      EXPORTING
+        iv_name      = ls_clskey-clsname
+      RECEIVING
+        ro_interface = obj.
+
+    ASSIGN obj->(`IF_XCO_AO_INTERFACE~IMPLEMENTATIONS`) TO <any>.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE cx_sy_dyn_call_illegal_class.
+    ENDIF.
+    obj = <any>.
+
+    ASSIGN obj->(`IF_XCO_INTF_IMPLEMENTATIONS_FC~ALL`) TO <any>.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE cx_sy_dyn_call_illegal_class.
+    ENDIF.
+    obj = <any>.
+
+    CALL METHOD obj->(`IF_XCO_INTF_IMPLEMENTATIONS~GET_NAMES`)
+      RECEIVING
+        rt_names = lt_implementation_names.
+
+    LOOP AT lt_implementation_names INTO implementation_name.
+
+      ls_class-classname   = implementation_name.
+      ls_class-description = rtti_get_class_descr_on_cloud( implementation_name ).
+      INSERT ls_class INTO TABLE result.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD rtti_get_classes_intf_std.
+
     TYPES BEGIN OF ty_s_impl.
-    TYPES   clsname    TYPE c LENGTH 30.
-    TYPES   refclsname TYPE c LENGTH 30.
+    TYPES clsname    TYPE c LENGTH 30.
+    TYPES refclsname TYPE c LENGTH 30.
     TYPES END OF ty_s_impl.
-    DATA lt_impl TYPE STANDARD TABLE OF ty_s_impl WITH DEFAULT KEY.
+    DATA lt_impl TYPE STANDARD TABLE OF ty_s_impl WITH EMPTY KEY.
     TYPES BEGIN OF ty_s_key.
-    TYPES   intkey TYPE c LENGTH 30.
+    TYPES intkey TYPE c LENGTH 30.
     TYPES END OF ty_s_key.
     DATA ls_key TYPE ty_s_key.
     DATA BEGIN OF ls_clskey.
-    DATA   clsname TYPE c LENGTH 30.
+    DATA clsname TYPE c LENGTH 30.
     DATA END OF ls_clskey.
-    DATA class               TYPE REF TO data.
-    DATA xco_cp_abap         TYPE c LENGTH 11.
-    DATA temp3               TYPE ty_t_classes.
-    DATA implementation_name LIKE LINE OF lt_implementation_names.
-    DATA temp4               LIKE LINE OF temp3.
-
-    DATA type                TYPE c LENGTH 12.
+    DATA class    TYPE REF TO data.
+    DATA type     TYPE c LENGTH 12.
     FIELD-SYMBOLS <class> TYPE data.
-    DATA temp5   LIKE LINE OF lt_impl.
-    DATA lr_impl LIKE REF TO temp5.
+    DATA lr_impl  TYPE REF TO ty_s_impl.
     FIELD-SYMBOLS <description> TYPE any.
-    DATA temp6 TYPE ty_s_class_descr.
+    DATA ls_class TYPE ty_s_class_descr.
+    DATA lv_fm    TYPE string.
 
-    IF context_check_abap_cloud( ).
+    ls_key-intkey = val.
 
-      ls_clskey-clsname = val.
+    lv_fm = `SEO_INTERFACE_IMPLEM_GET_ALL`.
+    CALL FUNCTION lv_fm
+      EXPORTING
+        intkey        = ls_key
+      IMPORTING
+        impkeys       = lt_impl
+      EXCEPTIONS
+        error_message = 1
+        OTHERS        = 2.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
 
-      xco_cp_abap = `XCO_CP_ABAP`.
-      CALL METHOD (xco_cp_abap)=>interface
-        EXPORTING
-          iv_name      = ls_clskey-clsname
-        RECEIVING
-          ro_interface = obj.
+    type = `SEOC_CLASS_R`.
+    CREATE DATA class TYPE (type).
 
-      ASSIGN obj->(`IF_XCO_AO_INTERFACE~IMPLEMENTATIONS`) TO <any>.
-      IF sy-subrc <> 0.
-        RAISE EXCEPTION TYPE cx_sy_dyn_call_illegal_class.
-      ENDIF.
-      obj = <any>.
+    ASSIGN class->* TO <class>.
 
-      ASSIGN obj->(`IF_XCO_INTF_IMPLEMENTATIONS_FC~ALL`) TO <any>.
-      IF sy-subrc <> 0.
-        RAISE EXCEPTION TYPE cx_sy_dyn_call_illegal_class.
-      ENDIF.
-      obj = <any>.
+    LOOP AT lt_impl REFERENCE INTO lr_impl.
 
-      CALL METHOD obj->(`IF_XCO_INTF_IMPLEMENTATIONS~GET_NAMES`)
-        RECEIVING
-          rt_names = lt_implementation_names.
+      CLEAR <class>.
 
-      CLEAR temp3.
+      ls_clskey-clsname = lr_impl->clsname.
 
-      LOOP AT lt_implementation_names INTO implementation_name.
-
-        temp4-classname   = implementation_name.
-        temp4-description = rtti_get_class_descr_on_cloud( implementation_name ).
-        INSERT temp4 INTO TABLE temp3.
-      ENDLOOP.
-      result = temp3.
-
-    ELSE.
-
-      ls_key-intkey = val.
-
-      DATA lv_fm               TYPE string.
-      lv_fm = `SEO_INTERFACE_IMPLEM_GET_ALL`.
+      lv_fm = `SEO_CLASS_READ`.
       CALL FUNCTION lv_fm
         EXPORTING
-          intkey        = ls_key
+          clskey        = ls_clskey
         IMPORTING
-          impkeys       = lt_impl
+          class         = <class>
         EXCEPTIONS
           error_message = 1
           OTHERS        = 2.
       IF sy-subrc <> 0.
-        RETURN.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error.
       ENDIF.
 
-      type = `SEOC_CLASS_R`.
-      CREATE DATA class TYPE (type).
+      ASSIGN
+        COMPONENT `DESCRIPT`
+        OF STRUCTURE <class>
+        TO <description>.
+      ASSERT sy-subrc = 0.
 
-      ASSIGN class->* TO <class>.
-
-      LOOP AT lt_impl REFERENCE INTO lr_impl.
-
-        CLEAR <class>.
-
-        ls_clskey-clsname = lr_impl->clsname.
-
-        lv_fm = `SEO_CLASS_READ`.
-        CALL FUNCTION lv_fm
-          EXPORTING
-            clskey        = ls_clskey
-          IMPORTING
-            class         = <class>
-          EXCEPTIONS
-            error_message = 1
-            OTHERS        = 2.
-        IF sy-subrc <> 0.
-          RAISE EXCEPTION TYPE zabaputil_cx_util_error.
-        ENDIF.
-
-        ASSIGN
-          COMPONENT `DESCRIPT`
-          OF STRUCTURE <class>
-          TO <description>.
-        ASSERT sy-subrc = 0.
-
-        CLEAR temp6.
-        temp6-classname   = lr_impl->clsname.
-        temp6-description = <description>.
-        INSERT
-          temp6
-          INTO TABLE result.
-      ENDLOOP.
-
-    ENDIF.
+      CLEAR ls_class.
+      ls_class-classname   = lr_impl->clsname.
+      ls_class-description = <description>.
+      INSERT
+        ls_class
+        INTO TABLE result.
+    ENDLOOP.
 
   ENDMETHOD.
 
   METHOD rtti_get_data_element_texts.
 
-    DATA ddic_ref     TYPE REF TO data.
-    DATA data_element TYPE REF TO object.
-    DATA content      TYPE REF TO object.
+    DATA data_element_name TYPE string.
+    DATA lv_do_fallback    TYPE abap_bool.
+
+    data_element_name = val.
+
+    TRY.
+        rtti_get_dtel_texts_by_ddic( EXPORTING name        = data_element_name
+                                     IMPORTING texts       = result
+                                               do_fallback = lv_do_fallback ).
+      CATCH cx_root.
+        rtti_get_dtel_texts_by_xco( EXPORTING name        = data_element_name
+                                    IMPORTING texts       = result
+                                              do_fallback = lv_do_fallback ).
+    ENDTRY.
+
+    IF lv_do_fallback = abap_true AND result IS INITIAL.
+      result-header = val.
+      result-long = val.
+      result-medium = val.
+      result-short = val.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD rtti_get_dtel_texts_by_ddic.
+
+    DATA ddic_ref TYPE REF TO data.
     DATA: BEGIN OF ddic,
             reptext   TYPE string,
             scrtext_s TYPE string,
             scrtext_m TYPE string,
             scrtext_l TYPE string,
           END OF ddic.
-    DATA exists            TYPE abap_bool.
-
-    DATA data_element_name TYPE string.
-    DATA temp7             TYPE REF TO cl_abap_structdescr.
-    DATA struct_desrc      LIKE temp7.
+    DATA struct_desrc TYPE REF TO cl_abap_structdescr.
     FIELD-SYMBOLS <ddic> TYPE data.
-    DATA lo_typedescr           TYPE REF TO cl_abap_typedescr.
-    DATA temp8                  TYPE REF TO cl_abap_datadescr.
-    DATA data_descr             LIKE temp8.
+    DATA lo_typedescr TYPE REF TO cl_abap_typedescr.
+    DATA data_descr   TYPE REF TO cl_abap_datadescr.
 
-    data_element_name = val.
+    CLEAR texts.
+    do_fallback = abap_false.
+
+    cl_abap_typedescr=>describe_by_name( `T100` ).
+
+    struct_desrc ?= cl_abap_structdescr=>describe_by_name( `DFIES` ).
+
+    CREATE DATA ddic_ref TYPE HANDLE struct_desrc.
+
+    ASSIGN ddic_ref->* TO <ddic>.
+    ASSERT sy-subrc = 0.
+
+    cl_abap_elemdescr=>describe_by_name( EXPORTING  p_name     = name
+                                         RECEIVING p_descr_ref = lo_typedescr
+                                         EXCEPTIONS OTHERS     = 1 ).
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    data_descr ?= lo_typedescr.
+
+    CALL METHOD data_descr->(`GET_DDIC_FIELD`)
+      RECEIVING
+        p_flddescr   = <ddic>
+      EXCEPTIONS
+        not_found    = 1
+        no_ddic_type = 2
+        OTHERS       = 3.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    MOVE-CORRESPONDING <ddic> TO ddic.
+    texts-header = ddic-reptext.
+    texts-short  = ddic-scrtext_s.
+    texts-medium = ddic-scrtext_m.
+    texts-long   = ddic-scrtext_l.
+    do_fallback  = abap_true.
+
+  ENDMETHOD.
+
+  METHOD rtti_get_dtel_texts_by_xco.
+
+    DATA data_element TYPE REF TO object.
+    DATA content      TYPE REF TO object.
+    DATA exists       TYPE abap_bool.
+    DATA lv_xco_cp_abap_dictionary TYPE string.
+
+    CLEAR texts.
+    do_fallback = abap_false.
 
     TRY.
-        cl_abap_typedescr=>describe_by_name( `T100` ).
-
-        temp7 ?= cl_abap_structdescr=>describe_by_name( `DFIES` ).
-
-        struct_desrc = temp7.
-
-        CREATE DATA ddic_ref TYPE HANDLE struct_desrc.
-
-        ASSIGN ddic_ref->* TO <ddic>.
-        ASSERT sy-subrc = 0.
-
-        cl_abap_elemdescr=>describe_by_name( EXPORTING  p_name      = data_element_name
-                                             RECEIVING  p_descr_ref = lo_typedescr
-                                             EXCEPTIONS OTHERS      = 1 ).
-        IF sy-subrc <> 0.
-          RETURN.
-        ENDIF.
-
-        temp8 ?= lo_typedescr.
-
-        data_descr = temp8.
-
-        CALL METHOD data_descr->(`GET_DDIC_FIELD`)
+        lv_xco_cp_abap_dictionary = `XCO_CP_ABAP_DICTIONARY`.
+        CALL METHOD (lv_xco_cp_abap_dictionary)=>(`DATA_ELEMENT`)
+          EXPORTING
+            iv_name         = name
           RECEIVING
-            p_flddescr   = <ddic>
-          EXCEPTIONS
-            not_found    = 1
-            no_ddic_type = 2
-            OTHERS       = 3.
-        IF sy-subrc <> 0.
+            ro_data_element = data_element.
+
+        CALL METHOD data_element->(`IF_XCO_AD_DATA_ELEMENT~EXISTS`)
+          RECEIVING
+            rv_exists = exists.
+
+        IF exists = abap_false.
           RETURN.
         ENDIF.
 
-        MOVE-CORRESPONDING <ddic> TO ddic.
-        result-header = ddic-reptext.
-        result-short  = ddic-scrtext_s.
-        result-medium = ddic-scrtext_m.
-        result-long   = ddic-scrtext_l.
+        CALL METHOD data_element->(`IF_XCO_AD_DATA_ELEMENT~CONTENT`)
+          RECEIVING
+            ro_content = content.
+
+        CALL METHOD content->(`IF_XCO_DTEL_CONTENT~GET_HEADING_FIELD_LABEL`)
+          RECEIVING
+            rs_heading_field_label = texts-header.
+
+        CALL METHOD content->(`IF_XCO_DTEL_CONTENT~GET_SHORT_FIELD_LABEL`)
+          RECEIVING
+            rs_short_field_label = texts-short.
+
+        CALL METHOD content->(`IF_XCO_DTEL_CONTENT~GET_MEDIUM_FIELD_LABEL`)
+          RECEIVING
+            rs_medium_field_label = texts-medium.
+
+        CALL METHOD content->(`IF_XCO_DTEL_CONTENT~GET_LONG_FIELD_LABEL`)
+          RECEIVING
+            rs_long_field_label = texts-long.
+
+        do_fallback = abap_true.
 
       CATCH cx_root.
-        TRY.
-            DATA lv_xco_cp_abap_dictionary TYPE string.
-            lv_xco_cp_abap_dictionary = `XCO_CP_ABAP_DICTIONARY`.
-            CALL METHOD (lv_xco_cp_abap_dictionary)=>(`DATA_ELEMENT`)
-              EXPORTING
-                iv_name         = data_element_name
-              RECEIVING
-                ro_data_element = data_element.
-
-            CALL METHOD data_element->(`IF_XCO_AD_DATA_ELEMENT~EXISTS`)
-              RECEIVING
-                rv_exists = exists.
-
-            IF exists = abap_false.
-              RETURN.
-            ENDIF.
-
-            CALL METHOD data_element->(`IF_XCO_AD_DATA_ELEMENT~CONTENT`)
-              RECEIVING
-                ro_content = content.
-
-            CALL METHOD content->(`IF_XCO_DTEL_CONTENT~GET_HEADING_FIELD_LABEL`)
-              RECEIVING
-                rs_heading_field_label = result-header.
-
-            CALL METHOD content->(`IF_XCO_DTEL_CONTENT~GET_SHORT_FIELD_LABEL`)
-              RECEIVING
-                rs_short_field_label = result-short.
-
-            CALL METHOD content->(`IF_XCO_DTEL_CONTENT~GET_MEDIUM_FIELD_LABEL`)
-              RECEIVING
-                rs_medium_field_label = result-medium.
-
-            CALL METHOD content->(`IF_XCO_DTEL_CONTENT~GET_LONG_FIELD_LABEL`)
-              RECEIVING
-                rs_long_field_label = result-long.
-
-          CATCH cx_root INTO DATA(x).
-            DATA(error) = x->get_text( ).
-        ENDTRY.
+        do_fallback = abap_true.
     ENDTRY.
-
-    IF result IS INITIAL.
-      result-header = val.
-      result-long = val.
-      result-medium = val.
-      result-short = val.
-    ENDIF.
 
   ENDMETHOD.
 
