@@ -12,36 +12,40 @@ abap-util provides utility functions for ABAP as class-based methods — strings
 **Language:** English — all code, comments, commit messages, PRs, issues, documentation, and communication must be in English.
 **Documentation:** https://abap-util.github.io/docs/
 
-## The Master/Copy Principle (Single Source of Truth)
+## The Master-Catalog Principle (Superset of All Methods)
 
 This is the most important concept in this repository. Read it before changing anything.
 
-**abap-util is the master repository for platform-abstraction utilities. Downstream projects do not install it as a dependency — they embed a renamed, trimmed copy of the classes they need.**
+**abap-util is the master catalog for platform-abstraction utilities: it contains all available utility classes with all available methods. Downstream projects do not install it as a dependency — each project decides which classes it needs and embeds a renamed copy of exactly those classes.**
 
 ```
-abap-util (master, this repo)                     Downstream projects (vendored copies)
+abap-util (master catalog, this repo)             Downstream projects (vendored copies)
 ┌──────────────────────────────┐
 │ zabaputil_cl_util_context    │  copy + rename   ┌────────────────────────────────────┐
-│  (all utility methods,       │ ───────────────→ │ abap2UI5:                          │
-│   full unit test coverage,   │  trim to used    │  z2ui5_cl_a2ui5_context            │
-│   linted for 7.02/Standard/  │  methods         │  (src/00/03/, framework subset)    │
-│   Cloud)                     │                  ├────────────────────────────────────┤
+│  (ALL utility methods,       │ ───────────────→ │ abap2UI5:                          │
+│   full unit test coverage,   │  context class:  │  z2ui5_cl_a2ui5_context            │
+│   linted for 7.02/Standard/  │  trim to used    │  (src/00/03/, framework subset)    │
+│   Cloud)                     │  methods         ├────────────────────────────────────┤
 │ zabaputil_cl_util_http       │ ───────────────→ │ popups:                            │
-│ zabaputil_cx_error           │                  │  z2ui5_cl_popup_context            │
-│ ...                          │                  │  (src/00/, popup subset)           │
+│ zabaputil_cx_error           │  other classes:  │  z2ui5_cl_popup_context            │
+│ ...                          │  copy as-is      │  (src/00/, popup subset)           │
 └──────────────────────────────┘                  └────────────────────────────────────┘
+        ↑                                                          │
+        └── periodic AI sync-back: methods added locally in the ───┘
+            consumers' context classes are merged into abap-util,
+            so the master stays the superset of all methods
 ```
 
 **Why copies instead of a dependency:**
 - abapGit has no dependency management — a hard dependency would force installation order and version pinning on every user. Copies keep every consumer "clone and go".
 - Namespace isolation: multiple projects (even on different versions of the utils) can coexist in one system without conflicts.
-- Each consumer only carries the methods it actually uses instead of the full class.
+- The context-class copy only carries the methods the project actually uses instead of the full class.
 
-**Rules:**
-1. **All development happens here first.** Bug fixes and new functionality are implemented and unit-tested in this repository, then propagated to the downstream copies. Never accept a change that only exists in a copy.
-2. **A copy may differ from the master in exactly two ways:** the class name (project namespace, e.g. `z2ui5_cl_a2ui5_context`) and the set of methods (trimmed to what the project uses). Method implementations must stay textually identical to the master.
-3. **Trimming must include the closure:** when a public method is copied, every private/protected helper it calls (transitively) must be copied with it.
-4. **When a consumer needs a method that is not in its copy yet,** copy it (with its helper closure) from the current master state here — do not re-implement it downstream.
+**How the cycle works:**
+1. **Class-level selection:** every project decides which utility classes it needs and vendors a renamed copy of exactly those classes.
+2. **Method-level trimming — context class only:** the copy of `zabaputil_cl_util_context` is additionally reduced at method level to the methods the project actually uses. Trimming must keep the closure: every private/protected helper a kept method calls (transitively) stays in the copy. All other vendored classes are copied as-is.
+3. **New methods are developed locally.** When a project needs a utility method during development that its context-class copy does not have, it is simply written directly into the project's local context class — no upstream round-trip is required. (If the method already exists in this catalog, copy it from here with its helper closure instead of re-implementing it.)
+4. **Periodic AI sync-back:** every few weeks an AI compares abap-util with all consumers' context classes and merges methods that were added downstream into this repository — so abap-util always converges back to the superset of all methods, unit-tested and linted for all targets, and every other consumer can pick them up from here.
 5. **Multi-environment compatibility is non-negotiable:** every method must work on NW 7.02, Standard ABAP, and ABAP Cloud, because any consumer may run on any of these targets. Environment-specific behavior is branched via `context_check_abap_cloud( )` and dynamic calls so the code compiles everywhere.
 
 ## Repository Structure
@@ -80,7 +84,7 @@ CI lints against all three targets (`ABAP_702.yaml`, `ABAP_STANDARD.yaml`, `ABAP
 ## Rules for AI Assistants
 
 1. **Do not modify `src/00/01/` (ajson) and `src/00/02/` (S-RTTI)** — mirrored from external projects.
-2. **Never break the master/copy contract** (see above): changes land here first, copies stay textually identical per method, tests live here.
+2. **Never break the master-catalog contract** (see above): this repository must remain the superset of all utility methods across all consumers; methods added downstream are merged back here by the periodic AI sync, and unit tests live here.
 3. **Always run `npx abaplint`** before considering changes complete.
 4. **Multi-environment compatibility** — code must work on NW 7.02, Standard ABAP, and ABAP Cloud. No direct use of on-premise-only or cloud-only APIs without a dynamic-call branch.
 5. **String literals use backticks** (`` ` ``), not single quotes; `xsdbool()` for booleans; `NEW #()` instead of `CREATE OBJECT`.
