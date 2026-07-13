@@ -99,6 +99,18 @@ CLASS zabaputil_cl_util_http DEFINITION PUBLIC.
   PROTECTED SECTION.
 
   PRIVATE SECTION.
+
+    DATA mo_request_onprem  TYPE REF TO object.
+    DATA mo_response_onprem TYPE REF TO object.
+
+    METHODS get_request_onprem
+      RETURNING
+        VALUE(result) TYPE REF TO object.
+
+    METHODS get_response_onprem
+      RETURNING
+        VALUE(result) TYPE REF TO object.
+
 ENDCLASS.
 
 
@@ -243,11 +255,7 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
     IF mo_server_onprem IS BOUND.
 
-      DATA object TYPE REF TO object.
-      FIELD-SYMBOLS <any> TYPE any.
-
-      ASSIGN mo_server_onprem->(`RESPONSE`) TO <any>.
-      object = <any>.
+      DATA(object) = get_response_onprem( ).
 
       CALL METHOD object->(`DELETE_COOKIE`)
         EXPORTING
@@ -265,15 +273,11 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
   METHOD get_response_cookie.
 
-    DATA object TYPE REF TO object.
-    FIELD-SYMBOLS <any> TYPE any.
-
     DATA(lv_val) = CONV string( val ).
 
     IF mo_server_onprem IS BOUND.
 
-      ASSIGN mo_server_onprem->(`RESPONSE`) TO <any>.
-      object = <any>.
+      DATA(object) = get_response_onprem( ).
 
       CALL METHOD object->(`GET_COOKIE`)
         EXPORTING
@@ -295,15 +299,11 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
   METHOD get_header_field.
 
-    DATA object TYPE REF TO object.
-    FIELD-SYMBOLS <any> TYPE any.
-
     DATA(lv_val) = CONV string( val ).
 
     IF mo_server_onprem IS BOUND.
 
-      ASSIGN mo_server_onprem->(`REQUEST`) TO <any>.
-      object = <any>.
+      DATA(object) = get_request_onprem( ).
 
       CALL METHOD object->(`GET_HEADER_FIELD`)
         EXPORTING
@@ -325,15 +325,11 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
   METHOD set_header_field.
 
-    DATA object TYPE REF TO object.
-    FIELD-SYMBOLS <any> TYPE any.
-
     DATA(lv_n) = CONV string( n ).
     DATA(lv_v) = CONV string( v ).
     IF mo_server_onprem IS BOUND.
 
-      ASSIGN mo_server_onprem->(`RESPONSE`) TO <any>.
-      object = <any>.
+      DATA(object) = get_response_onprem( ).
 
       CALL METHOD object->(`SET_HEADER_FIELD`)
         EXPORTING
@@ -368,13 +364,9 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
   METHOD get_cdata.
 
-    DATA object TYPE REF TO object.
-    FIELD-SYMBOLS <any> TYPE any.
-
     IF mo_server_onprem IS BOUND.
 
-      ASSIGN mo_server_onprem->(`REQUEST`) TO <any>.
-      object = <any>.
+      DATA(object) = get_request_onprem( ).
 
       CALL METHOD object->(`GET_CDATA`)
         RECEIVING
@@ -392,13 +384,9 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
   METHOD get_method.
 
-    DATA object TYPE REF TO object.
-    FIELD-SYMBOLS <any> TYPE any.
-
     IF mo_server_onprem IS BOUND.
 
-      ASSIGN mo_server_onprem->(`REQUEST`) TO <any>.
-      object = <any>.
+      DATA(object) = get_request_onprem( ).
 
       CALL METHOD object->(`IF_HTTP_REQUEST~GET_METHOD`)
         RECEIVING
@@ -416,13 +404,9 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
   METHOD set_cdata.
 
-    DATA object TYPE REF TO object.
-    FIELD-SYMBOLS <any> TYPE any.
-
     IF mo_server_onprem IS BOUND.
 
-      ASSIGN mo_server_onprem->(`RESPONSE`) TO <any>.
-      object = <any>.
+      DATA(object) = get_response_onprem( ).
 
       CALL METHOD object->(`SET_CDATA`)
         EXPORTING
@@ -440,15 +424,11 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
   METHOD set_status.
 
-    DATA object TYPE REF TO object.
-    FIELD-SYMBOLS <any> TYPE any.
-
     DATA(lv_reason) = CONV string( reason ).
 
     IF mo_server_onprem IS BOUND.
 
-      ASSIGN mo_server_onprem->(`RESPONSE`) TO <any>.
-      object = <any>.
+      DATA(object) = get_response_onprem( ).
 
       CALL METHOD object->(`IF_HTTP_RESPONSE~SET_STATUS`)
         EXPORTING
@@ -489,6 +469,32 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     result-method   = get_method( ).
     result-path     = get_header_field( `~path` ).
     result-t_params = zabaputil_cl_util_context=>url_param_get_tab( get_header_field( `~request_uri` ) ).
+
+  ENDMETHOD.
+
+  METHOD get_request_onprem.
+
+    FIELD-SYMBOLS <any> TYPE any.
+
+    IF mo_request_onprem IS NOT BOUND.
+      ASSIGN mo_server_onprem->(`REQUEST`) TO <any>.
+      mo_request_onprem = <any>.
+    ENDIF.
+
+    result = mo_request_onprem.
+
+  ENDMETHOD.
+
+  METHOD get_response_onprem.
+
+    FIELD-SYMBOLS <any> TYPE any.
+
+    IF mo_response_onprem IS NOT BOUND.
+      ASSIGN mo_server_onprem->(`RESPONSE`) TO <any>.
+      mo_response_onprem = <any>.
+    ENDIF.
+
+    result = mo_response_onprem.
 
   ENDMETHOD.
 
