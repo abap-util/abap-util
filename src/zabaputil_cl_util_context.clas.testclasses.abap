@@ -4169,10 +4169,43 @@ CLASS ltcl_sync_core_helpers DEFINITION FINAL
     METHODS test_cut_at            FOR TESTING RAISING cx_static_check.
     METHODS test_url_authority     FOR TESTING RAISING cx_static_check.
     METHODS test_hash_checksum     FOR TESTING RAISING cx_static_check.
+    METHODS test_ui5_binding_literal FOR TESTING RAISING cx_static_check.
+    METHODS test_ui5_handler_string FOR TESTING RAISING cx_static_check.
+    METHODS test_ui5_braces_balanced FOR TESTING RAISING cx_static_check.
 
 ENDCLASS.
 
 CLASS ltcl_sync_core_helpers IMPLEMENTATION.
+
+  METHOD test_ui5_binding_literal.
+
+    cl_abap_unit_assert=>assert_equals( exp = `a \{/PATH\} \\\\server`
+                                        act = zabaputil_cl_util_context=>ui5_escape_binding_literal( `a {/PATH} \\server` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `plain`
+                                        act = zabaputil_cl_util_context=>ui5_escape_binding_literal( `plain` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_ui5_handler_string.
+
+    DATA(lv_raw) = `it's a\b` && zabaputil_cl_util_context=>cv_char_util_cr_lf && `c`.
+    cl_abap_unit_assert=>assert_equals( exp = `it\'s a\\b\nc`
+                                        act = zabaputil_cl_util_context=>ui5_escape_handler_string( lv_raw ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `EVENT_ID`
+                                        act = zabaputil_cl_util_context=>ui5_escape_handler_string( `EVENT_ID` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_ui5_braces_balanced.
+
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>ui5_check_braces_balanced( `{/A}` ) ).
+    " a brace inside a string of the expression is text
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>ui5_check_braces_balanced( `{= ${/A} === '}' }` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>ui5_check_braces_balanced( `{0` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>ui5_check_braces_balanced( `}{` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>ui5_check_braces_balanced( `{'a}` ) ).
+
+  ENDMETHOD.
 
   METHOD test_url_origin.
 
