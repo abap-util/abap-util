@@ -4377,3 +4377,286 @@ CLASS ltcl_sync_core_helpers IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+
+" an object with one public attribute, for rtti_get_t_attri_by_oref
+CLASS ltcl_attri_probe DEFINITION FINAL FOR TESTING.
+  PUBLIC SECTION.
+    DATA mv_text TYPE string ##NEEDED.
+  PROTECTED SECTION.
+  PRIVATE SECTION.
+ENDCLASS.
+
+CLASS ltcl_attri_probe IMPLEMENTATION.
+ENDCLASS.
+
+
+" harvested from abap2UI5 (z2ui5_cl_ui5_util_context, ltcl_coverage): the
+" methods its framework calls, each with a test of its own
+CLASS ltcl_coverage DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+    TYPES:
+      BEGIN OF ty_s_flat,
+        text TYPE string,
+        date TYPE d,
+        time TYPE t,
+        flag TYPE abap_bool,
+        num  TYPE i,
+      END OF ty_s_flat.
+    TYPES ty_t_flat TYPE STANDARD TABLE OF ty_s_flat WITH EMPTY KEY.
+    TYPES ty_t_sorted TYPE SORTED TABLE OF ty_s_flat WITH UNIQUE KEY text.
+    TYPES:
+      BEGIN OF ty_s_nested,
+        id   TYPE string,
+        flat TYPE ty_s_flat,
+      END OF ty_s_nested.
+    TYPES BEGIN OF ty_s_incl.
+    TYPES name TYPE string.
+    TYPES END OF ty_s_incl.
+    TYPES BEGIN OF ty_s_with_incl.
+    INCLUDE TYPE ty_s_incl.
+    TYPES zip TYPE string.
+    TYPES END OF ty_s_with_incl.
+
+    METHODS test_check_table_standard FOR TESTING RAISING cx_static_check.
+    METHODS test_typedescr_by_data    FOR TESTING RAISING cx_static_check.
+    METHODS test_flat_components      FOR TESTING RAISING cx_static_check.
+    METHODS test_flat_components_none FOR TESTING RAISING cx_static_check.
+    METHODS test_attri_by_include     FOR TESTING RAISING cx_static_check.
+    METHODS test_expand_components    FOR TESTING RAISING cx_static_check.
+    METHODS test_unassign_initial     FOR TESTING RAISING cx_static_check.
+    METHODS test_unassign_object      FOR TESTING RAISING cx_static_check.
+    METHODS test_unassign_data        FOR TESTING RAISING cx_static_check.
+    METHODS test_as_data_ref          FOR TESTING RAISING cx_static_check.
+    METHODS test_timestampl           FOR TESTING RAISING cx_static_check.
+    METHODS test_attri_by_oref        FOR TESTING RAISING cx_static_check.
+    METHODS test_check_abap_cloud     FOR TESTING RAISING cx_static_check.
+    METHODS test_classes_impl_intf    FOR TESTING RAISING cx_static_check.
+
+ENDCLASS.
+
+
+CLASS ltcl_coverage IMPLEMENTATION.
+
+  METHOD test_check_table_standard.
+
+    DATA lt_std TYPE ty_t_flat.
+    DATA lt_sorted TYPE ty_t_sorted.
+    DATA ls_flat TYPE ty_s_flat.
+
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>rtti_check_table_standard( REF #( lt_std ) ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_table_standard( REF #( lt_sorted ) ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_table_standard( REF #( ls_flat ) ) ).
+
+  ENDMETHOD.
+
+  METHOD test_typedescr_by_data.
+
+    DATA ls_flat TYPE ty_s_flat.
+    DATA lt_flat TYPE ty_t_flat.
+
+    cl_abap_unit_assert=>assert_equals( exp = cl_abap_typedescr=>kind_struct
+                                        act = zabaputil_cl_util_context=>rtti_get_typedescr_by_data( ls_flat )->kind ).
+    cl_abap_unit_assert=>assert_equals( exp = cl_abap_typedescr=>kind_table
+                                        act = zabaputil_cl_util_context=>rtti_get_typedescr_by_data( lt_flat )->kind ).
+
+  ENDMETHOD.
+
+  METHOD test_flat_components.
+
+    DATA lt_flat TYPE ty_t_flat.
+
+    " the line of a standard table, every component with its json_kind
+    DATA(lt_comp) = zabaputil_cl_util_context=>rtti_get_flat_components( REF #( lt_flat ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 5
+                                        act = lines( lt_comp ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `TEXT`
+                                        act = lt_comp[ 1 ]-name ).
+    cl_abap_unit_assert=>assert_equals( exp = `S`
+                                        act = lt_comp[ 1 ]-json_kind ).
+    cl_abap_unit_assert=>assert_equals( exp = `D`
+                                        act = lt_comp[ 2 ]-json_kind ).
+    cl_abap_unit_assert=>assert_equals( exp = `T`
+                                        act = lt_comp[ 3 ]-json_kind ).
+    cl_abap_unit_assert=>assert_equals( exp = `B`
+                                        act = lt_comp[ 4 ]-json_kind ).
+    cl_abap_unit_assert=>assert_equals( exp = `N`
+                                        act = lt_comp[ 5 ]-json_kind ).
+
+  ENDMETHOD.
+
+  METHOD test_flat_components_none.
+
+    DATA lt_sorted TYPE ty_t_sorted.
+    DATA ls_nested TYPE ty_s_nested.
+    DATA lv_text TYPE string.
+
+    " a sorted table, a nested structure, a scalar: none is flat. (A
+    " structure with an include is refused too on a system - the transpiled
+    " runtime hands its components out already expanded, so it is not
+    " asserted here)
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>rtti_get_flat_components( REF #( lt_sorted ) ) ).
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>rtti_get_flat_components( REF #( ls_nested ) ) ).
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>rtti_get_flat_components( REF #( lv_text ) ) ).
+
+  ENDMETHOD.
+
+  METHOD test_attri_by_include.
+
+    DATA ls_with_incl TYPE ty_s_with_incl.
+    DATA lv_text TYPE string.
+
+    DATA(lt_comp) = zabaputil_cl_util_context=>rtti_get_t_attri_by_include(
+        CAST cl_abap_datadescr( cl_abap_typedescr=>describe_by_data( ls_with_incl ) ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = lines( lt_comp ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `NAME`
+                                        act = lt_comp[ 1 ]-name ).
+    cl_abap_unit_assert=>assert_equals( exp = `ZIP`
+                                        act = lt_comp[ 2 ]-name ).
+
+    " no structure: the error names it, it is no dump
+    TRY.
+        zabaputil_cl_util_context=>rtti_get_t_attri_by_include(
+            CAST cl_abap_datadescr( cl_abap_typedescr=>describe_by_data( lv_text ) ) ).
+        cl_abap_unit_assert=>fail( `a non-structure include must raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD test_expand_components.
+
+    DATA ls_with_incl TYPE ty_s_with_incl.
+
+    DATA(lt_raw) = CAST cl_abap_structdescr( cl_abap_typedescr=>describe_by_data( ls_with_incl ) )->get_components( ).
+    DATA(lt_comp) = zabaputil_cl_util_context=>expand_components( lt_raw ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = lines( lt_comp ) ).
+    READ TABLE lt_comp WITH KEY as_include = abap_true TRANSPORTING NO FIELDS. "#EC CI_SORTSEQ
+    cl_abap_unit_assert=>assert_subrc( exp = 4 ).
+
+    " the recursion guard: past 16 levels the expansion refuses
+    TRY.
+        zabaputil_cl_util_context=>expand_components( val   = lt_raw
+                                                      depth = 17 ).
+        cl_abap_unit_assert=>fail( `the depth guard must raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD test_unassign_initial.
+
+    DATA lv_empty TYPE string.
+    DATA lv_full TYPE string VALUE `x`.
+    DATA lr_none TYPE REF TO data.
+
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_unassign_initial( lr_none ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_unassign_initial( REF #( lv_empty ) ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_unassign_initial( REF #( lv_full ) ) ).
+
+  ENDMETHOD.
+
+  METHOD test_unassign_object.
+
+    DATA lo_probe TYPE REF TO ltcl_attri_probe.
+    lo_probe = NEW #( ).
+    DATA lr_oref TYPE REF TO data.
+    lr_oref = REF #( lo_probe ).
+
+    DATA(lo_back) = zabaputil_cl_util_context=>unassign_object( lr_oref ).
+
+    cl_abap_unit_assert=>assert_bound( lo_back ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lo_back = lo_probe ) ).
+
+  ENDMETHOD.
+
+  METHOD test_unassign_data.
+
+    DATA lv_text TYPE string VALUE `x`.
+    DATA lr_text TYPE REF TO data.
+    lr_text = REF #( lv_text ).
+    DATA lr_outer TYPE REF TO data.
+    lr_outer = REF #( lr_text ).
+
+    DATA(lr_back) = zabaputil_cl_util_context=>unassign_data( lr_outer ).
+
+    cl_abap_unit_assert=>assert_true( xsdbool( lr_back = lr_text ) ).
+
+  ENDMETHOD.
+
+  METHOD test_as_data_ref.
+
+    DATA lv_text TYPE string VALUE `x`.
+
+    DATA(lr_ref) = zabaputil_cl_util_context=>conv_get_as_data_ref( lv_text ).
+
+    cl_abap_unit_assert=>assert_bound( lr_ref ).
+    ASSIGN lr_ref->* TO FIELD-SYMBOL(<val>).
+    cl_abap_unit_assert=>assert_equals( exp = `x`
+                                        act = <val> ).
+
+  ENDMETHOD.
+
+  METHOD test_timestampl.
+
+    DATA(lv_first) = zabaputil_cl_util_context=>time_get_timestampl( ).
+    DATA(lv_second) = zabaputil_cl_util_context=>time_get_timestampl( ).
+
+    cl_abap_unit_assert=>assert_not_initial( lv_first ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_second >= lv_first ) ).
+
+  ENDMETHOD.
+
+  METHOD test_attri_by_oref.
+
+    DATA lo_probe TYPE REF TO ltcl_attri_probe.
+    lo_probe = NEW #( ).
+
+    DATA(lt_attri) = zabaputil_cl_util_context=>rtti_get_t_attri_by_oref( lo_probe ).
+
+    READ TABLE lt_attri WITH KEY name = `MV_TEXT` TRANSPORTING NO FIELDS. "#EC CI_SORTSEQ
+    cl_abap_unit_assert=>assert_subrc( exp = 0 ).
+
+  ENDMETHOD.
+
+  METHOD test_check_abap_cloud.
+
+    " the answer is latched - the second call gives the first one's answer
+    DATA(lv_first) = zabaputil_cl_util_context=>check_abap_cloud( ).
+
+    cl_abap_unit_assert=>assert_equals( exp = lv_first
+                                        act = zabaputil_cl_util_context=>check_abap_cloud( ) ).
+
+  ENDMETHOD.
+
+  METHOD test_classes_impl_intf.
+
+    " the repository lookup is the environment's, and this catalog ships no
+    " interface with a known implementation - so the test holds what any
+    " answer must hold: no row without a class name, and nothing for an
+    " interface that does not exist
+    DATA lt_classes TYPE zabaputil_cl_util_context=>ty_t_classes.
+    TRY.
+        lt_classes = zabaputil_cl_util_context=>rtti_get_classes_impl_intf( `IF_SERIALIZABLE_OBJECT` ).
+      CATCH cx_root.
+        RETURN.
+    ENDTRY.
+    READ TABLE lt_classes WITH KEY classname = `` TRANSPORTING NO FIELDS. "#EC CI_SORTSEQ
+    cl_abap_unit_assert=>assert_subrc( exp = 4 ).
+
+    TRY.
+        lt_classes = zabaputil_cl_util_context=>rtti_get_classes_impl_intf( `ZABAPUTIL_IF_DOES_NOT_EXIST` ).
+      CATCH cx_root.
+        RETURN.
+    ENDTRY.
+    cl_abap_unit_assert=>assert_initial( lt_classes ).
+
+  ENDMETHOD.
+
+ENDCLASS.

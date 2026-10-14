@@ -230,6 +230,40 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE abap_bool.
 
+    " one component of a flat structure, with the one fact a JSON writer
+    " decides by: json_kind is B for a boolean (abap_bool and its DDIC
+    " twins, by type name - as ajson tells them apart), N for a number
+    " (every numeric kind), S for a string (character, numeric text, string
+    " and binary - all of which |{ }| renders as ajson does), D for a date
+    " and T for a time (which ajson writes as ISO text, YYYY-MM-DD and
+    " HH:MM:SS, and empty when initial), and empty for a kind no such
+    " writer should take on - utclong, an enumeration, and a packed field
+    " TYPED timestamp or timestampl, which ajson converts through the time
+    " zone (rare in a bound row, and ajson's own rendering stays the
+    " reference for them)
+    TYPES:
+      BEGIN OF ty_s_flat_comp,
+        name      TYPE string,
+        json_kind TYPE c LENGTH 1,
+      END OF ty_s_flat_comp.
+    TYPES ty_t_flat_comp TYPE STANDARD TABLE OF ty_s_flat_comp WITH EMPTY KEY.
+
+    "! The components of the FLAT structure behind a data reference - the
+    "! structure itself, or the line of the STANDARD table it points to -
+    "! each with its json_kind (see the type). Empty when the reference
+    "! points to anything else (a scalar, a sorted or hashed table, a table
+    "! of scalars), when any component is no elementary one (a nested
+    "! structure, a table, a reference), when the structure has an include
+    "! (whose components are a question of their own), or when a component
+    "! has no json_kind - so a caller that gets rows can write every cell
+    "! of every row as a scalar, and one that gets none takes the general
+    "! road
+    CLASS-METHODS rtti_get_flat_components
+      IMPORTING
+        val           TYPE REF TO data
+      RETURNING
+        VALUE(result) TYPE ty_t_flat_comp.
+
     CLASS-METHODS rtti_get_typedescr_by_data
       IMPORTING
         val           TYPE any
@@ -2645,6 +2679,13 @@ CLASS zabaputil_cl_util_context DEFINITION
 
   PRIVATE SECTION.
 
+    " the json_kind of one elementary type (see ty_s_flat_comp)
+    CLASS-METHODS rtti_get_json_kind
+      IMPORTING
+        val           TYPE REF TO cl_abap_datadescr
+      RETURNING
+        VALUE(result) TYPE ty_s_flat_comp-json_kind.
+
     " the character set c_escape_xml guards against, concatenated once per
     " roll area instead of once per attribute value. Lazily filled on first
     " use - a public class_constructor is the alternative and a known trap
@@ -3474,20 +3515,22 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD rtti_get_t_attri_by_include.
 
-    cl_abap_typedescr=>describe_by_name( EXPORTING  p_name         = type->absolute_name
-                                         RECEIVING  p_descr_ref    = DATA(type_desc)
-                                         EXCEPTIONS type_not_found = 1 ).
-    " classic exception method: a missing type sets sy-subrc and leaves the
-    " ref unbound instead of raising - check it, or get_components below
-    " dumps with CX_SY_REF_IS_INITIAL
-    IF sy-subrc <> 0 OR type_desc IS NOT BOUND.
-      RAISE EXCEPTION TYPE zabaputil_cx_util_error
-        EXPORTING
-          val = |Include type '{ type->absolute_name }' not found|.
-    ENDIF.
-    DATA(sdescr) = CAST cl_abap_structdescr( type_desc ).
-    DATA(comps) = sdescr->get_components( ).
-    result = expand_components( val   = comps
+    " `type` IS the include's descriptor - the component the caller took it
+    " from (as_include = abap_true) carries the structure descriptor, and
+    " RTTI descriptors are singletons. It used to be re-described by name,
+    " an RTTI lookup per include on the binding path that could only hand
+    " back the object already in hand - or fail for a local include type
+    " whose absolute name does not resolve, where the direct cast cannot
+    DATA sdescr TYPE REF TO cl_abap_structdescr.
+    TRY.
+        sdescr ?= type.
+      CATCH cx_sy_move_cast_error INTO DATA(lx_cast).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val      = |Include type '{ type->absolute_name }' is not a structure|
+            previous = lx_cast.
+    ENDTRY.
+    result = expand_components( val   = sdescr->get_components( )
                                 depth = depth ).
 
   ENDMETHOD.
@@ -3505,11 +3548,20 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     LOOP AT val REFERENCE INTO DATA(lr_comp).
       IF lr_comp->as_include = abap_true.
-        DATA(lt_incl) = rtti_get_t_attri_by_include( type  = lr_comp->type
-                                                     depth = depth + 1 ).
-        APPEND LINES OF lt_incl TO result.
+        " INCLUDE ... RENAMING WITH SUFFIX: the structure's components are
+        " named <component><suffix>, and every nested level adds its own -
+        " the bare include names do not exist on the structure, so a
+        " binding path or ASSIGN COMPONENT built from them fails
+        DATA(lt_include) = rtti_get_t_attri_by_include( type  = lr_comp->type
+                                                        depth = depth + 1 ).
+        IF lr_comp->suffix IS NOT INITIAL.
+          LOOP AT lt_include REFERENCE INTO DATA(lr_include).
+            lr_include->name = lr_include->name && lr_comp->suffix.
+          ENDLOOP.
+        ENDIF.
+        INSERT LINES OF lt_include INTO TABLE result.
       ELSE.
-        APPEND lr_comp->* TO result.
+        INSERT lr_comp->* INTO TABLE result.
       ENDIF.
     ENDLOOP.
 
@@ -5429,6 +5481,73 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         result = xsdbool( lo_tab->table_kind = cl_abap_tabledescr=>tablekind_std ).
       CATCH cx_root ##NO_HANDLER.
     ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD rtti_get_flat_components.
+
+    DATA lo_type TYPE REF TO cl_abap_typedescr.
+    TRY.
+        lo_type = cl_abap_typedescr=>describe_by_data_ref( val ).
+        IF lo_type->kind = cl_abap_typedescr=>kind_table.
+          DATA(lo_table) = CAST cl_abap_tabledescr( lo_type ).
+          IF lo_table->table_kind <> cl_abap_tabledescr=>tablekind_std.
+            RETURN.
+          ENDIF.
+          lo_type = lo_table->get_table_line_type( ).
+        ENDIF.
+        IF lo_type->kind <> cl_abap_typedescr=>kind_struct.
+          RETURN.
+        ENDIF.
+        DATA(lt_comp) = CAST cl_abap_structdescr( lo_type )->get_components( ).
+        LOOP AT lt_comp REFERENCE INTO DATA(lr_comp).
+          DATA(ls_flat) = VALUE ty_s_flat_comp( name = lr_comp->name ).
+          IF lr_comp->as_include = abap_true OR lr_comp->type->kind <> cl_abap_typedescr=>kind_elem.
+            CLEAR result.
+            RETURN.
+          ENDIF.
+          ls_flat-json_kind = rtti_get_json_kind( lr_comp->type ).
+          IF ls_flat-json_kind IS INITIAL.
+            CLEAR result.
+            RETURN.
+          ENDIF.
+          APPEND ls_flat TO result.
+        ENDLOOP.
+      CATCH cx_root.
+        CLEAR result.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD rtti_get_json_kind.
+
+    " the same distinctions ajson's lcl_abap_to_json=>convert_value
+    " makes, in the same order - a boolean by its type name first, so an
+    " abap_bool (a CHAR 1) is not a string
+    CASE val->absolute_name.
+      WHEN `\TYPE-POOL=ABAP\TYPE=ABAP_BOOL` OR `\TYPE=ABAP_BOOLEAN` OR `\TYPE=XSDBOOLEAN`
+          OR `\TYPE=FLAG` OR `\TYPE=XFELD`.
+        result = `B`.
+        RETURN.
+      WHEN `\TYPE=TIMESTAMP` OR `\TYPE=TIMESTAMPL`.
+        RETURN.
+    ENDCASE.
+    CASE val->type_kind.
+      WHEN cl_abap_typedescr=>typekind_char OR cl_abap_typedescr=>typekind_num
+          OR cl_abap_typedescr=>typekind_string OR cl_abap_typedescr=>typekind_hex
+          OR cl_abap_typedescr=>typekind_xstring.
+        result = `S`.
+      WHEN cl_abap_typedescr=>typekind_date.
+        result = `D`.
+      WHEN cl_abap_typedescr=>typekind_time.
+        result = `T`.
+      WHEN cl_abap_typedescr=>typekind_int OR cl_abap_typedescr=>typekind_int1
+          OR cl_abap_typedescr=>typekind_int2 OR cl_abap_typedescr=>typekind_float
+          OR cl_abap_typedescr=>typekind_packed OR cl_abap_typedescr=>typekind_decfloat16
+          OR cl_abap_typedescr=>typekind_decfloat34 OR `8`.
+        " `8`: typekind_int8, a constant lower releases do not have
+        result = `N`.
+    ENDCASE.
 
   ENDMETHOD.
 
