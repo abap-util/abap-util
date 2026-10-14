@@ -8,6 +8,8 @@ CLASS zabaputil_cl_util_http DEFINITION PUBLIC.
         body     TYPE string,
         path     TYPE string,
         t_params TYPE zabaputil_cl_util_context=>ty_t_name_value,
+        " the raw query string t_params was parsed from, see get_query
+        query    TYPE string,
       END OF ty_s_http_req.
 
     TYPES:
@@ -30,6 +32,7 @@ CLASS zabaputil_cl_util_http DEFINITION PUBLIC.
         body          TYPE clike OPTIONAL
         !destination  TYPE clike OPTIONAL
         url           TYPE clike OPTIONAL
+        !query        TYPE clike OPTIONAL
       RETURNING
         VALUE(result) TYPE ty_s_http_res.
 
@@ -96,9 +99,23 @@ CLASS zabaputil_cl_util_http DEFINITION PUBLIC.
     DATA mo_request_cloud  TYPE REF TO object.
     DATA mo_response_cloud TYPE REF TO object.
 
+    " the query string of the request, raw - everything after the FIRST `?`
+    " of its URI, not decoded. What a proxy forwards: parsing it into
+    " t_params and encoding it again is not guaranteed to give the same
+    " string back (sap-startup-params, see url_param_get_tab)
+    METHODS get_query
+      RETURNING
+        VALUE(result) TYPE string.
+
   PROTECTED SECTION.
 
   PRIVATE SECTION.
+
+    TYPES:
+      BEGIN OF ty_s_client_target,
+        url         TYPE string,
+        request_uri TYPE string,
+      END OF ty_s_client_target.
 
     DATA mo_request_onprem  TYPE REF TO object.
     DATA mo_response_onprem TYPE REF TO object.
@@ -110,6 +127,15 @@ CLASS zabaputil_cl_util_http DEFINITION PUBLIC.
     METHODS get_response_onprem
       RETURNING
         VALUE(result) TYPE REF TO object.
+
+    " where client_call puts its query - see the method
+    CLASS-METHODS client_target
+      IMPORTING
+        !destination  TYPE clike
+        url           TYPE clike
+        !query        TYPE clike
+      RETURNING
+        VALUE(result) TYPE ty_s_client_target.
 
 ENDCLASS.
 
@@ -180,14 +206,35 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     DATA lv_message  TYPE string.
     FIELD-SYMBOLS <any> TYPE any.
 
+    DATA(ls_target) = client_target( destination = destination
+                                     url         = url
+                                     query       = query ).
+
     DATA(lo_client) = client_create( destination = destination
-                                     url         = url ).
+                                     url         = ls_target-url ).
 
     TRY.
 
+        " IS ASSIGNED, not sy-subrc, and a RAISE rather than an ASSERT -
+        " see get_response_onprem for both halves. Here the RAISE also buys
+        " the CLOSE below: the CATCH that closes the ICM connection on the
+        " failure path cannot see an ASSERTION_FAILED, so an HTTP client
+        " whose REQUEST could not be reached leaked its connection for the
+        " lifetime of the work process
+        UNASSIGN <any>.
         ASSIGN lo_client->(`REQUEST`) TO <any>.
-        ASSERT sy-subrc = 0.
+        IF <any> IS NOT ASSIGNED.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING val = `HTTP_CLIENT_REQUEST_NOT_FOUND - the http client has no REQUEST attribute`.
+        ENDIF.
         lo_request = <any>.
+
+        IF ls_target-request_uri IS NOT INITIAL.
+          CALL METHOD lo_request->(`SET_HEADER_FIELD`)
+            EXPORTING
+              name  = `~request_uri`
+              value = ls_target-request_uri.
+        ENDIF.
 
         DATA(lv_method) = CONV string( method ).
         CALL METHOD lo_request->(`SET_METHOD`)
@@ -220,15 +267,20 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
           CALL METHOD lo_client->(`GET_LAST_ERROR`)
             IMPORTING
               message = lv_message.
-          CALL METHOD lo_client->(`CLOSE`)
-            EXCEPTIONS
-              OTHERS = 1.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
             EXPORTING val = |HTTP_COMMUNICATION_ERROR - { lv_message }|.
         ENDIF.
 
+        " UNASSIGN first: <any> still holds the REQUEST from above, so
+        " IS ASSIGNED would read TRUE for a failed ASSIGN and the GET_CDATA
+        " below would be called on the request object - the reassigned case
+        " of the #1937 rule (see get_response_onprem)
+        UNASSIGN <any>.
         ASSIGN lo_client->(`RESPONSE`) TO <any>.
-        ASSERT sy-subrc = 0.
+        IF <any> IS NOT ASSIGNED.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING val = `HTTP_CLIENT_RESPONSE_NOT_FOUND - the http client has no RESPONSE attribute`.
+        ENDIF.
         lo_response = <any>.
 
         CALL METHOD lo_response->(`GET_CDATA`)
@@ -247,7 +299,7 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
       CATCH cx_root INTO DATA(x).
         " CLOSE on the failure path too: every throw between client_create
         " and the success-path CLOSE above (a failing dynamic GET_CDATA /
-        " GET_STATUS, the RESPONSE assign) used to leave the connection
+        " GET_STATUS, the RESPONSE assign) used to leave the ICM connection
         " open for the lifetime of the work process
         IF lo_client IS BOUND.
           TRY.
@@ -422,19 +474,27 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
   METHOD set_cdata.
 
+    " a string, whatever clike the caller passed: IF_HTTP_RESPONSE~SET_CDATA
+    " and IF_WEB_HTTP_RESPONSE~SET_TEXT both take a STRING, and a dynamic
+    " call with a C actual for it is CX_SY_DYN_CALL_ILLEGAL_TYPE - the typed
+    " call would have converted. Converted ONCE, above the branch: the cloud
+    " half used to pass the generic value through, so a CHAR caller worked
+    " on-prem and failed on cloud only
+    DATA(lv_data) = CONV string( val ).
+
     IF mo_server_onprem IS BOUND.
 
       DATA(object) = get_response_onprem( ).
 
       CALL METHOD object->(`SET_CDATA`)
         EXPORTING
-          data = val.
+          data = lv_data.
 
     ELSE.
 
       CALL METHOD mo_response_cloud->(`IF_WEB_HTTP_RESPONSE~SET_TEXT`)
         EXPORTING
-          i_text = val.
+          i_text = lv_data.
 
     ENDIF.
 
@@ -483,6 +543,7 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     result-method   = get_method( ).
     result-path     = get_header_field( `~path` ).
     result-t_params = zabaputil_cl_util_context=>url_param_get_tab( get_header_field( `~request_uri` ) ).
+    result-query    = get_query( ).
 
   ENDMETHOD.
 
@@ -490,8 +551,13 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
     IF mo_request_onprem IS NOT BOUND.
       FIELD-SYMBOLS <any> TYPE any.
+      " IS ASSIGNED, not sy-subrc, and a RAISE rather than an ASSERT - see
+      " the note at get_response_onprem below, which both share
       ASSIGN mo_server_onprem->(`REQUEST`) TO <any>.
-      ASSERT sy-subrc = 0.
+      IF <any> IS NOT ASSIGNED.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING val = `HTTP_SERVER_REQUEST_NOT_FOUND - the server object has no REQUEST attribute`.
+      ENDIF.
       mo_request_onprem = <any>.
     ENDIF.
 
@@ -503,12 +569,70 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
     IF mo_response_onprem IS NOT BOUND.
       FIELD-SYMBOLS <any> TYPE any.
+      " Both halves of this guard changed together, and both matter on the
+      " path every single request takes (get_cdata / get_method /
+      " get_header_field all come through here):
+      "
+      " IS ASSIGNED, not sy-subrc - a successful dynamic ASSIGN does not
+      " reset sy-subrc on every release (#1937,
+      " zabaputil_cl_util_context=>unassign_data), so a stale 4 left by an
+      " earlier statement read as "the server has no RESPONSE" on the one
+      " statement of the handler that cannot fail.
+      "
+      " ...and a RAISE rather than an ASSERT, because of what the failure
+      " then costs: ASSERTION_FAILED is a short dump no TRY can take (the
+      " reasoning is written out at z2ui5_cl_ui5_view_builder=>a), so it
+      " bypassed the outer TRY of z2ui5_cl_ui5_http_handler=>main and the
+      " request was answered with no body, no status code and none of the
+      " security headers - the exact state that TRY was added to prevent.
+      " The framework exception travels into it and comes back as a 500
+      " naming the cause
       ASSIGN mo_server_onprem->(`RESPONSE`) TO <any>.
-      ASSERT sy-subrc = 0.
+      IF <any> IS NOT ASSIGNED.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING val = `HTTP_SERVER_RESPONSE_NOT_FOUND - the server object has no RESPONSE attribute`.
+      ENDIF.
       mo_response_onprem = <any>.
     ENDIF.
 
     result = mo_response_onprem.
+
+  ENDMETHOD.
+
+  METHOD client_target.
+
+    " The query travels as it came, never parsed and encoded again (see
+    " get_query). By URL it becomes part of the URL. By destination it is the
+    " request URI, which the ICF client appends to the destination's path
+    " prefix - so the path stays the one maintained in SM59. The destination
+    " test is client_create's, which decides between the two
+    DATA lv_destination TYPE c LENGTH 32.
+    lv_destination = destination.
+
+    result-url = url.
+    DATA(lv_query) = CONV string( query ).
+    SHIFT lv_query LEFT DELETING LEADING `?`.
+    IF lv_query IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    IF lv_destination IS NOT INITIAL AND lv_destination <> `NONE`.
+      result-request_uri = |?{ lv_query }|.
+    ELSEIF result-url CS `?`.
+      result-url = |{ result-url }&{ lv_query }|.
+    ELSE.
+      result-url = |{ result-url }?{ lv_query }|.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD get_query.
+
+    DATA(lv_uri) = get_header_field( `~request_uri` ).
+    IF lv_uri CS `?`.
+      result = substring_after( val = lv_uri
+                                sub = `?` ).
+    ENDIF.
 
   ENDMETHOD.
 

@@ -551,8 +551,11 @@ CLASS ltcl_boolean_ops IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD ui5_msg_type_other.
-    " Any other type maps to Information
-    cl_abap_unit_assert=>assert_equals( exp = `Information` act = zabaputil_cl_util_context=>ui5_get_msg_type( `X` ) ).
+    " any other type maps to Information - A (abort) and X (exit) are the
+    " two SAP message types above E, so they are errors, never information
+    cl_abap_unit_assert=>assert_equals( exp = `Information` act = zabaputil_cl_util_context=>ui5_get_msg_type( `Z` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `Error` act = zabaputil_cl_util_context=>ui5_get_msg_type( `X` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `Error` act = zabaputil_cl_util_context=>ui5_get_msg_type( `A` ) ).
   ENDMETHOD.
 
 ENDCLASS.
@@ -4148,6 +4151,850 @@ CLASS ltcl_data_box IMPLEMENTATION.
     GET REFERENCE OF lv_str INTO lr_data.
 
     cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_table_standard( lr_data ) ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+" methods harvested from abap2UI5 (z2ui5_cl_ui5_util_context, 2026-10): the
+" generic escape, string, URL and HTTP helpers its core classes carried
+CLASS ltcl_sync_core_helpers DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+    METHODS test_url_origin        FOR TESTING RAISING cx_static_check.
+    METHODS test_etag_match_rules  FOR TESTING RAISING cx_static_check.
+    METHODS test_escape_json       FOR TESTING RAISING cx_static_check.
+    METHODS test_escape_js         FOR TESTING RAISING cx_static_check.
+    METHODS test_escape_xml        FOR TESTING RAISING cx_static_check.
+    METHODS test_truncate          FOR TESTING RAISING cx_static_check.
+    METHODS test_filter_chars      FOR TESTING RAISING cx_static_check.
+    METHODS test_cut_at            FOR TESTING RAISING cx_static_check.
+    METHODS test_url_authority     FOR TESTING RAISING cx_static_check.
+    METHODS test_hash_checksum     FOR TESTING RAISING cx_static_check.
+    METHODS test_ui5_binding_literal FOR TESTING RAISING cx_static_check.
+    METHODS test_ui5_handler_string FOR TESTING RAISING cx_static_check.
+    METHODS test_ui5_braces_balanced FOR TESTING RAISING cx_static_check.
+
+ENDCLASS.
+
+CLASS ltcl_sync_core_helpers IMPLEMENTATION.
+
+  METHOD test_ui5_binding_literal.
+
+    cl_abap_unit_assert=>assert_equals( exp = `a \{/PATH\} \\\\server`
+                                        act = zabaputil_cl_util_context=>ui5_escape_binding_literal( `a {/PATH} \\server` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `plain`
+                                        act = zabaputil_cl_util_context=>ui5_escape_binding_literal( `plain` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_ui5_handler_string.
+
+    DATA(lv_raw) = `it's a\b` && zabaputil_cl_util_context=>cv_char_util_cr_lf && `c`.
+    cl_abap_unit_assert=>assert_equals( exp = `it\'s a\\b\nc`
+                                        act = zabaputil_cl_util_context=>ui5_escape_handler_string( lv_raw ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `EVENT_ID`
+                                        act = zabaputil_cl_util_context=>ui5_escape_handler_string( `EVENT_ID` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_ui5_braces_balanced.
+
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>ui5_check_braces_balanced( `{/A}` ) ).
+    " a brace inside a string of the expression is text
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>ui5_check_braces_balanced( `{= ${/A} === '}' }` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>ui5_check_braces_balanced( `{0` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>ui5_check_braces_balanced( `}{` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>ui5_check_braces_balanced( `{'a}` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_url_origin.
+
+    cl_abap_unit_assert=>assert_equals( exp = `https://sdk.openui5.org`
+                                        act = zabaputil_cl_util_context=>url_get_origin(
+                                                  `https://sdk.openui5.org/resources/sap-ui-cachebuster/sap-ui-core.js` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `https://cdn.example:8443`
+                                        act = zabaputil_cl_util_context=>url_get_origin(
+                                                  `https://cdn.example:8443/ui5/resources/sap-ui-core.js?x=1` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `http://cdn.example`
+                                        act = zabaputil_cl_util_context=>url_get_origin( `HTTP://cdn.example?q` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `//cdn.example`
+                                        act = zabaputil_cl_util_context=>url_get_origin( `//cdn.example/resources/sap-ui-core.js` ) ).
+    " the host alone, no path at all
+    cl_abap_unit_assert=>assert_equals( exp = `https://cdn.example`
+                                        act = zabaputil_cl_util_context=>url_get_origin( `https://cdn.example` ) ).
+    " relative: the page's own origin, nothing to announce
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>url_get_origin(
+                                             `/sap/public/bc/ui5_ui5/1/resources/sap-ui-core.js` ) ).
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>url_get_origin( `resources/sap-ui-core.js` ) ).
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>url_get_origin( `` ) ).
+    " no host, or userinfo in front of it: nothing rather than a guess
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>url_get_origin( `https:///x.js` ) ).
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>url_get_origin( `https://u:p@cdn.example/x.js` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_etag_match_rules.
+
+    DATA(lv_tag) = `"1.0-11-22-33"`.
+
+    " exact, weak, listed, any, the Apache suffix - all a match
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>http_check_etag_match(
+        if_none_match = `"1.0-11-22-33"`
+        etag          = lv_tag ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>http_check_etag_match(
+        if_none_match = `W/"1.0-11-22-33"`
+        etag          = lv_tag ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>http_check_etag_match(
+        if_none_match = `"a" , "1.0-11-22-33" ,"b"`
+        etag          = lv_tag ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>http_check_etag_match(
+        if_none_match = `*`
+        etag          = lv_tag ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>http_check_etag_match(
+        if_none_match = `"1.0-11-22-33-gzip"`
+        etag          = lv_tag ) ).
+
+    " another tag, a tag that merely starts like ours, nothing at all
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>http_check_etag_match(
+        if_none_match = `"1.0-99-99-99"`
+        etag          = lv_tag ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>http_check_etag_match(
+        if_none_match = `"1.0-11-22-33-x"`
+        etag          = lv_tag ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>http_check_etag_match(
+        if_none_match = ``
+        etag          = lv_tag ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>http_check_etag_match(
+        if_none_match = `*`
+        etag          = `` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_escape_json.
+
+    DATA(lv_raw) = `a"b\c` && zabaputil_cl_util_context=>cv_char_util_horizontal_tab
+                   && zabaputil_cl_util_context=>cv_char_util_cr_lf && `d`.
+    cl_abap_unit_assert=>assert_equals( exp = `a\"b\\c\t\r\nd`
+                                        act = zabaputil_cl_util_context=>c_escape_json( lv_raw ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `plain </b>`
+                                        act = zabaputil_cl_util_context=>c_escape_json( `plain </b>` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_escape_js.
+
+    " both quotes, the backslash, the line terminators and the end of an
+    " inline script - the backslash first, or it would double the others
+    DATA(lv_raw) = `a"b'c\d</e` && zabaputil_cl_util_context=>cv_char_util_cr_lf && `f`.
+    cl_abap_unit_assert=>assert_equals( exp = `a\"b\'c\\d<\/e\r\nf`
+                                        act = zabaputil_cl_util_context=>c_escape_js( lv_raw ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `/sap/bc/z2ui5`
+                                        act = zabaputil_cl_util_context=>c_escape_js( `/sap/bc/z2ui5` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_escape_xml.
+
+    " the entities, the whitespace as character references, and a form feed
+    " (illegal in XML 1.0 even as a reference) dropped
+    DATA(lv_ff) = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `0C` ) ).
+    DATA(lv_raw) = `a&b<c>d"e'f` && zabaputil_cl_util_context=>cv_char_util_newline
+                   && zabaputil_cl_util_context=>cv_char_util_horizontal_tab && lv_ff && `g`.
+    cl_abap_unit_assert=>assert_equals( exp = `a&amp;b&lt;c&gt;d&quot;e'f&#xA;&#x9;g`
+                                        act = zabaputil_cl_util_context=>c_escape_xml( lv_raw ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `plain`
+                                        act = zabaputil_cl_util_context=>c_escape_xml( `plain` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_truncate.
+
+    cl_abap_unit_assert=>assert_equals( exp = `abcdefg...`
+                                        act = zabaputil_cl_util_context=>c_truncate( val = `abcdefghijklmn`
+                                                                                     max = 10 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `abcdefghij`
+                                        act = zabaputil_cl_util_context=>c_truncate( val = `abcdefghij`
+                                                                                     max = 10 ) ).
+    " no room for the ellipsis: a plain cut
+    cl_abap_unit_assert=>assert_equals( exp = `ab`
+                                        act = zabaputil_cl_util_context=>c_truncate( val = `abcdef`
+                                                                                     max = 2 ) ).
+
+  ENDMETHOD.
+
+  METHOD test_filter_chars.
+
+    cl_abap_unit_assert=>assert_equals( exp = `ZCL_X`
+                                        act = zabaputil_cl_util_context=>c_filter_chars(
+                                                  val     = `ZCL_X"><script>`
+                                                  allowed = `ABCDEFGHIJKLMNOPQRSTUVWXYZ_` ) ).
+    " nothing to strip: the value itself
+    cl_abap_unit_assert=>assert_equals( exp = `abc`
+                                        act = zabaputil_cl_util_context=>c_filter_chars( val     = `abc`
+                                                                                         allowed = `abc` ) ).
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>c_filter_chars( val     = ``
+                                                                                    allowed = `abc` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_cut_at.
+
+    cl_abap_unit_assert=>assert_equals( exp = `ZCL_X`
+                                        act = zabaputil_cl_util_context=>c_cut_at( val = `ZCL_X?a=1`
+                                                                                   sub = `?` ) ).
+    " sub absent: the whole value, not the empty one substring_before answers
+    cl_abap_unit_assert=>assert_equals( exp = `ZCL_X`
+                                        act = zabaputil_cl_util_context=>c_cut_at( val = `ZCL_X`
+                                                                                   sub = `?` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_url_authority.
+
+    cl_abap_unit_assert=>assert_equals( exp = `host.example:8443`
+                                        act = zabaputil_cl_util_context=>url_get_authority(
+                                                  `HTTPS://Host.Example:8443/path?q#f` ) ).
+    " a default port is no port, whatever the scheme
+    cl_abap_unit_assert=>assert_equals( exp = `host.example`
+                                        act = zabaputil_cl_util_context=>url_get_authority( `host.example:443` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `host.example`
+                                        act = zabaputil_cl_util_context=>url_get_authority( `http://host.example:80/` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_hash_checksum.
+
+    DATA(lv_a) = zabaputil_cl_util_context=>hash_checksum( `<html>shell content A</html>` ).
+    DATA(lv_b) = zabaputil_cl_util_context=>hash_checksum( `<html>shell content B</html>` ).
+    cl_abap_unit_assert=>assert_not_initial( lv_a ).
+    cl_abap_unit_assert=>assert_differs( exp = lv_a
+                                         act = lv_b ).
+    cl_abap_unit_assert=>assert_equals( exp = lv_a
+                                        act = zabaputil_cl_util_context=>hash_checksum( `<html>shell content A</html>` ) ).
+    " the byte count leads
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_a CP `28-*` ) ).
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+" an object with one public attribute, for rtti_get_t_attri_by_oref
+CLASS ltcl_attri_probe DEFINITION FINAL FOR TESTING.
+  PUBLIC SECTION.
+    DATA mv_text TYPE string ##NEEDED.
+  PROTECTED SECTION.
+  PRIVATE SECTION.
+ENDCLASS.
+
+CLASS ltcl_attri_probe IMPLEMENTATION.
+ENDCLASS.
+
+
+" harvested from abap2UI5 (z2ui5_cl_ui5_util_context, ltcl_coverage): the
+" methods its framework calls, each with a test of its own
+CLASS ltcl_coverage DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+    TYPES:
+      BEGIN OF ty_s_flat,
+        text TYPE string,
+        date TYPE d,
+        time TYPE t,
+        flag TYPE abap_bool,
+        num  TYPE i,
+      END OF ty_s_flat.
+    TYPES ty_t_flat TYPE STANDARD TABLE OF ty_s_flat WITH EMPTY KEY.
+    TYPES ty_t_sorted TYPE SORTED TABLE OF ty_s_flat WITH UNIQUE KEY text.
+    TYPES:
+      BEGIN OF ty_s_nested,
+        id   TYPE string,
+        flat TYPE ty_s_flat,
+      END OF ty_s_nested.
+    TYPES BEGIN OF ty_s_incl.
+    TYPES name TYPE string.
+    TYPES END OF ty_s_incl.
+    TYPES BEGIN OF ty_s_with_incl.
+    INCLUDE TYPE ty_s_incl.
+    TYPES zip TYPE string.
+    TYPES END OF ty_s_with_incl.
+
+    METHODS test_check_table_standard FOR TESTING RAISING cx_static_check.
+    METHODS test_typedescr_by_data    FOR TESTING RAISING cx_static_check.
+    METHODS test_flat_components      FOR TESTING RAISING cx_static_check.
+    METHODS test_flat_components_none FOR TESTING RAISING cx_static_check.
+    METHODS test_attri_by_include     FOR TESTING RAISING cx_static_check.
+    METHODS test_expand_components    FOR TESTING RAISING cx_static_check.
+    METHODS test_unassign_initial     FOR TESTING RAISING cx_static_check.
+    METHODS test_unassign_object      FOR TESTING RAISING cx_static_check.
+    METHODS test_unassign_data        FOR TESTING RAISING cx_static_check.
+    METHODS test_as_data_ref          FOR TESTING RAISING cx_static_check.
+    METHODS test_timestampl           FOR TESTING RAISING cx_static_check.
+    METHODS test_attri_by_oref        FOR TESTING RAISING cx_static_check.
+    METHODS test_check_abap_cloud     FOR TESTING RAISING cx_static_check.
+    METHODS test_classes_impl_intf    FOR TESTING RAISING cx_static_check.
+
+ENDCLASS.
+
+
+CLASS ltcl_coverage IMPLEMENTATION.
+
+  METHOD test_check_table_standard.
+
+    DATA lt_std TYPE ty_t_flat.
+    DATA lt_sorted TYPE ty_t_sorted.
+    DATA ls_flat TYPE ty_s_flat.
+
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>rtti_check_table_standard( REF #( lt_std ) ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_table_standard( REF #( lt_sorted ) ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_table_standard( REF #( ls_flat ) ) ).
+
+  ENDMETHOD.
+
+  METHOD test_typedescr_by_data.
+
+    DATA ls_flat TYPE ty_s_flat.
+    DATA lt_flat TYPE ty_t_flat.
+
+    cl_abap_unit_assert=>assert_equals( exp = cl_abap_typedescr=>kind_struct
+                                        act = zabaputil_cl_util_context=>rtti_get_typedescr_by_data( ls_flat )->kind ).
+    cl_abap_unit_assert=>assert_equals( exp = cl_abap_typedescr=>kind_table
+                                        act = zabaputil_cl_util_context=>rtti_get_typedescr_by_data( lt_flat )->kind ).
+
+  ENDMETHOD.
+
+  METHOD test_flat_components.
+
+    DATA lt_flat TYPE ty_t_flat.
+
+    " the line of a standard table, every component with its json_kind
+    DATA(lt_comp) = zabaputil_cl_util_context=>rtti_get_flat_components( REF #( lt_flat ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 5
+                                        act = lines( lt_comp ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `TEXT`
+                                        act = lt_comp[ 1 ]-name ).
+    cl_abap_unit_assert=>assert_equals( exp = `S`
+                                        act = lt_comp[ 1 ]-json_kind ).
+    cl_abap_unit_assert=>assert_equals( exp = `D`
+                                        act = lt_comp[ 2 ]-json_kind ).
+    cl_abap_unit_assert=>assert_equals( exp = `T`
+                                        act = lt_comp[ 3 ]-json_kind ).
+    cl_abap_unit_assert=>assert_equals( exp = `B`
+                                        act = lt_comp[ 4 ]-json_kind ).
+    cl_abap_unit_assert=>assert_equals( exp = `N`
+                                        act = lt_comp[ 5 ]-json_kind ).
+
+  ENDMETHOD.
+
+  METHOD test_flat_components_none.
+
+    DATA lt_sorted TYPE ty_t_sorted.
+    DATA ls_nested TYPE ty_s_nested.
+    DATA lv_text TYPE string.
+
+    " a sorted table, a nested structure, a scalar: none is flat. (A
+    " structure with an include is refused too on a system - the transpiled
+    " runtime hands its components out already expanded, so it is not
+    " asserted here)
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>rtti_get_flat_components( REF #( lt_sorted ) ) ).
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>rtti_get_flat_components( REF #( ls_nested ) ) ).
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>rtti_get_flat_components( REF #( lv_text ) ) ).
+
+  ENDMETHOD.
+
+  METHOD test_attri_by_include.
+
+    DATA ls_with_incl TYPE ty_s_with_incl.
+    DATA lv_text TYPE string.
+
+    DATA(lt_comp) = zabaputil_cl_util_context=>rtti_get_t_attri_by_include(
+        CAST cl_abap_datadescr( cl_abap_typedescr=>describe_by_data( ls_with_incl ) ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = lines( lt_comp ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `NAME`
+                                        act = lt_comp[ 1 ]-name ).
+    cl_abap_unit_assert=>assert_equals( exp = `ZIP`
+                                        act = lt_comp[ 2 ]-name ).
+
+    " no structure: the error names it, it is no dump
+    TRY.
+        zabaputil_cl_util_context=>rtti_get_t_attri_by_include(
+            CAST cl_abap_datadescr( cl_abap_typedescr=>describe_by_data( lv_text ) ) ).
+        cl_abap_unit_assert=>fail( `a non-structure include must raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD test_expand_components.
+
+    DATA ls_with_incl TYPE ty_s_with_incl.
+
+    DATA(lt_raw) = CAST cl_abap_structdescr( cl_abap_typedescr=>describe_by_data( ls_with_incl ) )->get_components( ).
+    DATA(lt_comp) = zabaputil_cl_util_context=>expand_components( lt_raw ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = lines( lt_comp ) ).
+    READ TABLE lt_comp WITH KEY as_include = abap_true TRANSPORTING NO FIELDS. "#EC CI_SORTSEQ
+    cl_abap_unit_assert=>assert_subrc( exp = 4 ).
+
+    " the recursion guard: past 16 levels the expansion refuses
+    TRY.
+        zabaputil_cl_util_context=>expand_components( val   = lt_raw
+                                                      depth = 17 ).
+        cl_abap_unit_assert=>fail( `the depth guard must raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD test_unassign_initial.
+
+    DATA lv_empty TYPE string.
+    DATA lv_full TYPE string VALUE `x`.
+    DATA lr_none TYPE REF TO data.
+
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_unassign_initial( lr_none ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_unassign_initial( REF #( lv_empty ) ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_unassign_initial( REF #( lv_full ) ) ).
+
+  ENDMETHOD.
+
+  METHOD test_unassign_object.
+
+    DATA lo_probe TYPE REF TO ltcl_attri_probe.
+    lo_probe = NEW #( ).
+    DATA lr_oref TYPE REF TO data.
+    lr_oref = REF #( lo_probe ).
+
+    DATA(lo_back) = zabaputil_cl_util_context=>unassign_object( lr_oref ).
+
+    cl_abap_unit_assert=>assert_bound( lo_back ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lo_back = lo_probe ) ).
+
+  ENDMETHOD.
+
+  METHOD test_unassign_data.
+
+    DATA lv_text TYPE string VALUE `x`.
+    DATA lr_text TYPE REF TO data.
+    lr_text = REF #( lv_text ).
+    DATA lr_outer TYPE REF TO data.
+    lr_outer = REF #( lr_text ).
+
+    DATA(lr_back) = zabaputil_cl_util_context=>unassign_data( lr_outer ).
+
+    cl_abap_unit_assert=>assert_true( xsdbool( lr_back = lr_text ) ).
+
+  ENDMETHOD.
+
+  METHOD test_as_data_ref.
+
+    DATA lv_text TYPE string VALUE `x`.
+
+    DATA(lr_ref) = zabaputil_cl_util_context=>conv_get_as_data_ref( lv_text ).
+
+    cl_abap_unit_assert=>assert_bound( lr_ref ).
+    ASSIGN lr_ref->* TO FIELD-SYMBOL(<val>).
+    cl_abap_unit_assert=>assert_equals( exp = `x`
+                                        act = <val> ).
+
+  ENDMETHOD.
+
+  METHOD test_timestampl.
+
+    DATA(lv_first) = zabaputil_cl_util_context=>time_get_timestampl( ).
+    DATA(lv_second) = zabaputil_cl_util_context=>time_get_timestampl( ).
+
+    cl_abap_unit_assert=>assert_not_initial( lv_first ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_second >= lv_first ) ).
+
+  ENDMETHOD.
+
+  METHOD test_attri_by_oref.
+
+    DATA lo_probe TYPE REF TO ltcl_attri_probe.
+    lo_probe = NEW #( ).
+
+    DATA(lt_attri) = zabaputil_cl_util_context=>rtti_get_t_attri_by_oref( lo_probe ).
+
+    READ TABLE lt_attri WITH KEY name = `MV_TEXT` TRANSPORTING NO FIELDS. "#EC CI_SORTSEQ
+    cl_abap_unit_assert=>assert_subrc( exp = 0 ).
+
+  ENDMETHOD.
+
+  METHOD test_check_abap_cloud.
+
+    " the answer is latched - the second call gives the first one's answer
+    DATA(lv_first) = zabaputil_cl_util_context=>check_abap_cloud( ).
+
+    cl_abap_unit_assert=>assert_equals( exp = lv_first
+                                        act = zabaputil_cl_util_context=>check_abap_cloud( ) ).
+
+  ENDMETHOD.
+
+  METHOD test_classes_impl_intf.
+
+    " the repository lookup is the environment's, and this catalog ships no
+    " interface with a known implementation - so the test holds what any
+    " answer must hold: no row without a class name, and nothing for an
+    " interface that does not exist
+    DATA lt_classes TYPE zabaputil_cl_util_context=>ty_t_classes.
+    TRY.
+        lt_classes = zabaputil_cl_util_context=>rtti_get_classes_impl_intf( `IF_SERIALIZABLE_OBJECT` ).
+      CATCH cx_root.
+        RETURN.
+    ENDTRY.
+    READ TABLE lt_classes WITH KEY classname = `` TRANSPORTING NO FIELDS. "#EC CI_SORTSEQ
+    cl_abap_unit_assert=>assert_subrc( exp = 4 ).
+
+    TRY.
+        lt_classes = zabaputil_cl_util_context=>rtti_get_classes_impl_intf( `ZABAPUTIL_IF_DOES_NOT_EXIST` ).
+      CATCH cx_root.
+        RETURN.
+    ENDTRY.
+    cl_abap_unit_assert=>assert_initial( lt_classes ).
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+" methods harvested from abap2UI5 in the full sync (2026-10): the tests its
+" copy carries for them, the class lookups on the ajson mirror, which ships
+" a class with a known interface here
+CLASS ltcl_sync_downstream DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+    METHODS test_hash_string           FOR TESTING RAISING cx_static_check.
+    METHODS test_hash_fallback         FOR TESTING RAISING cx_static_check.
+    METHODS test_impl_intf_app         FOR TESTING RAISING cx_static_check.
+    METHODS test_impl_intf_lower_case  FOR TESTING RAISING cx_static_check.
+    METHODS test_impl_intf_no_app      FOR TESTING RAISING cx_static_check.
+    METHODS test_impl_intf_no_class    FOR TESTING RAISING cx_static_check.
+    METHODS test_impl_intf_interface   FOR TESTING RAISING cx_static_check.
+    METHODS test_ref_type_name_lookup  FOR TESTING RAISING cx_static_check.
+    METHODS test_ref_type_name_intf    FOR TESTING RAISING cx_static_check.
+    METHODS test_ref_type_name_class   FOR TESTING RAISING cx_static_check.
+    METHODS test_ref_type_name_no_ref  FOR TESTING RAISING cx_static_check.
+    METHODS test_class_exists_lower    FOR TESTING RAISING cx_static_check.
+    METHODS test_class_exists_case     FOR TESTING RAISING cx_static_check.
+    METHODS test_diff_ms_fraction      FOR TESTING RAISING cx_static_check.
+    METHODS test_diff_ms_minute_wrap   FOR TESTING RAISING cx_static_check.
+    METHODS test_diff_ms_midnight      FOR TESTING RAISING cx_static_check.
+    METHODS test_diff_ms_negative      FOR TESTING RAISING cx_static_check.
+    METHODS test_diff_ms_initial       FOR TESTING RAISING cx_static_check.
+    METHODS test_diff_ms_leap_day      FOR TESTING RAISING cx_static_check.
+    METHODS test_srtti_pair_roundtrip  FOR TESTING RAISING cx_static_check.
+
+ENDCLASS.
+
+CLASS zabaputil_cl_util_context DEFINITION LOCAL FRIENDS ltcl_sync_downstream.
+
+CLASS ltcl_sync_downstream IMPLEMENTATION.
+
+  METHOD test_hash_string.
+
+    " the one promise: equal texts give equal answers, different texts
+    " different ones - on every runtime. Where cl_abap_message_digest
+    " exists (a system, and open-abap-core under npm run unit) the answer
+    " is the SHA-256 of the characters; where it does not, the text itself,
+    " and the comparison holds as before
+    DATA(lv_abc)   = zabaputil_cl_util_context=>hash_string( `abc` ).
+    DATA(lv_again) = zabaputil_cl_util_context=>hash_string( `abc` ).
+    DATA(lv_other) = zabaputil_cl_util_context=>hash_string( `abd` ).
+    DATA(lv_empty) = zabaputil_cl_util_context=>hash_string( `` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = lv_abc
+                                        act = lv_again ).
+    cl_abap_unit_assert=>assert_differs( exp = lv_abc
+                                         act = lv_other ).
+    cl_abap_unit_assert=>assert_differs( exp = lv_abc
+                                         act = lv_empty ).
+
+    IF zabaputil_cl_util_context=>rtti_check_class_exists( `CL_ABAP_MESSAGE_DIGEST` ) = abap_true.
+      cl_abap_unit_assert=>assert_equals( exp = `BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD`
+                                          act = to_upper( lv_abc ) ).
+      cl_abap_unit_assert=>assert_equals( exp = 64
+                                          act = strlen( lv_empty ) ).
+    ELSE.
+      cl_abap_unit_assert=>assert_equals( exp = `abc`
+                                          act = lv_abc ).
+      cl_abap_unit_assert=>assert_initial( lv_empty ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD test_hash_fallback.
+
+    " the fallback branch on every runtime: a digest class that does not
+    " exist answers nothing, and hash_string( ) then answers the text
+    " itself (asserted above where the runtime has no digest class)
+    DATA(lv_long) = repeat( val = `{"ROW":"value"}`
+                            occ = 1000 ).
+    " (a class that exists without the method is the same CATCH on a system
+    " - CX_SY_DYN_CALL_ILLEGAL_METHOD - and a JS TypeError no CATCH sees in
+    " the transpiled runtime, so it is not asserted here)
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>hash_string_by_class(
+                                             val       = lv_long
+                                             classname = `ZZ_NO_SUCH_DIGEST_CLASS` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_impl_intf_app.
+
+    cl_abap_unit_assert=>assert_true(
+        zabaputil_cl_util_context=>rtti_check_class_impl_intf( class = `ZABAPUTIL_CL_AJSON`
+                                                               intf  = `ZABAPUTIL_IF_AJSON` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_impl_intf_lower_case.
+
+    " the interface name is normalised the way a class name is
+    cl_abap_unit_assert=>assert_true(
+        zabaputil_cl_util_context=>rtti_check_class_impl_intf( class = `ZABAPUTIL_CL_AJSON`
+                                                               intf  = `zabaputil_if_ajson` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_impl_intf_no_app.
+
+    " exists, is a class, implements something else entirely
+    cl_abap_unit_assert=>assert_false(
+        zabaputil_cl_util_context=>rtti_check_class_impl_intf( class = `ZABAPUTIL_CL_UTIL_CONTEXT`
+                                                               intf  = `ZABAPUTIL_IF_AJSON` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_impl_intf_no_class.
+
+    cl_abap_unit_assert=>assert_false(
+        zabaputil_cl_util_context=>rtti_check_class_impl_intf( class = `ZCL_THIS_CLASS_DOES_NOT_EXIST`
+                                                               intf  = `ZABAPUTIL_IF_AJSON` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_impl_intf_interface.
+
+    " an interface is not a class - it cannot be created, so it is no app
+    cl_abap_unit_assert=>assert_false(
+        zabaputil_cl_util_context=>rtti_check_class_impl_intf( class = `ZABAPUTIL_IF_AJSON`
+                                                               intf  = `ZABAPUTIL_IF_AJSON` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_ref_type_name_lookup.
+
+    " what a consumer does with it: the implementation pre-check of a
+    " dynamically named class, with no name spelled out at all
+    DATA li_app TYPE REF TO zabaputil_if_ajson.
+    DATA lo_app TYPE REF TO object.
+
+    lo_app = zabaputil_cl_ajson=>create_empty( ).
+    cl_abap_unit_assert=>assert_true(
+        zabaputil_cl_util_context=>rtti_check_class_impl_intf(
+            class = zabaputil_cl_util_context=>rtti_get_classname_by_ref( lo_app )
+            intf  = zabaputil_cl_util_context=>rtti_get_ref_type_name( li_app ) ) ).
+
+  ENDMETHOD.
+
+  METHOD test_ref_type_name_intf.
+
+    " the name a dynamic lookup needs, taken from a declaration - which a
+    " namespace rename rewrites - instead of a literal, which it does not
+    DATA li_app TYPE REF TO zabaputil_if_ajson.
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = `ZABAPUTIL_IF_AJSON`
+        act = zabaputil_cl_util_context=>rtti_get_ref_type_name( li_app ) ).
+
+  ENDMETHOD.
+
+  METHOD test_ref_type_name_class.
+
+    DATA lo_exit TYPE REF TO zabaputil_cl_util_context.
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = `ZABAPUTIL_CL_UTIL_CONTEXT`
+        act = zabaputil_cl_util_context=>rtti_get_ref_type_name( lo_exit ) ).
+
+  ENDMETHOD.
+
+  METHOD test_ref_type_name_no_ref.
+
+    " a value that is no reference is a programming error at the caller -
+    " it raises, it never answers with a name
+    DATA lv_text TYPE string.
+
+    TRY.
+        zabaputil_cl_util_context=>rtti_get_ref_type_name( lv_text ).
+        cl_abap_unit_assert=>fail( `a string is no typed reference` ).
+      CATCH zabaputil_cx_util_error INTO DATA(lx).
+        cl_abap_unit_assert=>assert_true( xsdbool( lx->get_text( ) CS `RTTI_NOT_AN_OBJECT_REFERENCE` ) ).
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD test_class_exists_lower.
+
+    " the answer is cached under the upper-case name, and RTTI is asked in
+    " that spelling too: it used to be asked in the caller's, so a class
+    " first asked in lower case could be cached as missing for the whole
+    " roll area. The name comes from a typed reference (a namespace rename
+    " rewrites it) and is asked here first - no other test asks for it
+    DATA lo_class TYPE REF TO zabaputil_cl_util_http.
+    DATA(lv_name) = zabaputil_cl_util_context=>rtti_get_ref_type_name( lo_class ).
+
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>rtti_check_class_exists( to_lower( lv_name ) ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>rtti_check_class_exists( lv_name ) ).
+
+  ENDMETHOD.
+
+  METHOD test_class_exists_case.
+
+    " the answer is cached per upper-case name, so the spelling of the FIRST
+    " question must not decide the answer to every later one
+    DATA li_app TYPE REF TO zabaputil_if_ajson.
+    DATA(lv_name) = zabaputil_cl_util_context=>rtti_get_ref_type_name( li_app ).
+
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_class_exists( `zz_no_such_class_4711` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_class_exists( `ZZ_NO_SUCH_CLASS_4711` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_class_exists( `` ) ).
+    " an interface is no class
+    cl_abap_unit_assert=>assert_equals(
+        exp = zabaputil_cl_util_context=>rtti_check_class_exists( lv_name )
+        act = zabaputil_cl_util_context=>rtti_check_class_exists( to_lower( lv_name ) ) ).
+
+  ENDMETHOD.
+
+  METHOD test_diff_ms_fraction.
+
+    " below a second - what cl_abap_tstmp=>subtract loses in the transpiled
+    " runtime, which answers whole seconds there
+    cl_abap_unit_assert=>assert_equals(
+        exp = 250
+        act = zabaputil_cl_util_context=>time_diff_milliseconds( time_from = `20261003101500.1000000`
+                                                                 time_to   = `20261003101500.3500000` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_diff_ms_minute_wrap.
+
+    " a timestamp is YYYYMMDDhhmmss, not a count - 10:15:59.75 to
+    " 10:16:00.25 is 500 ms, while the digits differ by 40.5. Quarters, not
+    " the tenths of abap2UI5's copy of this test: the transpiled runtime
+    " this repository pins holds a timestampl as a binary float, where .9
+    " and .1 are not exact (the tenths answered 203 for 200 ms) - .75 and
+    " .25 are, so the test checks the wrap and not the float
+    cl_abap_unit_assert=>assert_equals(
+        exp = 500
+        act = zabaputil_cl_util_context=>time_diff_milliseconds( time_from = `20261003101559.7500000`
+                                                                 time_to   = `20261003101600.2500000` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = 3600000
+        act = zabaputil_cl_util_context=>time_diff_milliseconds( time_from = `20261003095959.0000000`
+                                                                 time_to   = `20261003105959.0000000` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_diff_ms_midnight.
+
+    " across midnight and a year end
+    cl_abap_unit_assert=>assert_equals(
+        exp = 1500
+        act = zabaputil_cl_util_context=>time_diff_milliseconds( time_from = `20261231235959.5000000`
+                                                                 time_to   = `20270101000001.0000000` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_diff_ms_negative.
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = -1000
+        act = zabaputil_cl_util_context=>time_diff_milliseconds( time_from = `20261003101501.0000000`
+                                                                 time_to   = `20261003101500.0000000` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_diff_ms_initial.
+
+    DATA lv_initial TYPE timestampl.
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = 0
+        act = zabaputil_cl_util_context=>time_diff_milliseconds( time_from = lv_initial
+                                                                 time_to   = `20261003101500.0000000` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_diff_ms_leap_day.
+
+    " the 29th of February counts in a leap year and does not exist in any
+    " other - a day is 86 400 000 ms either way
+    cl_abap_unit_assert=>assert_equals(
+        exp = 2 * 86400000
+        act = zabaputil_cl_util_context=>time_diff_milliseconds( time_from = `20240228120000.0000000`
+                                                                 time_to   = `20240301120000.0000000` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = 86400000
+        act = zabaputil_cl_util_context=>time_diff_milliseconds( time_from = `20250228120000.0000000`
+                                                                 time_to   = `20250301120000.0000000` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_srtti_pair_roundtrip.
+
+    " type and data as two documents: neither carries the other, and the
+    " pair parses back into the same table - the combined document (one
+    " lex for the type, one for the data) is what every draft used to carry
+    FIELD-SYMBOLS <tab>  TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <back> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <row>  TYPE any.
+    FIELD-SYMBOLS <col>  TYPE any.
+    DATA lv_col   TYPE string.
+    DATA lv_type  TYPE string.
+    DATA lv_data  TYPE string.
+
+    " a runtime-built line type, like a table an app creates dynamically
+    DATA(lt_comp) = VALUE cl_abap_structdescr=>component_table(
+        ( name = `COL1` type = CAST #( cl_abap_datadescr=>describe_by_data( lv_col ) ) ) ).
+    DATA(lo_tab) = cl_abap_tabledescr=>create( p_line_type  = cl_abap_structdescr=>create( lt_comp )
+                                               p_table_kind = cl_abap_tabledescr=>tablekind_std ).
+    DATA lr_tab TYPE REF TO data.
+    CREATE DATA lr_tab TYPE HANDLE lo_tab.
+    ASSIGN lr_tab->* TO <tab>.
+    APPEND INITIAL LINE TO <tab> ASSIGNING <row>.
+    ASSIGN COMPONENT `COL1` OF STRUCTURE <row> TO <col>.
+    cl_abap_unit_assert=>assert_subrc( ).
+    <col> = `payload-value`.
+
+    zabaputil_cl_util_context=>xml_srtti_stringify_pair( EXPORTING data    = <tab>
+                                                         IMPORTING ev_type = lv_type
+                                                                   ev_data = lv_data ).
+    cl_abap_unit_assert=>assert_not_initial( lv_type ).
+    cl_abap_unit_assert=>assert_not_initial( lv_data ).
+    cl_abap_unit_assert=>assert_false( xsdbool( lv_type CS `payload-value` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_data CS `payload-value` ) ).
+
+    DATA(lr_back) = zabaputil_cl_util_context=>xml_srtti_parse_pair( iv_type = lv_type
+                                                                     iv_data = lv_data ).
+    ASSIGN lr_back->* TO <back>.
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = lines( <back> ) ).
+    ASSIGN <back>[ 1 ] TO <row>.
+    cl_abap_unit_assert=>assert_subrc( ).
+    ASSIGN COMPONENT `COL1` OF STRUCTURE <row> TO <col>.
+    cl_abap_unit_assert=>assert_subrc( ).
+    cl_abap_unit_assert=>assert_equals( exp = `payload-value`
+                                        act = <col> ).
+
   ENDMETHOD.
 
 ENDCLASS.
