@@ -1,3 +1,8 @@
+" client_target( ) is PRIVATE - the URL arithmetic it does is what the
+" tests below assert on, so the test class needs friendship
+CLASS ltcl_test DEFINITION DEFERRED.
+CLASS zabaputil_cl_util_http DEFINITION LOCAL FRIENDS ltcl_test.
+
 CLASS ltcl_fake_request DEFINITION FINAL.
   PUBLIC SECTION.
     DATA mv_cdata  TYPE string.
@@ -157,6 +162,13 @@ CLASS ltcl_test DEFINITION FINAL
     METHODS test_delete_resp_cookie   FOR TESTING RAISING cx_static_check.
     METHODS test_set_session_stateful FOR TESTING RAISING cx_static_check.
     METHODS test_onprem_getter_cache  FOR TESTING RAISING cx_static_check.
+    METHODS test_target_no_query      FOR TESTING RAISING cx_static_check.
+    METHODS test_target_destination   FOR TESTING RAISING cx_static_check.
+    METHODS test_target_url_query     FOR TESTING RAISING cx_static_check.
+    METHODS test_target_url_has_query FOR TESTING RAISING cx_static_check.
+    METHODS test_target_none_is_url   FOR TESTING RAISING cx_static_check.
+    METHODS test_get_query            FOR TESTING RAISING cx_static_check.
+    METHODS test_get_query_none       FOR TESTING RAISING cx_static_check.
 
 ENDCLASS.
 
@@ -320,6 +332,101 @@ CLASS ltcl_test IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( exp = `second`
                                         act = lo_response_old->mv_cdata ).
     cl_abap_unit_assert=>assert_initial( mo_server->response->mv_cdata ).
+
+  ENDMETHOD.
+
+  METHOD test_target_no_query.
+
+    " no query: the url as given, no request_uri to override
+    DATA(ls_target) = zabaputil_cl_util_http=>client_target( destination = ``
+                                                           url           = `https://host/path`
+                                                           query         = `` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `https://host/path`
+                                        act = ls_target-url ).
+    cl_abap_unit_assert=>assert_initial( ls_target-request_uri ).
+
+  ENDMETHOD.
+
+  METHOD test_target_destination.
+
+    " through an RFC destination the url is the destination's: the query
+    " travels as the ~request_uri header, with the leading ? the caller may
+    " or may not have written
+    DATA(ls_target) = zabaputil_cl_util_http=>client_target( destination = `MY_DEST`
+                                                           url           = ``
+                                                           query         = `?a=1&b=2` ).
+
+    cl_abap_unit_assert=>assert_initial( ls_target-url ).
+    cl_abap_unit_assert=>assert_equals( exp = `?a=1&b=2`
+                                        act = ls_target-request_uri ).
+
+    ls_target = zabaputil_cl_util_http=>client_target( destination = `MY_DEST`
+                                                     url           = ``
+                                                     query         = `a=1` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `?a=1`
+                                        act = ls_target-request_uri ).
+
+  ENDMETHOD.
+
+  METHOD test_target_url_query.
+
+    " by url the query is appended to the url itself
+    DATA(ls_target) = zabaputil_cl_util_http=>client_target( destination = ``
+                                                           url           = `https://host/path`
+                                                           query         = `?a=1` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `https://host/path?a=1`
+                                        act = ls_target-url ).
+    cl_abap_unit_assert=>assert_initial( ls_target-request_uri ).
+
+  ENDMETHOD.
+
+  METHOD test_target_url_has_query.
+
+    " a url that already carries a query takes the next one with &
+    DATA(ls_target) = zabaputil_cl_util_http=>client_target( destination = ``
+                                                           url           = `https://host/path?x=0`
+                                                           query         = `a=1` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `https://host/path?x=0&a=1`
+                                        act = ls_target-url ).
+
+  ENDMETHOD.
+
+  METHOD test_target_none_is_url.
+
+    " the destination NONE means "by url", like no destination at all
+    DATA(ls_target) = zabaputil_cl_util_http=>client_target( destination = `NONE`
+                                                           url           = `https://host/path`
+                                                           query         = `a=1` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `https://host/path?a=1`
+                                        act = ls_target-url ).
+    cl_abap_unit_assert=>assert_initial( ls_target-request_uri ).
+
+  ENDMETHOD.
+
+  METHOD test_get_query.
+
+    " cut at the FIRST `?` and left encoded - a later `?` is part of a value,
+    " and sap-startup-params keeps its %26 / %3D exactly as they came
+    INSERT VALUE #( n = `~request_uri`
+                    v = `/sap/bc/z2ui5?app_start=z&title=why?&sap-startup-params=a%3D1%26b%3D2` )
+           INTO TABLE mo_server->request->mt_header.
+
+    cl_abap_unit_assert=>assert_equals( exp = `app_start=z&title=why?&sap-startup-params=a%3D1%26b%3D2`
+                                        act = mo_cut->get_query( ) ).
+
+  ENDMETHOD.
+
+  METHOD test_get_query_none.
+
+    INSERT VALUE #( n = `~request_uri`
+                    v = `/sap/bc/z2ui5` ) INTO TABLE mo_server->request->mt_header.
+
+    cl_abap_unit_assert=>assert_initial( mo_cut->get_query( ) ).
 
   ENDMETHOD.
 

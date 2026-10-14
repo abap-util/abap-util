@@ -551,8 +551,11 @@ CLASS ltcl_boolean_ops IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD ui5_msg_type_other.
-    " Any other type maps to Information
-    cl_abap_unit_assert=>assert_equals( exp = `Information` act = zabaputil_cl_util_context=>ui5_get_msg_type( `X` ) ).
+    " any other type maps to Information - A (abort) and X (exit) are the
+    " two SAP message types above E, so they are errors, never information
+    cl_abap_unit_assert=>assert_equals( exp = `Information` act = zabaputil_cl_util_context=>ui5_get_msg_type( `Z` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `Error` act = zabaputil_cl_util_context=>ui5_get_msg_type( `X` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `Error` act = zabaputil_cl_util_context=>ui5_get_msg_type( `A` ) ).
   ENDMETHOD.
 
 ENDCLASS.
@@ -4656,6 +4659,341 @@ CLASS ltcl_coverage IMPLEMENTATION.
         RETURN.
     ENDTRY.
     cl_abap_unit_assert=>assert_initial( lt_classes ).
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+" methods harvested from abap2UI5 in the full sync (2026-10): the tests its
+" copy carries for them, the class lookups on the ajson mirror, which ships
+" a class with a known interface here
+CLASS ltcl_sync_downstream DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+    METHODS test_hash_string           FOR TESTING RAISING cx_static_check.
+    METHODS test_hash_fallback         FOR TESTING RAISING cx_static_check.
+    METHODS test_impl_intf_app         FOR TESTING RAISING cx_static_check.
+    METHODS test_impl_intf_lower_case  FOR TESTING RAISING cx_static_check.
+    METHODS test_impl_intf_no_app      FOR TESTING RAISING cx_static_check.
+    METHODS test_impl_intf_no_class    FOR TESTING RAISING cx_static_check.
+    METHODS test_impl_intf_interface   FOR TESTING RAISING cx_static_check.
+    METHODS test_ref_type_name_lookup  FOR TESTING RAISING cx_static_check.
+    METHODS test_ref_type_name_intf    FOR TESTING RAISING cx_static_check.
+    METHODS test_ref_type_name_class   FOR TESTING RAISING cx_static_check.
+    METHODS test_ref_type_name_no_ref  FOR TESTING RAISING cx_static_check.
+    METHODS test_class_exists_lower    FOR TESTING RAISING cx_static_check.
+    METHODS test_class_exists_case     FOR TESTING RAISING cx_static_check.
+    METHODS test_diff_ms_fraction      FOR TESTING RAISING cx_static_check.
+    METHODS test_diff_ms_minute_wrap   FOR TESTING RAISING cx_static_check.
+    METHODS test_diff_ms_midnight      FOR TESTING RAISING cx_static_check.
+    METHODS test_diff_ms_negative      FOR TESTING RAISING cx_static_check.
+    METHODS test_diff_ms_initial       FOR TESTING RAISING cx_static_check.
+    METHODS test_diff_ms_leap_day      FOR TESTING RAISING cx_static_check.
+    METHODS test_srtti_pair_roundtrip  FOR TESTING RAISING cx_static_check.
+
+ENDCLASS.
+
+CLASS zabaputil_cl_util_context DEFINITION LOCAL FRIENDS ltcl_sync_downstream.
+
+CLASS ltcl_sync_downstream IMPLEMENTATION.
+
+  METHOD test_hash_string.
+
+    " the one promise: equal texts give equal answers, different texts
+    " different ones - on every runtime. Where cl_abap_message_digest
+    " exists (a system, and open-abap-core under npm run unit) the answer
+    " is the SHA-256 of the characters; where it does not, the text itself,
+    " and the comparison holds as before
+    DATA(lv_abc)   = zabaputil_cl_util_context=>hash_string( `abc` ).
+    DATA(lv_again) = zabaputil_cl_util_context=>hash_string( `abc` ).
+    DATA(lv_other) = zabaputil_cl_util_context=>hash_string( `abd` ).
+    DATA(lv_empty) = zabaputil_cl_util_context=>hash_string( `` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = lv_abc
+                                        act = lv_again ).
+    cl_abap_unit_assert=>assert_differs( exp = lv_abc
+                                         act = lv_other ).
+    cl_abap_unit_assert=>assert_differs( exp = lv_abc
+                                         act = lv_empty ).
+
+    IF zabaputil_cl_util_context=>rtti_check_class_exists( `CL_ABAP_MESSAGE_DIGEST` ) = abap_true.
+      cl_abap_unit_assert=>assert_equals( exp = `BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD`
+                                          act = to_upper( lv_abc ) ).
+      cl_abap_unit_assert=>assert_equals( exp = 64
+                                          act = strlen( lv_empty ) ).
+    ELSE.
+      cl_abap_unit_assert=>assert_equals( exp = `abc`
+                                          act = lv_abc ).
+      cl_abap_unit_assert=>assert_initial( lv_empty ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD test_hash_fallback.
+
+    " the fallback branch on every runtime: a digest class that does not
+    " exist answers nothing, and hash_string( ) then answers the text
+    " itself (asserted above where the runtime has no digest class)
+    DATA(lv_long) = repeat( val = `{"ROW":"value"}`
+                            occ = 1000 ).
+    " (a class that exists without the method is the same CATCH on a system
+    " - CX_SY_DYN_CALL_ILLEGAL_METHOD - and a JS TypeError no CATCH sees in
+    " the transpiled runtime, so it is not asserted here)
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>hash_string_by_class(
+                                             val       = lv_long
+                                             classname = `ZZ_NO_SUCH_DIGEST_CLASS` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_impl_intf_app.
+
+    cl_abap_unit_assert=>assert_true(
+        zabaputil_cl_util_context=>rtti_check_class_impl_intf( class = `ZABAPUTIL_CL_AJSON`
+                                                               intf  = `ZABAPUTIL_IF_AJSON` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_impl_intf_lower_case.
+
+    " the interface name is normalised the way a class name is
+    cl_abap_unit_assert=>assert_true(
+        zabaputil_cl_util_context=>rtti_check_class_impl_intf( class = `ZABAPUTIL_CL_AJSON`
+                                                               intf  = `zabaputil_if_ajson` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_impl_intf_no_app.
+
+    " exists, is a class, implements something else entirely
+    cl_abap_unit_assert=>assert_false(
+        zabaputil_cl_util_context=>rtti_check_class_impl_intf( class = `ZABAPUTIL_CL_UTIL_CONTEXT`
+                                                               intf  = `ZABAPUTIL_IF_AJSON` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_impl_intf_no_class.
+
+    cl_abap_unit_assert=>assert_false(
+        zabaputil_cl_util_context=>rtti_check_class_impl_intf( class = `ZCL_THIS_CLASS_DOES_NOT_EXIST`
+                                                               intf  = `ZABAPUTIL_IF_AJSON` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_impl_intf_interface.
+
+    " an interface is not a class - it cannot be created, so it is no app
+    cl_abap_unit_assert=>assert_false(
+        zabaputil_cl_util_context=>rtti_check_class_impl_intf( class = `ZABAPUTIL_IF_AJSON`
+                                                               intf  = `ZABAPUTIL_IF_AJSON` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_ref_type_name_lookup.
+
+    " what a consumer does with it: the implementation pre-check of a
+    " dynamically named class, with no name spelled out at all
+    DATA li_app TYPE REF TO zabaputil_if_ajson.
+    DATA lo_app TYPE REF TO object.
+
+    lo_app = zabaputil_cl_ajson=>create_empty( ).
+    cl_abap_unit_assert=>assert_true(
+        zabaputil_cl_util_context=>rtti_check_class_impl_intf(
+            class = zabaputil_cl_util_context=>rtti_get_classname_by_ref( lo_app )
+            intf  = zabaputil_cl_util_context=>rtti_get_ref_type_name( li_app ) ) ).
+
+  ENDMETHOD.
+
+  METHOD test_ref_type_name_intf.
+
+    " the name a dynamic lookup needs, taken from a declaration - which a
+    " namespace rename rewrites - instead of a literal, which it does not
+    DATA li_app TYPE REF TO zabaputil_if_ajson.
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = `ZABAPUTIL_IF_AJSON`
+        act = zabaputil_cl_util_context=>rtti_get_ref_type_name( li_app ) ).
+
+  ENDMETHOD.
+
+  METHOD test_ref_type_name_class.
+
+    DATA lo_exit TYPE REF TO zabaputil_cl_util_context.
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = `ZABAPUTIL_CL_UTIL_CONTEXT`
+        act = zabaputil_cl_util_context=>rtti_get_ref_type_name( lo_exit ) ).
+
+  ENDMETHOD.
+
+  METHOD test_ref_type_name_no_ref.
+
+    " a value that is no reference is a programming error at the caller -
+    " it raises, it never answers with a name
+    DATA lv_text TYPE string.
+
+    TRY.
+        zabaputil_cl_util_context=>rtti_get_ref_type_name( lv_text ).
+        cl_abap_unit_assert=>fail( `a string is no typed reference` ).
+      CATCH zabaputil_cx_util_error INTO DATA(lx).
+        cl_abap_unit_assert=>assert_true( xsdbool( lx->get_text( ) CS `RTTI_NOT_AN_OBJECT_REFERENCE` ) ).
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD test_class_exists_lower.
+
+    " the answer is cached under the upper-case name, and RTTI is asked in
+    " that spelling too: it used to be asked in the caller's, so a class
+    " first asked in lower case could be cached as missing for the whole
+    " roll area. The name comes from a typed reference (a namespace rename
+    " rewrites it) and is asked here first - no other test asks for it
+    DATA lo_class TYPE REF TO zabaputil_cl_util_http.
+    DATA(lv_name) = zabaputil_cl_util_context=>rtti_get_ref_type_name( lo_class ).
+
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>rtti_check_class_exists( to_lower( lv_name ) ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>rtti_check_class_exists( lv_name ) ).
+
+  ENDMETHOD.
+
+  METHOD test_class_exists_case.
+
+    " the answer is cached per upper-case name, so the spelling of the FIRST
+    " question must not decide the answer to every later one
+    DATA li_app TYPE REF TO zabaputil_if_ajson.
+    DATA(lv_name) = zabaputil_cl_util_context=>rtti_get_ref_type_name( li_app ).
+
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_class_exists( `zz_no_such_class_4711` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_class_exists( `ZZ_NO_SUCH_CLASS_4711` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_class_exists( `` ) ).
+    " an interface is no class
+    cl_abap_unit_assert=>assert_equals(
+        exp = zabaputil_cl_util_context=>rtti_check_class_exists( lv_name )
+        act = zabaputil_cl_util_context=>rtti_check_class_exists( to_lower( lv_name ) ) ).
+
+  ENDMETHOD.
+
+  METHOD test_diff_ms_fraction.
+
+    " below a second - what cl_abap_tstmp=>subtract loses in the transpiled
+    " runtime, which answers whole seconds there
+    cl_abap_unit_assert=>assert_equals(
+        exp = 250
+        act = zabaputil_cl_util_context=>time_diff_milliseconds( time_from = `20261003101500.1000000`
+                                                                 time_to   = `20261003101500.3500000` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_diff_ms_minute_wrap.
+
+    " a timestamp is YYYYMMDDhhmmss, not a count - 10:15:59.75 to
+    " 10:16:00.25 is 500 ms, while the digits differ by 40.5. Quarters, not
+    " the tenths of abap2UI5's copy of this test: the transpiled runtime
+    " this repository pins holds a timestampl as a binary float, where .9
+    " and .1 are not exact (the tenths answered 203 for 200 ms) - .75 and
+    " .25 are, so the test checks the wrap and not the float
+    cl_abap_unit_assert=>assert_equals(
+        exp = 500
+        act = zabaputil_cl_util_context=>time_diff_milliseconds( time_from = `20261003101559.7500000`
+                                                                 time_to   = `20261003101600.2500000` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = 3600000
+        act = zabaputil_cl_util_context=>time_diff_milliseconds( time_from = `20261003095959.0000000`
+                                                                 time_to   = `20261003105959.0000000` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_diff_ms_midnight.
+
+    " across midnight and a year end
+    cl_abap_unit_assert=>assert_equals(
+        exp = 1500
+        act = zabaputil_cl_util_context=>time_diff_milliseconds( time_from = `20261231235959.5000000`
+                                                                 time_to   = `20270101000001.0000000` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_diff_ms_negative.
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = -1000
+        act = zabaputil_cl_util_context=>time_diff_milliseconds( time_from = `20261003101501.0000000`
+                                                                 time_to   = `20261003101500.0000000` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_diff_ms_initial.
+
+    DATA lv_initial TYPE timestampl.
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = 0
+        act = zabaputil_cl_util_context=>time_diff_milliseconds( time_from = lv_initial
+                                                                 time_to   = `20261003101500.0000000` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_diff_ms_leap_day.
+
+    " the 29th of February counts in a leap year and does not exist in any
+    " other - a day is 86 400 000 ms either way
+    cl_abap_unit_assert=>assert_equals(
+        exp = 2 * 86400000
+        act = zabaputil_cl_util_context=>time_diff_milliseconds( time_from = `20240228120000.0000000`
+                                                                 time_to   = `20240301120000.0000000` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = 86400000
+        act = zabaputil_cl_util_context=>time_diff_milliseconds( time_from = `20250228120000.0000000`
+                                                                 time_to   = `20250301120000.0000000` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_srtti_pair_roundtrip.
+
+    " type and data as two documents: neither carries the other, and the
+    " pair parses back into the same table - the combined document (one
+    " lex for the type, one for the data) is what every draft used to carry
+    FIELD-SYMBOLS <tab>  TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <back> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <row>  TYPE any.
+    FIELD-SYMBOLS <col>  TYPE any.
+    DATA lv_col   TYPE string.
+    DATA lv_type  TYPE string.
+    DATA lv_data  TYPE string.
+
+    " a runtime-built line type, like a table an app creates dynamically
+    DATA(lt_comp) = VALUE cl_abap_structdescr=>component_table(
+        ( name = `COL1` type = CAST #( cl_abap_datadescr=>describe_by_data( lv_col ) ) ) ).
+    DATA(lo_tab) = cl_abap_tabledescr=>create( p_line_type  = cl_abap_structdescr=>create( lt_comp )
+                                               p_table_kind = cl_abap_tabledescr=>tablekind_std ).
+    DATA lr_tab TYPE REF TO data.
+    CREATE DATA lr_tab TYPE HANDLE lo_tab.
+    ASSIGN lr_tab->* TO <tab>.
+    APPEND INITIAL LINE TO <tab> ASSIGNING <row>.
+    ASSIGN COMPONENT `COL1` OF STRUCTURE <row> TO <col>.
+    cl_abap_unit_assert=>assert_subrc( ).
+    <col> = `payload-value`.
+
+    zabaputil_cl_util_context=>xml_srtti_stringify_pair( EXPORTING data    = <tab>
+                                                         IMPORTING ev_type = lv_type
+                                                                   ev_data = lv_data ).
+    cl_abap_unit_assert=>assert_not_initial( lv_type ).
+    cl_abap_unit_assert=>assert_not_initial( lv_data ).
+    cl_abap_unit_assert=>assert_false( xsdbool( lv_type CS `payload-value` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_data CS `payload-value` ) ).
+
+    DATA(lr_back) = zabaputil_cl_util_context=>xml_srtti_parse_pair( iv_type = lv_type
+                                                                     iv_data = lv_data ).
+    ASSIGN lr_back->* TO <back>.
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = lines( <back> ) ).
+    ASSIGN <back>[ 1 ] TO <row>.
+    cl_abap_unit_assert=>assert_subrc( ).
+    ASSIGN COMPONENT `COL1` OF STRUCTURE <row> TO <col>.
+    cl_abap_unit_assert=>assert_subrc( ).
+    cl_abap_unit_assert=>assert_equals( exp = `payload-value`
+                                        act = <col> ).
 
   ENDMETHOD.
 
