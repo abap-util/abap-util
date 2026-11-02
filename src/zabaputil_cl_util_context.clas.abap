@@ -4411,19 +4411,44 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CONTINUE.
       ENDIF.
 
-      DATA(lv_field_where) = ``.
+      " the select-options are bound to the view, so the name comes back from
+      " the browser - only a plain field name goes into the WHERE clause, never
+      " a condition or a subquery on another table
+      " a character set instead of a regex: PCRE is not on 7.02, POSIX not
+      " on ABAP Cloud
+      IF ls_filter-name IS INITIAL
+          OR ls_filter-name CN `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_/`.
+        CONTINUE.
+      ENDIF.
+
+      " select-option semantics: a row matches one of the including ranges
+      " and none of the excluding ones. An excluding range arrives here
+      " already negated (filter_get_sql_cond_by_range), so the includes are
+      " joined with OR and the excludes with AND - OR-ing them too let
+      " every row through that missed a single exclude
+      DATA(lv_include) = ``.
+      DATA(lv_exclude) = ``.
       LOOP AT ls_filter-t_range INTO DATA(ls_range).
         DATA(lv_cond) = filter_get_sql_cond_by_range( fieldname = ls_filter-name
                                                       range     = ls_range ).
         IF lv_cond IS INITIAL.
           CONTINUE.
         ENDIF.
-        IF lv_field_where IS INITIAL.
-          lv_field_where = lv_cond.
+        IF ls_range-sign = `E`.
+          lv_exclude = COND #( WHEN lv_exclude IS INITIAL THEN lv_cond
+                               ELSE |{ lv_exclude } AND { lv_cond }| ).
         ELSE.
-          lv_field_where = |{ lv_field_where } OR { lv_cond }|.
+          lv_include = COND #( WHEN lv_include IS INITIAL THEN lv_cond
+                               ELSE |{ lv_include } OR { lv_cond }| ).
         ENDIF.
       ENDLOOP.
+
+      DATA(lv_field_where) = COND string(
+        WHEN lv_include IS NOT INITIAL AND lv_exclude IS NOT INITIAL
+        THEN |( { lv_include } ) AND { lv_exclude }|
+        WHEN lv_include IS NOT INITIAL
+        THEN lv_include
+        ELSE lv_exclude ).
 
       IF lv_field_where IS INITIAL.
         CONTINUE.
@@ -4466,7 +4491,29 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       ENDCASE.
     ENDIF.
 
-    DATA(lv_like) = ``.
+    " CP: only * and + are wildcards - a _ or % the user typed is a plain
+    " character, as in an IN range, so it is escaped
+    DATA(lv_like) = replace( val  = lv_low
+                             sub  = `#`
+                             with = `##`
+                             occ  = 0 ).
+    lv_like = replace( val  = lv_like
+                       sub  = `%`
+                       with = `#%`
+                       occ  = 0 ).
+    lv_like = replace( val  = lv_like
+                       sub  = `_`
+                       with = `#_`
+                       occ  = 0 ).
+    lv_like = replace( val  = lv_like
+                       sub  = `*`
+                       with = `%`
+                       occ  = 0 ).
+    lv_like = replace( val  = lv_like
+                       sub  = `+`
+                       with = `_`
+                       occ  = 0 ).
+
     CASE lv_option.
       WHEN `EQ`.
         result = |{ fieldname } = '{ lv_low }'|.
@@ -4481,15 +4528,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       WHEN `GE`.
         result = |{ fieldname } >= '{ lv_low }'|.
       WHEN `CP`.
-        lv_like = lv_low.
-        REPLACE ALL OCCURRENCES OF `*` IN lv_like WITH `%`.
-        REPLACE ALL OCCURRENCES OF `+` IN lv_like WITH `_`.
-        result = |{ fieldname } LIKE '{ lv_like }'|.
+        result = |{ fieldname } LIKE '{ lv_like }' ESCAPE '#'|.
       WHEN `NP`.
-        lv_like = lv_low.
-        REPLACE ALL OCCURRENCES OF `*` IN lv_like WITH `%`.
-        REPLACE ALL OCCURRENCES OF `+` IN lv_like WITH `_`.
-        result = |{ fieldname } NOT LIKE '{ lv_like }'|.
+        result = |{ fieldname } NOT LIKE '{ lv_like }' ESCAPE '#'|.
       WHEN `BT`.
         result = |{ fieldname } BETWEEN '{ lv_low }' AND '{ lv_high }'|.
       WHEN `NB`.
@@ -4811,7 +4852,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           cl_abap_datadescr=>typekind_float OR
           cl_abap_datadescr=>typekind_decfloat16 OR
           cl_abap_datadescr=>typekind_decfloat34 OR
-          cl_abap_datadescr=>typekind_hex.
+          cl_abap_datadescr=>typekind_hex OR
+          `8`.
+        " `8`: typekind_int8, a constant lower releases do not have
         result = abap_true.
     ENDCASE.
 
@@ -5038,8 +5081,23 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD rtti_create_tab_by_name.
 
-    DATA(struct_desc) = cl_abap_structdescr=>describe_by_name( val ).
-    DATA(data_desc) = CAST cl_abap_datadescr( struct_desc ).
+    " type_not_found is a classic exception: called functionally, an unknown
+    " name ends in a short dump no CATCH stops - so it is handled here and
+    " the caller gets an unbound reference instead
+    DATA lo_type TYPE REF TO cl_abap_typedescr.
+    cl_abap_typedescr=>describe_by_name( EXPORTING  p_name         = val
+                                         RECEIVING  p_descr_ref    = lo_type
+                                         EXCEPTIONS type_not_found = 1
+                                                    OTHERS         = 2 ).
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    " a class or an interface of that name is no data type - the kind, not
+    " IS INSTANCE OF, which the 7.02 downport cannot express
+    IF lo_type->kind = cl_abap_typedescr=>kind_class OR lo_type->kind = cl_abap_typedescr=>kind_intf.
+      RETURN.
+    ENDIF.
+    DATA(data_desc) = CAST cl_abap_datadescr( lo_type ).
     DATA(gr_dyntable_typ) = cl_abap_tabledescr=>create( data_desc ).
     CREATE DATA result TYPE HANDLE gr_dyntable_typ.
 
@@ -5685,7 +5743,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
               cl_abap_datadescr=>typekind_packed OR
               cl_abap_datadescr=>typekind_float OR
               cl_abap_datadescr=>typekind_decfloat16 OR
-              cl_abap_datadescr=>typekind_decfloat34.
+              cl_abap_datadescr=>typekind_decfloat34 OR
+              `8`.
+            " `8`: typekind_int8, a constant lower releases do not have
             result = |{ val }|.
           WHEN OTHERS.
             result = val.
@@ -6593,6 +6653,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD conv_decode_x_base64.
     DATA lv_web_http_name TYPE c LENGTH 19.
     DATA classname        TYPE c LENGTH 15.
+    DATA lx_first         TYPE REF TO cx_root.
 
     TRY.
 
@@ -6602,8 +6663,14 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             encoded = val
           RECEIVING
             decoded = result.
+        RETURN.
 
-      CATCH cx_root.
+      CATCH cx_root INTO lx_first ##NO_HANDLER.
+        " the cause is chained below if the classic API fails too - the
+        " two-TRY shape of conv_get_string_by_xstring, reasoning there
+    ENDTRY.
+
+    TRY.
 
         classname = `CL_HTTP_UTILITY`.
         CALL METHOD (classname)=>(`DECODE_X_BASE64`)
@@ -6612,6 +6679,11 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           RECEIVING
             decoded = result.
 
+      CATCH cx_root.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val      = `UNSUPPORTED_BASE64_API - neither CL_WEB_HTTP_UTILITY nor CL_HTTP_UTILITY could decode here`
+            previous = lx_first.
     ENDTRY.
 
   ENDMETHOD.
@@ -6619,6 +6691,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD conv_encode_x_base64.
     DATA lv_web_http_name TYPE c LENGTH 19.
     DATA classname        TYPE c LENGTH 15.
+    DATA lx_first         TYPE REF TO cx_root.
 
     TRY.
 
@@ -6628,8 +6701,13 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             unencoded = val
           RECEIVING
             encoded   = result.
+        RETURN.
 
-      CATCH cx_root.
+      CATCH cx_root INTO lx_first ##NO_HANDLER.
+        " see conv_decode_x_base64
+    ENDTRY.
+
+    TRY.
 
         classname = `CL_HTTP_UTILITY`.
         CALL METHOD (classname)=>(`ENCODE_X_BASE64`)
@@ -6638,6 +6716,11 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           RECEIVING
             encoded   = result.
 
+      CATCH cx_root.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val      = `UNSUPPORTED_BASE64_API - neither CL_WEB_HTTP_UTILITY nor CL_HTTP_UTILITY could encode here`
+            previous = lx_first.
     ENDTRY.
 
   ENDMETHOD.
@@ -11921,10 +12004,14 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     " replaces below, unchanged
     IF gv_xml_escape_specials IS INITIAL.
       " the XML-illegal control characters as one string, so the CA scan
-      " stays a single statement; built from their UTF-8 bytes
+      " stays a single statement; built from their UTF-8 bytes. Behind them
+      " the two non-characters U+FFFE and U+FFFF (EF BF BE, EF BF BF): a
+      " legacy long text through a broken codepage conversion carries them,
+      " and the XMLView parser refuses the whole document for one of them
       TRY.
           gv_xml_escape_controls = conv_get_string_by_xstring(
-              CONV xstring( `000102030405060708` && `0B0C` && `0E0F101112131415161718191A1B1C1D1E1F` ) ).
+              CONV xstring( `000102030405060708` && `0B0C` && `0E0F101112131415161718191A1B1C1D1E1F`
+                            && `EFBFBE` && `EFBFBF` ) ).
         CATCH zabaputil_cx_util_error.
           " No codepage API here (UNSUPPORTED_CODEPAGE_API). Degrade instead of
           " failing: the set stays empty, the CA scan below then matches no
@@ -13410,6 +13497,13 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     result = rtti_create_tab_by_name( lv_tab ).
     FIELD-SYMBOLS <tab> TYPE STANDARD TABLE.
     ASSIGN result->* TO <tab>.
+    " rtti_create_tab_by_name answers an unknown name with an unbound
+    " reference - the SELECT below would dump on the unassigned target
+    IF <tab> IS NOT ASSIGNED.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |DB_TABLE_NOT_FOUND - no table or view { lv_tab }|.
+    ENDIF.
 
     TRY.
         IF max_rows > 0.

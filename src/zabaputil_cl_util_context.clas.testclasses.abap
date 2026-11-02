@@ -1176,7 +1176,7 @@ CLASS ltcl_filter_ops IMPLEMENTATION.
     DATA(lt_filter) = VALUE zabaputil_cl_util_context=>ty_t_filter_multi(
         ( name = `NAME` t_range = VALUE #( ( sign = `I` option = `CP` low = `*test*` ) ) ) ).
     DATA(lv_result) = zabaputil_cl_util_context=>filter_get_sql_where( lt_filter ).
-    cl_abap_unit_assert=>assert_equals( exp = `( NAME LIKE '%test%' )` act = lv_result ).
+    cl_abap_unit_assert=>assert_equals( exp = `( NAME LIKE '%test%' ESCAPE '#' )` act = lv_result ).
   ENDMETHOD.
 
   METHOD sql_where_multiple_fields.
@@ -4167,6 +4167,7 @@ CLASS ltcl_sync_core_helpers DEFINITION FINAL
     METHODS test_escape_json       FOR TESTING RAISING cx_static_check.
     METHODS test_escape_js         FOR TESTING RAISING cx_static_check.
     METHODS test_escape_xml        FOR TESTING RAISING cx_static_check.
+    METHODS test_base64_roundtrip  FOR TESTING RAISING cx_static_check.
     METHODS test_truncate          FOR TESTING RAISING cx_static_check.
     METHODS test_filter_chars      FOR TESTING RAISING cx_static_check.
     METHODS test_cut_at            FOR TESTING RAISING cx_static_check.
@@ -4307,6 +4308,27 @@ CLASS ltcl_sync_core_helpers IMPLEMENTATION.
                                         act = zabaputil_cl_util_context=>c_escape_xml( lv_raw ) ).
     cl_abap_unit_assert=>assert_equals( exp = `plain`
                                         act = zabaputil_cl_util_context=>c_escape_xml( `plain` ) ).
+
+    " the non-characters U+FFFE and U+FFFF are dropped like a control
+    " character - the XMLView parser refuses the document for one of them
+    DATA(lv_nonchar) = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `EFBFBE` && `EFBFBF` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `ab`
+                                        act = zabaputil_cl_util_context=>c_escape_xml( `a` && lv_nonchar && `b` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_base64_roundtrip.
+
+    DATA lv_empty TYPE xstring.
+
+    DATA(lv_xstr) = zabaputil_cl_util_context=>conv_get_xstring_by_string( `Hello` ).
+    DATA(lv_b64) = zabaputil_cl_util_context=>conv_encode_x_base64( lv_xstr ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `SGVsbG8=`
+                                        act = lv_b64 ).
+    cl_abap_unit_assert=>assert_equals( exp = lv_xstr
+                                        act = zabaputil_cl_util_context=>conv_decode_x_base64( lv_b64 ) ).
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>conv_encode_x_base64( lv_empty ) ).
 
   ENDMETHOD.
 
@@ -4994,6 +5016,116 @@ CLASS ltcl_sync_downstream IMPLEMENTATION.
     cl_abap_unit_assert=>assert_subrc( ).
     cl_abap_unit_assert=>assert_equals( exp = `payload-value`
                                         act = <col> ).
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+CLASS ltcl_filter_where DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+    METHODS includes_or            FOR TESTING RAISING cx_static_check.
+    METHODS excludes_and           FOR TESTING RAISING cx_static_check.
+    METHODS include_and_exclude    FOR TESTING RAISING cx_static_check.
+    METHODS fields_and             FOR TESTING RAISING cx_static_check.
+    METHODS quote_doubled          FOR TESTING RAISING cx_static_check.
+    METHODS pattern_escaped        FOR TESTING RAISING cx_static_check.
+    METHODS name_not_a_field       FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+
+
+CLASS ltcl_filter_where IMPLEMENTATION.
+
+  METHOD includes_or.
+
+    DATA(lv_where) = zabaputil_cl_util_context=>filter_get_sql_where( VALUE #(
+        ( name    = `F`
+          t_range = VALUE #( ( sign = `I` option = `EQ` low = `A` )
+                             ( sign = `I` option = `EQ` low = `B` ) ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `( F = 'A' OR F = 'B' )`
+                                        act = lv_where ).
+
+  ENDMETHOD.
+
+  METHOD excludes_and.
+
+    " a row is kept only if it misses every excluded value
+    DATA(lv_where) = zabaputil_cl_util_context=>filter_get_sql_where( VALUE #(
+        ( name    = `F`
+          t_range = VALUE #( ( sign = `E` option = `EQ` low = `X` )
+                             ( sign = `E` option = `EQ` low = `Y` ) ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `( F <> 'X' AND F <> 'Y' )`
+                                        act = lv_where ).
+
+  ENDMETHOD.
+
+  METHOD include_and_exclude.
+
+    DATA(lv_where) = zabaputil_cl_util_context=>filter_get_sql_where( VALUE #(
+        ( name    = `F`
+          t_range = VALUE #( ( sign = `I` option = `CP` low = `A*` )
+                             ( sign = `E` option = `EQ` low = `AB` ) ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `( ( F LIKE 'A%' ESCAPE '#' ) AND F <> 'AB' )`
+                                        act = lv_where ).
+
+  ENDMETHOD.
+
+  METHOD fields_and.
+
+    DATA(lv_where) = zabaputil_cl_util_context=>filter_get_sql_where( VALUE #(
+        ( name    = `F`
+          t_range = VALUE #( ( sign = `I` option = `EQ` low = `A` ) ) )
+        ( name    = `G`
+          t_range = VALUE #( ( sign = `E` option = `EQ` low = `B` ) ) )
+        " the empty range spelled out: the transpiled runtime carries the
+        " previous row's t_range into a row that leaves it out
+        ( name    = `H`
+          t_range = VALUE #( ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `( F = 'A' ) AND ( G <> 'B' )`
+                                        act = lv_where ).
+
+  ENDMETHOD.
+
+  METHOD quote_doubled.
+
+    DATA(lv_where) = zabaputil_cl_util_context=>filter_get_sql_where( VALUE #(
+        ( name    = `F`
+          t_range = VALUE #( ( sign = `I` option = `EQ` low = `O'Neil` ) ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `( F = 'O''Neil' )`
+                                        act = lv_where ).
+
+  ENDMETHOD.
+
+  METHOD pattern_escaped.
+
+    " * and + are the wildcards - a typed _ or % only matches itself
+    DATA(lv_where) = zabaputil_cl_util_context=>filter_get_sql_where( VALUE #(
+        ( name    = `F`
+          t_range = VALUE #( ( sign = `I` option = `CP` low = `Z_T%#*+` ) ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `( F LIKE 'Z#_T#%##%_' ESCAPE '#' )`
+                                        act = lv_where ).
+
+  ENDMETHOD.
+
+  METHOD name_not_a_field.
+
+    " a name that is no plain field name never reaches the WHERE clause
+    DATA(lv_where) = zabaputil_cl_util_context=>filter_get_sql_where( VALUE #(
+        ( name    = `F = 'A' OR EXISTS ( SELECT bname FROM usr02 ) OR F`
+          t_range = VALUE #( ( sign = `I` option = `EQ` low = `A` ) ) )
+        ( name    = `G`
+          t_range = VALUE #( ( sign = `I` option = `EQ` low = `B` ) ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `( G = 'B' )`
+                                        act = lv_where ).
 
   ENDMETHOD.
 
