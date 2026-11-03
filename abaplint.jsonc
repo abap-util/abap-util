@@ -26,6 +26,9 @@
     "parser_error": true,
     "superclass_final": true,
     "unknown_types": true,
-    "xml_consistency": true
+    "xml_consistency": true,
+    // a failed ASSIGN in a loop keeps the previous binding, so IS ASSIGNED after
+    // it answers for the wrong row - UNASSIGN in front (abaplint 2.120.76+)
+    "is_assigned_in_loop": true
   }
 }

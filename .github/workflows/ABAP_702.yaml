@@ -21,6 +21,6 @@ jobs:
         ref: 702
     - uses: actions/setup-node@v3
       with:
-        node-version: 20
+        node-version: '22'
     - run: npm ci
     - run: npx abaplint .github/abaplint/abap_702.jsonc

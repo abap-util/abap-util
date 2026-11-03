@@ -13521,7 +13521,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     TRY.
         IF max_rows > 0.
-          SELECT * FROM (lv_tab) WHERE (lv_where) INTO TABLE @<tab> UP TO @max_rows ROWS.
+          " INTO and UP TO ahead of WHERE: the 702 downport moves INTO in front of
+          " WHERE but leaves a trailing UP TO behind, which no release parses
+          SELECT * FROM (lv_tab) INTO TABLE @<tab> UP TO @max_rows ROWS WHERE (lv_where).
         ELSE.
           SELECT * FROM (lv_tab) WHERE (lv_where) INTO TABLE @<tab>.
         ENDIF.
