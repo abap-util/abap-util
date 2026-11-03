@@ -184,6 +184,101 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE abap_bool.
 
+    TYPES:
+      "! the DDIC reference field of an amount (CURR, referencing a CUKY)
+      "! or a quantity (QUAN, referencing a UNIT): the component of the
+      "! same structure that holds the currency or the unit
+      BEGIN OF ty_s_ref_field,
+        name     TYPE string,
+        currency TYPE abap_bool,
+      END OF ty_s_ref_field.
+
+    "! the core:require of the types the ui5_binding_* methods name: the
+    "! aliases DateType, TimeType, FloatType, IntType, CurrType and
+    "! UnitType. Set it once on the View or on any control above the bound
+    "! ones - the aliases work on UI5 1.71 and on 2.x, where the global
+    "! names of the types are gone
+    CLASS-METHODS ui5_get_type_require
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! the type alias of ui5_get_type_require( ) for an ABAP type kind
+    "! (cl_abap_typedescr=>typekind_*) - empty for a kind that is shown as
+    "! it is (characters, NUMC, strings, ...). check_currency / check_unit
+    "! choose CurrType / UnitType for an amount or a quantity whose
+    "! currency or unit is bound beside it
+    CLASS-METHODS ui5_get_model_type
+      IMPORTING
+        type_kind      TYPE clike
+        check_currency TYPE abap_bool DEFAULT abap_false
+        check_unit     TYPE abap_bool DEFAULT abap_false
+      RETURNING
+        VALUE(result)  TYPE string.
+
+    "! the formatOptions that go with ui5_get_model_type( ), as a binding
+    "! object literal: the source pattern of a date or a time as the model
+    "! carries it (yyyy-MM-dd, HH:mm:ss), the decimals of a packed number,
+    "! the grouping of every number, no measure for an amount or a
+    "! quantity. Empty when the kind has no type
+    CLASS-METHODS ui5_get_format_options
+      IMPORTING
+        type_kind      TYPE clike
+        decimals       TYPE i         DEFAULT 0
+        check_currency TYPE abap_bool DEFAULT abap_false
+        check_unit     TYPE abap_bool DEFAULT abap_false
+      RETURNING
+        VALUE(result)  TYPE string.
+
+    "! the binding of path with the type and the format options of an ABAP
+    "! type kind - {path} when the kind has no type. currency_path /
+    "! unit_path bind the currency or the unit as the second part of a
+    "! Currency / Unit type. The types are the aliases of
+    "! ui5_get_type_require( ), which the view has to carry
+    CLASS-METHODS ui5_binding_by_kind
+      IMPORTING
+        path          TYPE clike
+        type_kind     TYPE clike
+        decimals      TYPE i     DEFAULT 0
+        currency_path TYPE clike OPTIONAL
+        unit_path     TYPE clike OPTIONAL
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! the binding of path with the type of val - val is only described,
+    "! never read: a field of the bound attribute, or of a row of the same
+    "! type for a relative path in a table template. A TIMESTAMP or a
+    "! TIMESTAMPL travels as an ISO text and stays {path}
+    CLASS-METHODS ui5_binding_typed
+      IMPORTING
+        path          TYPE clike
+        val           TYPE any
+        currency_path TYPE clike OPTIONAL
+        unit_path     TYPE clike OPTIONAL
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! the binding of the component comp of struc with a path relative to
+    "! the row (`PRICE`) - for a cell of a table template. An amount or a
+    "! quantity whose reference field the DDIC names in the same structure
+    "! is bound with it as Currency / Unit (rtti_get_ref_field)
+    CLASS-METHODS ui5_binding_typed_comp
+      IMPORTING
+        struc         TYPE any
+        comp          TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! the reference field of the component comp of struc as the DDIC has
+    "! it - empty for a type that is no DDIC structure, a reference field
+    "! outside struc, and always on ABAP Cloud and in the transpiled
+    "! runtime (DDFIELDS is not released)
+    CLASS-METHODS rtti_get_ref_field
+      IMPORTING
+        struc         TYPE any
+        comp          TYPE clike
+      RETURNING
+        VALUE(result) TYPE ty_s_ref_field.
+
     CLASS-METHODS rtti_check_serializable
       IMPORTING
         val           TYPE REF TO object
@@ -13921,6 +14016,225 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           EXPORTING
             val      = `UNSUPPORTED_FEATURE`
             previous = lx_srtti.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD ui5_get_type_require.
+
+    result = `{DateType: 'sap/ui/model/type/Date', TimeType: 'sap/ui/model/type/Time', `
+          && `FloatType: 'sap/ui/model/type/Float', IntType: 'sap/ui/model/type/Integer', `
+          && `CurrType: 'sap/ui/model/type/Currency', UnitType: 'sap/ui/model/type/Unit'}`.
+
+  ENDMETHOD.
+
+  METHOD ui5_get_model_type.
+
+    IF check_currency = abap_true.
+      result = `CurrType`.
+      RETURN.
+    ENDIF.
+    IF check_unit = abap_true.
+      result = `UnitType`.
+      RETURN.
+    ENDIF.
+
+    CASE type_kind.
+      WHEN cl_abap_typedescr=>typekind_date.
+        result = `DateType`.
+      WHEN cl_abap_typedescr=>typekind_time.
+        result = `TimeType`.
+      WHEN cl_abap_typedescr=>typekind_int
+          OR cl_abap_typedescr=>typekind_int1
+          OR cl_abap_typedescr=>typekind_int2
+          OR cl_abap_typedescr=>typekind_int8.
+        result = `IntType`.
+      WHEN cl_abap_typedescr=>typekind_packed
+          OR cl_abap_typedescr=>typekind_float
+          OR cl_abap_typedescr=>typekind_decfloat16
+          OR cl_abap_typedescr=>typekind_decfloat34.
+        result = `FloatType`.
+    ENDCASE.
+
+  ENDMETHOD.
+
+  METHOD ui5_get_format_options.
+
+    IF check_currency = abap_true OR check_unit = abap_true.
+      " the digits come with the currency or the unit (CLDR), the code is
+      " a column or a field of its own
+      result = `{showMeasure: false}`.
+      RETURN.
+    ENDIF.
+
+    CASE ui5_get_model_type( type_kind ).
+      WHEN `DateType`.
+        result = `{source: {pattern: 'yyyy-MM-dd'}}`.
+      WHEN `TimeType`.
+        result = `{source: {pattern: 'HH:mm:ss'}}`.
+      WHEN `IntType`.
+        result = `{groupingEnabled: true}`.
+      WHEN `FloatType`.
+        IF type_kind = cl_abap_typedescr=>typekind_packed.
+          result = |\{minFractionDigits: { decimals }, maxFractionDigits: { decimals }, groupingEnabled: true\}|.
+        ELSE.
+          result = `{groupingEnabled: true}`.
+        ENDIF.
+    ENDCASE.
+
+  ENDMETHOD.
+
+  METHOD ui5_binding_by_kind.
+
+    DATA(lv_currency) = xsdbool( currency_path IS NOT INITIAL ).
+    DATA(lv_unit) = xsdbool( lv_currency = abap_false AND unit_path IS NOT INITIAL ).
+
+    DATA(lv_type) = ui5_get_model_type( type_kind      = type_kind
+                                        check_currency = lv_currency
+                                        check_unit     = lv_unit ).
+    IF lv_type IS INITIAL.
+      result = |\{{ path }\}|.
+      RETURN.
+    ENDIF.
+
+    DATA(lv_options) = ui5_get_format_options( type_kind      = type_kind
+                                               decimals       = decimals
+                                               check_currency = lv_currency
+                                               check_unit     = lv_unit ).
+
+    IF lv_currency = abap_true.
+      result = |\{parts: [\{path: '{ path }'\}, \{path: '{ currency_path }'\}], type: '{ lv_type }', formatOptions: { lv_options }\}|.
+    ELSEIF lv_unit = abap_true.
+      result = |\{parts: [\{path: '{ path }'\}, \{path: '{ unit_path }'\}], type: '{ lv_type }', formatOptions: { lv_options }\}|.
+    ELSE.
+      result = |\{path: '{ path }', type: '{ lv_type }', formatOptions: { lv_options }\}|.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD ui5_binding_typed.
+
+    DATA(lo_descr) = cl_abap_typedescr=>describe_by_data( val ).
+    " a TIMESTAMP / TIMESTAMPL is a packed number here and an ISO text in
+    " the model - a FloatType would refuse to parse it
+    IF lo_descr->kind <> cl_abap_typedescr=>kind_elem
+        OR lo_descr->absolute_name = `\TYPE=TIMESTAMP`
+        OR lo_descr->absolute_name = `\TYPE=TIMESTAMPL`.
+      result = |\{{ path }\}|.
+      RETURN.
+    ENDIF.
+
+    DATA(lo_elem) = CAST cl_abap_elemdescr( lo_descr ).
+    result = ui5_binding_by_kind( path          = path
+                                  type_kind     = lo_descr->type_kind
+                                  decimals      = lo_elem->decimals
+                                  currency_path = currency_path
+                                  unit_path     = unit_path ).
+
+  ENDMETHOD.
+
+  METHOD ui5_binding_typed_comp.
+
+    DATA lv_currency TYPE string.
+    DATA lv_unit     TYPE string.
+    FIELD-SYMBOLS <val> TYPE any.
+
+    DATA(lv_comp) = to_upper( condense( comp ) ).
+    ASSIGN COMPONENT lv_comp OF STRUCTURE struc TO <val>.
+    IF sy-subrc <> 0.
+      result = |\{{ lv_comp }\}|.
+      RETURN.
+    ENDIF.
+
+    DATA(ls_ref) = rtti_get_ref_field( struc = struc
+                                       comp  = lv_comp ).
+    IF ls_ref-currency = abap_true.
+      lv_currency = ls_ref-name.
+    ELSE.
+      lv_unit = ls_ref-name.
+    ENDIF.
+
+    result = ui5_binding_typed( path          = lv_comp
+                                val           = <val>
+                                currency_path = lv_currency
+                                unit_path     = lv_unit ).
+
+  ENDMETHOD.
+
+  METHOD rtti_get_ref_field.
+
+    DATA lr_fields TYPE REF TO data.
+    DATA lo_type   TYPE REF TO cl_abap_datadescr.
+    DATA lv_ref    TYPE string.
+    FIELD-SYMBOLS <fields>   TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <field>    TYPE any.
+    FIELD-SYMBOLS <name>     TYPE any.
+    FIELD-SYMBOLS <reffield> TYPE any.
+    FIELD-SYMBOLS <datatype> TYPE any.
+    FIELD-SYMBOLS <ref>      TYPE any.
+
+    DATA(lv_comp) = to_upper( condense( comp ) ).
+
+    TRY.
+        DATA(lo_descr) = cl_abap_typedescr=>describe_by_data( struc ).
+        IF lo_descr->kind <> cl_abap_typedescr=>kind_struct OR lo_descr->is_ddic_type( ) = abap_false.
+          RETURN.
+        ENDIF.
+        DATA(lo_struct) = CAST cl_abap_structdescr( lo_descr ).
+
+        " DDFIELDS is not released on ABAP Cloud - there the lookup raises
+        " and the field has no reference field
+        lo_type ?= cl_abap_typedescr=>describe_by_name( `DDFIELDS` ).
+        CREATE DATA lr_fields TYPE HANDLE lo_type.
+        ASSIGN lr_fields->* TO <fields>.
+
+        CALL METHOD lo_struct->(`GET_DDIC_FIELD_LIST`)
+          RECEIVING
+            p_field_list = <fields>
+          EXCEPTIONS
+            not_found    = 1
+            no_ddic_type = 2
+            OTHERS       = 3.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+
+        LOOP AT <fields> ASSIGNING <field>.
+          UNASSIGN: <name>, <reffield>, <datatype>.
+          ASSIGN COMPONENT `FIELDNAME` OF STRUCTURE <field> TO <name>.
+          IF <name> IS NOT ASSIGNED.
+            RETURN.
+          ENDIF.
+          IF to_upper( condense( CONV string( <name> ) ) ) <> lv_comp.
+            CONTINUE.
+          ENDIF.
+
+          ASSIGN COMPONENT `REFFIELD` OF STRUCTURE <field> TO <reffield>.
+          ASSIGN COMPONENT `DATATYPE` OF STRUCTURE <field> TO <datatype>.
+          IF <reffield> IS NOT ASSIGNED OR <datatype> IS NOT ASSIGNED.
+            RETURN.
+          ENDIF.
+          IF <datatype> <> `CURR` AND <datatype> <> `QUAN`.
+            RETURN.
+          ENDIF.
+          lv_ref = to_upper( condense( CONV string( <reffield> ) ) ).
+          IF lv_ref IS INITIAL.
+            RETURN.
+          ENDIF.
+          " the DDIC may name a field of another table (T001-WAERS) - only
+          " a field of the same row can be bound beside the amount
+          ASSIGN COMPONENT lv_ref OF STRUCTURE struc TO <ref>.
+          IF sy-subrc <> 0.
+            RETURN.
+          ENDIF.
+
+          result-name     = lv_ref.
+          result-currency = xsdbool( <datatype> = `CURR` ).
+          RETURN.
+        ENDLOOP.
+
+      CATCH cx_root.
+        CLEAR result.
     ENDTRY.
 
   ENDMETHOD.

@@ -5133,3 +5133,125 @@ CLASS ltcl_filter_where IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+
+CLASS ltcl_ui5_binding DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+    METHODS binding_date_time     FOR TESTING.
+    METHODS binding_numbers       FOR TESTING.
+    METHODS binding_currency_unit FOR TESTING.
+    METHODS binding_plain         FOR TESTING.
+    METHODS binding_comp          FOR TESTING.
+
+ENDCLASS.
+
+
+CLASS ltcl_ui5_binding IMPLEMENTATION.
+
+  METHOD binding_date_time.
+
+    DATA lv_date TYPE d.
+    DATA lv_time TYPE t.
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = `{path: '/DATE', type: 'DateType', formatOptions: {source: {pattern: 'yyyy-MM-dd'}}}`
+        act = zabaputil_cl_util_context=>ui5_binding_typed( path = `/DATE`
+                                                        val  = lv_date ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = `{path: 'TIME', type: 'TimeType', formatOptions: {source: {pattern: 'HH:mm:ss'}}}`
+        act = zabaputil_cl_util_context=>ui5_binding_typed( path = `TIME`
+                                                        val  = lv_time ) ).
+
+  ENDMETHOD.
+
+  METHOD binding_numbers.
+
+    DATA lv_int    TYPE i.
+    DATA lv_packed TYPE p LENGTH 10 DECIMALS 3.
+    DATA lv_float  TYPE f.
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = `{path: 'N', type: 'IntType', formatOptions: {groupingEnabled: true}}`
+        act = zabaputil_cl_util_context=>ui5_binding_typed( path = `N`
+                                                        val  = lv_int ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = `{path: 'P', type: 'FloatType', formatOptions: {minFractionDigits: 3, maxFractionDigits: 3, groupingEnabled: true}}`
+        act = zabaputil_cl_util_context=>ui5_binding_typed( path = `P`
+                                                        val  = lv_packed ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = `{path: 'F', type: 'FloatType', formatOptions: {groupingEnabled: true}}`
+        act = zabaputil_cl_util_context=>ui5_binding_typed( path = `F`
+                                                        val  = lv_float ) ).
+
+  ENDMETHOD.
+
+  METHOD binding_currency_unit.
+
+    DATA lv_amount TYPE p LENGTH 10 DECIMALS 2.
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = `{parts: [{path: 'PRICE'}, {path: 'CURRENCY'}], type: 'CurrType', formatOptions: {showMeasure: false}}`
+        act = zabaputil_cl_util_context=>ui5_binding_typed( path          = `PRICE`
+                                                        val           = lv_amount
+                                                        currency_path = `CURRENCY` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = `{parts: [{path: 'MENGE'}, {path: 'MEINS'}], type: 'UnitType', formatOptions: {showMeasure: false}}`
+        act = zabaputil_cl_util_context=>ui5_binding_typed( path      = `MENGE`
+                                                        val       = lv_amount
+                                                        unit_path = `MEINS` ) ).
+
+  ENDMETHOD.
+
+  METHOD binding_plain.
+
+    DATA lv_text TYPE string.
+    DATA lv_char TYPE c LENGTH 10.
+    DATA lv_flag TYPE abap_bool.
+
+    cl_abap_unit_assert=>assert_equals( exp = `{TEXT}`
+                                        act = zabaputil_cl_util_context=>ui5_binding_typed( path = `TEXT`
+                                                                                        val  = lv_text ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `{/CHAR}`
+                                        act = zabaputil_cl_util_context=>ui5_binding_typed( path = `/CHAR`
+                                                                                        val  = lv_char ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `{FLAG}`
+                                        act = zabaputil_cl_util_context=>ui5_binding_typed( path = `FLAG`
+                                                                                        val  = lv_flag ) ).
+    cl_abap_unit_assert=>assert_char_cp( exp = `*CurrType: 'sap/ui/model/type/Currency'*`
+                                         act = zabaputil_cl_util_context=>ui5_get_type_require( ) ).
+
+  ENDMETHOD.
+
+  METHOD binding_comp.
+
+    TYPES:
+      BEGIN OF ty_s_row,
+        fldate TYPE d,
+        price  TYPE p LENGTH 8 DECIMALS 2,
+        text   TYPE string,
+      END OF ty_s_row.
+    DATA ls_row TYPE ty_s_row.
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = `{path: 'FLDATE', type: 'DateType', formatOptions: {source: {pattern: 'yyyy-MM-dd'}}}`
+        act = zabaputil_cl_util_context=>ui5_binding_typed_comp( struc = ls_row
+                                                             comp  = `fldate` ) ).
+    " a local type has no DDIC reference field - the amount is a number
+    cl_abap_unit_assert=>assert_equals(
+        exp = `{path: 'PRICE', type: 'FloatType', formatOptions: {minFractionDigits: 2, maxFractionDigits: 2, groupingEnabled: true}}`
+        act = zabaputil_cl_util_context=>ui5_binding_typed_comp( struc = ls_row
+                                                             comp  = `PRICE` ) ).
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>rtti_get_ref_field( struc = ls_row
+                                                                                   comp  = `PRICE` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `{TEXT}`
+                                        act = zabaputil_cl_util_context=>ui5_binding_typed_comp( struc = ls_row
+                                                                                             comp  = `TEXT` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `{MISSING}`
+                                        act = zabaputil_cl_util_context=>ui5_binding_typed_comp( struc = ls_row
+                                                                                             comp  = `MISSING` ) ).
+
+  ENDMETHOD.
+
+ENDCLASS.
