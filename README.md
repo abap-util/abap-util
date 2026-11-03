@@ -2,7 +2,6 @@
 [![ABAP_STANDARD](https://github.com/abap-util/abap-util/actions/workflows/ABAP_STANDARD.yaml/badge.svg)](https://github.com/abap-util/abap-util/actions/workflows/ABAP_STANDARD.yaml)
 [![ABAP_CLOUD](https://github.com/abap-util/abap-util/actions/workflows/ABAP_CLOUD.yaml/badge.svg)](https://github.com/abap-util/abap-util/actions/workflows/ABAP_CLOUD.yaml)
 <br>
-[![auto_build](https://github.com/abap-util/abap-util/actions/workflows/auto_build.yml/badge.svg)](https://github.com/abap-util/abap-util/actions/workflows/auto_build.yml)
 [![auto_downport](https://github.com/abap-util/abap-util/actions/workflows/auto_downport.yaml/badge.svg)](https://github.com/abap-util/abap-util/actions/workflows/auto_downport.yaml)
 <br>
 [![test_unit](https://github.com/abap-util/abap-util/actions/workflows/test_unit.yaml/badge.svg)](https://github.com/abap-util/abap-util/actions/workflows/test_unit.yaml)
@@ -37,10 +36,10 @@ abap-util is designed to be consumed **as a vendored copy, not as an installed d
 
 | Project | Vendored Copies | Scope |
 |---|---|---|
-| [abap2UI5](https://github.com/abap2UI5/abap2UI5) | `z2ui5_cl_a2ui5_context`, `z2ui5_cl_a2ui5_http`, `z2ui5_cx_a2ui5_error` (`src/00/03/`) | context class trimmed to the methods used by the core framework, the other two copied as-is |
-| [popups](https://github.com/abap2UI5-addons/popups) | `z2ui5_cl_popup_context` (`src/00/`) | methods used by the popup apps |
+| [abap2UI5](https://github.com/abap2UI5/abap2UI5) | `z2ui5_cl_ui5_util_context`, `z2ui5_cl_ui5_util_http`, `z2ui5_cx_ui5_util_error` (`src/00/03/`) | context class trimmed to the methods used by the core framework, the other two copied as-is |
+| [popups](https://github.com/abap2UI5-addons/popups) | `z2ui5_cl_popup_context`, `z2ui5_cx_popup_error` (`src/00/`) | context class trimmed to the methods used by the popup apps, the exception copied as-is |
 
-Not every class next to a vendored copy has a master here: `z2ui5_cl_a2ui5_json_fltr` in the same abap2UI5 package is framework-owned and has no counterpart in this repository. And abap2UI5's `src/99/01/` (`z2ui5_cl_util`, `z2ui5_cl_util_http`, `z2ui5_cx_util_error`, …) holds *frozen* copies from before the vendoring model — they are kept for compatibility, receive no fixes, and are never a source for the sync described below.
+Not every class next to a vendored copy has a master here: `z2ui5_cl_ui5_util_json_fl` in the same abap2UI5 package is framework-owned and has no counterpart in this repository. And abap2UI5's `src/99/01/` (`z2ui5_cl_util`, `z2ui5_cl_util_http`, `z2ui5_cx_util_error`, …) holds *frozen* copies from before the vendoring model — they are kept for compatibility, receive no fixes, and are never a source for the sync described below.
 
 This gives every consumer a zero-dependency installation ("clone and go") and full namespace isolation (several projects — even on different versions — can coexist in one system with their own copy), while this repository remains the place where all methods converge, are unit-tested, and are kept compatible with all ABAP releases.
 

@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ABAP_702-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ABAP_702:
     if: ${{ github.event_name == 'push' || github.event.workflow_run.conclusion == 'success' }}
