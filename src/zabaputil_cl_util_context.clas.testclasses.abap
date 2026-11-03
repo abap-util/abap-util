@@ -3692,6 +3692,7 @@ CLASS ltcl_sync_back IMPLEMENTATION.
   METHOD build_rap_row.
 
     DATA lt_comp TYPE cl_abap_structdescr=>component_table.
+    DATA lo_struct TYPE REF TO cl_abap_structdescr.
     FIELD-SYMBOLS <row>  TYPE any.
     FIELD-SYMBOLS <comp> TYPE any.
 
@@ -3708,7 +3709,9 @@ CLASS ltcl_sync_back IMPLEMENTATION.
                                             type = cl_abap_elemdescr=>get_i( ) ) ) ) ) INTO TABLE lt_comp.
     ENDIF.
 
-    CREATE DATA result TYPE HANDLE cl_abap_structdescr=>create( lt_comp ).
+    " the handle in a variable: TYPE HANDLE takes no functional method call
+    lo_struct = cl_abap_structdescr=>create( lt_comp ).
+    CREATE DATA result TYPE HANDLE lo_struct.
     ASSIGN result->* TO <row>.
 
     ASSIGN COMPONENT `%CID` OF STRUCTURE <row> TO <comp>.
