@@ -5036,6 +5036,7 @@ CLASS ltcl_filter_where DEFINITION FINAL
     METHODS quote_doubled          FOR TESTING RAISING cx_static_check.
     METHODS pattern_escaped        FOR TESTING RAISING cx_static_check.
     METHODS name_not_a_field       FOR TESTING RAISING cx_static_check.
+    METHODS dfies_where_escaped    FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 
@@ -5128,6 +5129,27 @@ CLASS ltcl_filter_where IMPLEMENTATION.
           t_range = VALUE #( ( sign = `I` option = `EQ` low = `B` ) ) ) ) ).
 
     cl_abap_unit_assert=>assert_equals( exp = `( G = 'B' )`
+                                        act = lv_where ).
+
+  ENDMETHOD.
+
+  METHOD dfies_where_escaped.
+
+    TYPES:
+      BEGIN OF ty_s_row,
+        f TYPE string,
+      END OF ty_s_row.
+    DATA ls_row TYPE ty_s_row.
+
+    " a typed quote cannot end the literal, a typed # % _ only matches itself
+    ls_row-f = `O'N_1%#`.
+
+    DATA(lv_where) = zabaputil_cl_util_context=>tab_get_where_by_dfies(
+        mv_check_tab_field = `F`
+        ms_data_row        = REF #( ls_row )
+        it_dfies           = VALUE #( ( fieldname = `F` ) ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = ` ( F LIKE '%O''N#_1#%##%' ESCAPE '#' )`
                                         act = lv_where ).
 
   ENDMETHOD.
