@@ -1,7 +1,7 @@
 {
   "name": "abap-util",
   "version": "1.0.0",
-  "description": "utiliy functions for ABAP",
+  "description": "utility functions for ABAP",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/oblomov-dev/abap-util"
@@ -29,6 +29,10 @@
     "downport": "abaplint --fix .github/abaplint/abap_702.jsonc && npm run syfixes",
     "auto_transpile": "rm -rf node/output && cp -r src node/downport && abap_transpile ./node/setup/abap_transpile.json",
     "unit": "echo RUNNING && node node/output/index.mjs",
-    "rename_test": "abaplint .github/abaplint/rename_test.jsonc --rename"
+    "rename_test": "abaplint .github/abaplint/rename_test.jsonc --rename",
+    "lint": "abaplint ./abaplint.jsonc",
+    "lint:cloud": "abaplint .github/abaplint/abap_cloud.jsonc",
+    "check": "npm run lint && npm run lint:cloud && npm run rename_test",
+    "test": "npm run check"
   }
 }
