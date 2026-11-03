@@ -1,13 +1,16 @@
 {
   "name": "abap-util",
   "version": "1.0.0",
-  "description": "utility functions for ABAP",
+  "description": "Utility functions for ABAP Cloud and Standard ABAP",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/oblomov-dev/abap-util"
+    "url": "git+https://github.com/abap-util/abap-util.git"
   },
   "license": "MIT",
-  "homepage": "https://github.com/oblomov-dev/abap-util",
+  "bugs": {
+    "url": "https://github.com/abap-util/abap-util/issues"
+  },
+  "homepage": "https://github.com/abap-util/abap-util#readme",
   "dependencies": {
     "@abaplint/cli": "^2.120.92",
     "@abaplint/database-sqlite": "^2.14.12",

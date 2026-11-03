@@ -6,6 +6,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: test_unit-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test_unit:
     runs-on: ubuntu-latest

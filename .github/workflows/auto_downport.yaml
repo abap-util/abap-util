@@ -4,6 +4,14 @@ on:
   push:
     branches: [main]
 
+# pushes the downported source to the branch 702
+permissions:
+  contents: write
+
+concurrency:
+  group: auto_downport-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   auto_downport:
     runs-on: ubuntu-latest
@@ -28,7 +36,7 @@ jobs:
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
         git add src
-        git commit -m "Downport changes"
+        git diff --staged --quiet || git commit -m "Downport changes"
 
     - name: Switch to Branch 702
       run: git checkout -b 702
