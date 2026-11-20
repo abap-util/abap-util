@@ -4708,6 +4708,7 @@ CLASS ltcl_sync_downstream DEFINITION FINAL
     METHODS test_ref_type_name_intf    FOR TESTING RAISING cx_static_check.
     METHODS test_ref_type_name_class   FOR TESTING RAISING cx_static_check.
     METHODS test_ref_type_name_no_ref  FOR TESTING RAISING cx_static_check.
+    METHODS test_rtti_initial_reference FOR TESTING RAISING cx_static_check.
     METHODS test_class_exists_lower    FOR TESTING RAISING cx_static_check.
     METHODS test_class_exists_case     FOR TESTING RAISING cx_static_check.
     METHODS test_diff_ms_fraction      FOR TESTING RAISING cx_static_check.
@@ -4863,6 +4864,33 @@ CLASS ltcl_sync_downstream IMPLEMENTATION.
         cl_abap_unit_assert=>fail( `a string is no typed reference` ).
       CATCH zabaputil_cx_util_error INTO DATA(lx).
         cl_abap_unit_assert=>assert_true( xsdbool( lx->get_text( ) CS `RTTI_NOT_AN_OBJECT_REFERENCE` ) ).
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD test_rtti_initial_reference.
+
+    " describe_by_*_ref raise the classic exception REFERENCE_IS_INITIAL for an
+    " initial reference, a runtime error no CATCH reaches - the helpers answer
+    " empty where every failure means "no", and raise where a result is owed
+    DATA lr_data TYPE REF TO data.
+    DATA lo_obj  TYPE REF TO object.
+
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_table_standard( lr_data ) ).
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>rtti_get_flat_components( lr_data ) ).
+
+    TRY.
+        zabaputil_cl_util_context=>rtti_get_typedescr_by_data_ref( lr_data ).
+        cl_abap_unit_assert=>fail( `an initial data reference has no type` ).
+      CATCH zabaputil_cx_util_error INTO DATA(lx_data).
+        cl_abap_unit_assert=>assert_true( xsdbool( lx_data->get_text( ) CS `RTTI_REFERENCE_IS_INITIAL` ) ).
+    ENDTRY.
+
+    TRY.
+        zabaputil_cl_util_context=>rtti_get_t_attri_by_oref( lo_obj ).
+        cl_abap_unit_assert=>fail( `an initial object reference has no attributes` ).
+      CATCH zabaputil_cx_util_error INTO DATA(lx_obj).
+        cl_abap_unit_assert=>assert_true( xsdbool( lx_obj->get_text( ) CS `RTTI_REFERENCE_IS_INITIAL` ) ).
     ENDTRY.
 
   ENDMETHOD.

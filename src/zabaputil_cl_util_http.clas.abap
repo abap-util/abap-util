@@ -327,9 +327,10 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
             code   = result-status_code
             reason = result-status_reason.
 
+        " a failed CLOSE changes nothing for the caller, the response is read
         CALL METHOD lo_client->(`CLOSE`)
           EXCEPTIONS
-            OTHERS = 1.
+            OTHERS = 0.
 
       CATCH cx_root INTO DATA(x).
         " CLOSE on the failure path too: every throw between client_create
@@ -340,7 +341,7 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
           TRY.
               CALL METHOD lo_client->(`CLOSE`)
                 EXCEPTIONS
-                  OTHERS = 1.
+                  OTHERS = 0.
             CATCH cx_root ##NO_HANDLER.
           ENDTRY.
         ENDIF.
