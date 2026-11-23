@@ -2598,6 +2598,15 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE ty_s_http_response.
 
+    "! Reset the table buffer of a database table on the application server,
+    "! so a buffered customizing table shows a change at once and not only
+    "! after the buffer synchronisation. Nothing happens on ABAP Cloud, which
+    "! has no SBUF_GENERIC_RESET, nor for an unbuffered table.
+    "! @parameter val | the database table
+    CLASS-METHODS db_reset_table_buffer
+      IMPORTING
+        val TYPE clike.
+
     CLASS-METHODS db_check_table_exists
       IMPORTING
         val           TYPE clike
@@ -13742,6 +13751,29 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         RAISE EXCEPTION TYPE zabaputil_cx_util_error
           EXPORTING
             val = lx_error.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD db_reset_table_buffer.
+
+    DATA lv_fm      TYPE c LENGTH 30 VALUE `SBUF_GENERIC_RESET`.
+    DATA lv_tabname TYPE c LENGTH 30.
+
+    IF check_abap_cloud( ) = abap_true.
+      RETURN.
+    ENDIF.
+
+    lv_tabname = val.
+    " called by name, so the class compiles where the module does not exist
+    TRY.
+        CALL FUNCTION lv_fm
+          EXPORTING
+            sync    = abap_true
+            tabname = lv_tabname
+          EXCEPTIONS
+            OTHERS  = 1.
+      CATCH cx_root ##NO_HANDLER.
     ENDTRY.
 
   ENDMETHOD.

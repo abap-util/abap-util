@@ -2827,6 +2827,7 @@ CLASS ltcl_rtti_ext DEFINITION FINAL
     METHODS table_descr_basic              FOR TESTING.
     METHODS dfies_by_rollname_basic        FOR TESTING.
     METHODS tab_by_comps                   FOR TESTING.
+    METHODS table_buffer_reset_no_raise    FOR TESTING.
     METHODS type_exists                    FOR TESTING.
     METHODS dfies_by_rollname_unknown      FOR TESTING.
     METHODS data_element_text_types        FOR TESTING.
@@ -2869,6 +2870,13 @@ CLASS ltcl_rtti_ext IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
     cl_abap_unit_assert=>assert_true( lv_found ).
+  ENDMETHOD.
+
+  METHOD table_buffer_reset_no_raise.
+    " no table of that name, or no SBUF_GENERIC_RESET (ABAP Cloud, the JS
+    " runtime): nothing happens, and nothing reaches the caller
+    zabaputil_cl_util_context=>db_reset_table_buffer( `ZZ_NO_SUCH_TABLE_AT_ALL` ).
+    cl_abap_unit_assert=>assert_true( abap_true ).
   ENDMETHOD.
 
   METHOD tab_by_comps.
