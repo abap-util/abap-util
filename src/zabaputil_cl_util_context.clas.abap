@@ -1476,6 +1476,20 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE xstring.
 
+    "! Cut an XSTRING into the lines of a binary table, as
+    "! SCMS_XSTRING_TO_BINARY does - without the function module, so it
+    "! runs on ABAP Cloud too. The line length comes from the table: a line
+    "! of one byte field (x255, SOLIX) or a structure whose first component
+    "! is one (BAPICONTEN-LINE, x1022). The last line is padded with zero
+    "! bytes; xstrlen( val ) is the real length.
+    "! @parameter val    | the bytes
+    "! @parameter result | the binary table, any of the two line shapes
+    CLASS-METHODS conv_get_bintab_by_xstring
+      IMPORTING
+        val    TYPE xstring
+      EXPORTING
+        result TYPE STANDARD TABLE.
+
     " read_description defaults to off: filling it costs one repository
     " read PER implementing class (SEO_CLASS_READ / XCO), and the common
     " caller - interface implementer discovery - only ever reads the
@@ -7091,6 +7105,45 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                        |nor CL_ABAP_CONV_IN_CE could convert here|
             previous = lx_first.
     ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD conv_get_bintab_by_xstring.
+
+    DATA lr_line   TYPE REF TO data.
+    DATA lv_len    TYPE i.
+    DATA lv_total  TYPE i.
+    DATA lv_offset TYPE i.
+    DATA lv_chunk  TYPE i.
+    FIELD-SYMBOLS <line>  TYPE any.
+    FIELD-SYMBOLS <field> TYPE any.
+
+    CLEAR result.
+
+    CREATE DATA lr_line LIKE LINE OF result.
+    ASSIGN lr_line->* TO <line>.
+
+    " BAPICONTEN-LINE and the like: the bytes go into the first component
+    ASSIGN COMPONENT 1 OF STRUCTURE <line> TO <field>.
+    IF sy-subrc <> 0.
+      ASSIGN <line> TO <field>.
+    ENDIF.
+
+    " the byte length - DESCRIBE FIELD is no statement of ABAP Cloud
+    lv_len = cl_abap_typedescr=>describe_by_data( <field> )->length.
+    IF lv_len <= 0.
+      RETURN.
+    ENDIF.
+
+    lv_total = xstrlen( val ).
+    WHILE lv_offset < lv_total.
+      lv_chunk = nmin( val1 = lv_len
+                       val2 = lv_total - lv_offset ).
+      CLEAR <line>.
+      <field> = val+lv_offset(lv_chunk).
+      APPEND <line> TO result.
+      lv_offset = lv_offset + lv_chunk.
+    ENDWHILE.
 
   ENDMETHOD.
 

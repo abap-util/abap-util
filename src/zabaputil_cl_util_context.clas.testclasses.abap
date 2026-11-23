@@ -1075,6 +1075,11 @@ CLASS ltcl_filter_ops DEFINITION FINAL
     METHODS token_bt                       FOR TESTING.
     METHODS token_plain_value              FOR TESTING.
 
+    " conv_get_bintab_by_xstring
+    METHODS bintab_flat_lines              FOR TESTING.
+    METHODS bintab_struct_lines            FOR TESTING.
+    METHODS bintab_empty                   FOR TESTING.
+
     " conv_exit
     METHODS conv_exit_unknown_exit         FOR TESTING.
     METHODS conv_exit_alpha_from           FOR TESTING.
@@ -1110,6 +1115,39 @@ CLASS ltcl_filter_ops DEFINITION FINAL
 ENDCLASS.
 
 CLASS ltcl_filter_ops IMPLEMENTATION.
+
+  METHOD bintab_flat_lines.
+    TYPES ty_x4 TYPE x LENGTH 4.
+    DATA lt_bin TYPE STANDARD TABLE OF ty_x4 WITH EMPTY KEY.
+    zabaputil_cl_util_context=>conv_get_bintab_by_xstring( EXPORTING val    = CONV xstring( `AABBCCDDEE` )
+                                                           IMPORTING result = lt_bin ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_bin ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV ty_x4( `AABBCCDD` ) act = lt_bin[ 1 ] ).
+    " the last line is padded with zero bytes
+    cl_abap_unit_assert=>assert_equals( exp = CONV ty_x4( `EE000000` ) act = lt_bin[ 2 ] ).
+  ENDMETHOD.
+
+  METHOD bintab_struct_lines.
+    " the BAPICONTEN shape: a structure whose first component holds the bytes
+    TYPES:
+      BEGIN OF ty_s_line,
+        line TYPE x LENGTH 3,
+      END OF ty_s_line.
+    DATA lt_bin TYPE STANDARD TABLE OF ty_s_line WITH EMPTY KEY.
+    zabaputil_cl_util_context=>conv_get_bintab_by_xstring( EXPORTING val    = CONV xstring( `010203040506` )
+                                                           IMPORTING result = lt_bin ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_bin ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV xstring( `040506` ) act = CONV xstring( lt_bin[ 2 ]-line ) ).
+  ENDMETHOD.
+
+  METHOD bintab_empty.
+    TYPES ty_x4 TYPE x LENGTH 4.
+    DATA lt_bin TYPE STANDARD TABLE OF ty_x4 WITH EMPTY KEY.
+    lt_bin = VALUE #( ( CONV ty_x4( `FFFFFFFF` ) ) ).
+    zabaputil_cl_util_context=>conv_get_bintab_by_xstring( EXPORTING val    = VALUE xstring( )
+                                                           IMPORTING result = lt_bin ).
+    cl_abap_unit_assert=>assert_initial( lt_bin ).
+  ENDMETHOD.
 
   METHOD conv_exit_unknown_exit.
     " an exit that does not exist raises, with a text - VALUE stays
