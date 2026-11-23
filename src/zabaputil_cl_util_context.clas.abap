@@ -702,6 +702,25 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO data.
 
+    "! A standard table whose line is built from components - the
+    "! structdescr, the tabledescr and the CREATE DATA in one call.
+    "! cx_sy_struct_creation and cx_sy_table_creation reach the caller.
+    "! @parameter val    | the components, e.g. from rtti_get_t_attri_by_table_name
+    "! @parameter result | a reference to the new, empty table
+    CLASS-METHODS rtti_create_tab_by_comps
+      IMPORTING
+        val           TYPE abap_component_tab
+      RETURNING
+        VALUE(result) TYPE REF TO data.
+
+    "! Whether a type of that name exists - a DDIC object, a class, an
+    "! interface. Never raises.
+    CLASS-METHODS rtti_check_type_exists
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE abap_bool.
+
     CLASS-METHODS rtti_check_type_kind_dref
       IMPORTING
         val           TYPE any
@@ -5381,6 +5400,36 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDWHILE.
 
     result = xsdbool( lv_depth = 0 AND lv_quote IS INITIAL ).
+
+  ENDMETHOD.
+
+  METHOD rtti_create_tab_by_comps.
+
+    DATA lo_struct TYPE REF TO cl_abap_structdescr.
+    DATA lo_table  TYPE REF TO cl_abap_tabledescr.
+
+    lo_struct = cl_abap_structdescr=>create( val ).
+    lo_table = cl_abap_tabledescr=>create( p_line_type  = lo_struct
+                                           p_table_kind = cl_abap_tabledescr=>tablekind_std ).
+    CREATE DATA result TYPE HANDLE lo_table.
+
+  ENDMETHOD.
+
+  METHOD rtti_check_type_exists.
+
+    DATA lv_name TYPE string.
+
+    IF val IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    lv_name = val.
+    " the non-functional form: an unknown name comes back as sy-subrc,
+    " where the functional one ends in a classic exception
+    cl_abap_typedescr=>describe_by_name( EXPORTING  p_name         = lv_name
+                                         EXCEPTIONS type_not_found = 1
+                                                    OTHERS         = 2 ).
+    result = xsdbool( sy-subrc = 0 ).
 
   ENDMETHOD.
 

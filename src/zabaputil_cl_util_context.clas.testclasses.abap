@@ -2826,6 +2826,8 @@ CLASS ltcl_rtti_ext DEFINITION FINAL
     METHODS dfies_by_table_has_fields      FOR TESTING.
     METHODS table_descr_basic              FOR TESTING.
     METHODS dfies_by_rollname_basic        FOR TESTING.
+    METHODS tab_by_comps                   FOR TESTING.
+    METHODS type_exists                    FOR TESTING.
     METHODS dfies_by_rollname_unknown      FOR TESTING.
     METHODS data_element_text_types        FOR TESTING.
 
@@ -2867,6 +2869,30 @@ CLASS ltcl_rtti_ext IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
     cl_abap_unit_assert=>assert_true( lv_found ).
+  ENDMETHOD.
+
+  METHOD tab_by_comps.
+    DATA lv_id   TYPE string.
+    DATA lv_qty  TYPE i.
+    FIELD-SYMBOLS <tab> TYPE STANDARD TABLE.
+    DATA(lr_tab) = zabaputil_cl_util_context=>rtti_create_tab_by_comps( VALUE #(
+        ( name = `ID`  type = CAST #( cl_abap_datadescr=>describe_by_data( lv_id ) ) )
+        ( name = `QTY` type = CAST #( cl_abap_datadescr=>describe_by_data( lv_qty ) ) ) ) ).
+    cl_abap_unit_assert=>assert_bound( lr_tab ).
+    ASSIGN lr_tab->* TO <tab>.
+    cl_abap_unit_assert=>assert_initial( <tab> ).
+    APPEND INITIAL LINE TO <tab> ASSIGNING FIELD-SYMBOL(<row>).
+    ASSIGN COMPONENT `QTY` OF STRUCTURE <row> TO FIELD-SYMBOL(<qty>).
+    cl_abap_unit_assert=>assert_subrc( ).
+    <qty> = 7.
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( <tab> ) ).
+  ENDMETHOD.
+
+  METHOD type_exists.
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>rtti_check_type_exists( `STRING` ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>rtti_check_type_exists( `ZABAPUTIL_CL_UTIL_CONTEXT` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_type_exists( `ZZ_NO_SUCH_TYPE_AT_ALL` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_type_exists( `` ) ).
   ENDMETHOD.
 
   METHOD dfies_by_rollname_basic.
