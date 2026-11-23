@@ -1075,6 +1075,13 @@ CLASS ltcl_filter_ops DEFINITION FINAL
     METHODS token_bt                       FOR TESTING.
     METHODS token_plain_value              FOR TESTING.
 
+    " filter_get_range_by_value / filter_get_range_t_by_value_t
+    METHODS value_eq                       FOR TESTING.
+    METHODS value_cp                       FOR TESTING.
+    METHODS value_initial                  FOR TESTING.
+    METHODS value_t_sorted_distinct        FOR TESTING.
+    METHODS value_t_keeps_blank            FOR TESTING.
+
     " filter_get_sql_where
     METHODS sql_where_eq                   FOR TESTING.
     METHODS sql_where_bt                   FOR TESTING.
@@ -1099,6 +1106,44 @@ CLASS ltcl_filter_ops DEFINITION FINAL
 ENDCLASS.
 
 CLASS ltcl_filter_ops IMPLEMENTATION.
+
+  METHOD value_eq.
+    " no `*` - EQ; a `+` is no wildcard here, it stays a character
+    DATA(lt_range) = zabaputil_cl_util_context=>filter_get_range_by_value( `A+B` ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_range ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `I`   act = lt_range[ 1 ]-sign ).
+    cl_abap_unit_assert=>assert_equals( exp = `EQ`  act = lt_range[ 1 ]-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `A+B` act = lt_range[ 1 ]-low ).
+  ENDMETHOD.
+
+  METHOD value_cp.
+    DATA(lt_range) = zabaputil_cl_util_context=>filter_get_range_by_value( `MAT*` ).
+    cl_abap_unit_assert=>assert_equals( exp = `CP`   act = lt_range[ 1 ]-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `MAT*` act = lt_range[ 1 ]-low ).
+  ENDMETHOD.
+
+  METHOD value_initial.
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>filter_get_range_by_value( `` ) ).
+  ENDMETHOD.
+
+  METHOD value_t_sorted_distinct.
+    DATA(lt_range) = zabaputil_cl_util_context=>filter_get_range_t_by_value_t(
+        VALUE #( ( `B` ) ( `A*` ) ( `B` ) ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_range ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `A*` act = lt_range[ 1 ]-low ).
+    cl_abap_unit_assert=>assert_equals( exp = `CP` act = lt_range[ 1 ]-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `B`  act = lt_range[ 2 ]-low ).
+    cl_abap_unit_assert=>assert_equals( exp = `EQ` act = lt_range[ 2 ]-option ).
+  ENDMETHOD.
+
+  METHOD value_t_keeps_blank.
+    " an empty value asks for "blank" on purpose - it is not dropped
+    DATA(lt_range) = zabaputil_cl_util_context=>filter_get_range_t_by_value_t(
+        VALUE #( ( `` ) ( `X` ) ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_range ) ).
+    cl_abap_unit_assert=>assert_equals( exp = ``   act = lt_range[ 1 ]-low ).
+    cl_abap_unit_assert=>assert_equals( exp = `EQ` act = lt_range[ 1 ]-option ).
+  ENDMETHOD.
 
   METHOD token_eq.
     DATA(ls_range) = zabaputil_cl_util_context=>filter_get_range_by_token( `=100` ).
@@ -2065,12 +2110,21 @@ CLASS ltcl_time_ops DEFINITION FINAL
     METHODS measure_start_stop             FOR TESTING.
     METHODS stampl_by_date_time            FOR TESTING.
     METHODS text_by_stampl                 FOR TESTING.
+    METHODS get_timestamp_short            FOR TESTING.
     METHODS text_by_stampl_fraction        FOR TESTING.
     METHODS text_by_stampl_utc_zone        FOR TESTING.
 
 ENDCLASS.
 
 CLASS ltcl_time_ops IMPLEMENTATION.
+
+  METHOD get_timestamp_short.
+    " whole seconds, never ahead of the precise stamp taken right after
+    DATA(lv_short) = zabaputil_cl_util_context=>time_get_timestamp( ).
+    DATA(lv_long) = zabaputil_cl_util_context=>time_get_timestampl( ).
+    cl_abap_unit_assert=>assert_not_initial( lv_short ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_short <= lv_long ) ).
+  ENDMETHOD.
 
   METHOD text_by_stampl.
     " a fraction of zero is left out - the shape a short TIMESTAMP gives

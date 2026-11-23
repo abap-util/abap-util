@@ -634,6 +634,13 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE timestampl.
 
+    "! The current time stamp in whole seconds, as GET TIME STAMP fills a
+    "! TIMESTAMP: truncated. time_get_timestampl assigned to a TIMESTAMP
+    "! field rounds instead, and can land a second in the future.
+    CLASS-METHODS time_get_timestamp
+      RETURNING
+        VALUE(result) TYPE timestamp.
+
     CLASS-METHODS time_subtract_seconds
       IMPORTING
         !time         TYPE timestampl
@@ -737,6 +744,27 @@ CLASS zabaputil_cl_util_context DEFINITION
         val           TYPE string
       RETURNING
         VALUE(result) TYPE ty_s_range.
+
+    "! A range for one value the user typed: CP when it holds a `*`, EQ
+    "! otherwise - the select-option behaviour of a search field.
+    "! @parameter val    | the value; initial gives an empty range, which selects everything
+    "! @parameter result | one line, sign I
+    CLASS-METHODS filter_get_range_by_value
+      IMPORTING
+        val           TYPE any
+      RETURNING
+        VALUE(result) TYPE ty_t_range.
+
+    "! A range for a list of values, one line per distinct value - CP for a
+    "! value with a `*`, EQ otherwise. An empty value is kept as EQ space,
+    "! so a list can ask for "blank" on purpose.
+    "! @parameter val    | the values, in any order, duplicates allowed
+    "! @parameter result | sorted by value, sign I; empty for an empty list
+    CLASS-METHODS filter_get_range_t_by_value_t
+      IMPORTING
+        val           TYPE string_table
+      RETURNING
+        VALUE(result) TYPE ty_t_range.
 
     CLASS-METHODS filter_get_token_t_by_range_t
       IMPORTING
@@ -3400,6 +3428,49 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD filter_get_range_by_value.
+
+    DATA ls_range TYPE ty_s_range.
+
+    IF val IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    ls_range-sign = `I`.
+    ls_range-low  = val.
+    IF ls_range-low CA `*`.
+      ls_range-option = `CP`.
+    ELSE.
+      ls_range-option = `EQ`.
+    ENDIF.
+    INSERT ls_range INTO TABLE result.
+
+  ENDMETHOD.
+
+  METHOD filter_get_range_t_by_value_t.
+
+    DATA lt_val   TYPE string_table.
+    DATA lv_val   TYPE string.
+    DATA ls_range TYPE ty_s_range.
+
+    lt_val = val.
+    SORT lt_val.
+    DELETE ADJACENT DUPLICATES FROM lt_val.
+
+    LOOP AT lt_val INTO lv_val.
+      CLEAR ls_range.
+      ls_range-sign = `I`.
+      ls_range-low  = lv_val.
+      IF lv_val CA `*`.
+        ls_range-option = `CP`.
+      ELSE.
+        ls_range-option = `EQ`.
+      ENDIF.
+      INSERT ls_range INTO TABLE result.
+    ENDLOOP.
+
+  ENDMETHOD.
+
   METHOD filter_get_range_by_token.
 
     DATA(lv_value) = val.
@@ -4156,6 +4227,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD time_get_date_by_stampl.
     DATA(ls_sy) = zabaputil_cl_util_context=>context_get_sy( ).
     CONVERT TIME STAMP val TIME ZONE ls_sy-zonlo INTO DATE result TIME DATA(lv_dummy).
+  ENDMETHOD.
+
+  METHOD time_get_timestamp.
+    GET TIME STAMP FIELD result.
   ENDMETHOD.
 
   METHOD time_get_timestampl.
