@@ -2064,10 +2064,34 @@ CLASS ltcl_time_ops DEFINITION FINAL
     METHODS diff_seconds                   FOR TESTING.
     METHODS measure_start_stop             FOR TESTING.
     METHODS stampl_by_date_time            FOR TESTING.
+    METHODS text_by_stampl                 FOR TESTING.
+    METHODS text_by_stampl_fraction        FOR TESTING.
+    METHODS text_by_stampl_utc_zone        FOR TESTING.
 
 ENDCLASS.
 
 CLASS ltcl_time_ops IMPLEMENTATION.
+
+  METHOD text_by_stampl.
+    " a fraction of zero is left out - the shape a short TIMESTAMP gives
+    cl_abap_unit_assert=>assert_equals(
+        exp = `2026-11-23 14:05:09`
+        act = zabaputil_cl_util_context=>time_get_text_by_stampl( CONV timestampl( `20261123140509` ) ) ).
+  ENDMETHOD.
+
+  METHOD text_by_stampl_fraction.
+    cl_abap_unit_assert=>assert_equals(
+        exp = `2026-11-23 14:05:09,1234567`
+        act = zabaputil_cl_util_context=>time_get_text_by_stampl( CONV timestampl( `20261123140509.1234567` ) ) ).
+  ENDMETHOD.
+
+  METHOD text_by_stampl_utc_zone.
+    " an explicit UTC changes nothing - the stamp is stored in UTC
+    cl_abap_unit_assert=>assert_equals(
+        exp = zabaputil_cl_util_context=>time_get_text_by_stampl( CONV timestampl( `20261123140509` ) )
+        act = zabaputil_cl_util_context=>time_get_text_by_stampl( val       = CONV timestampl( `20261123140509` )
+                                                                  time_zone = `UTC` ) ).
+  ENDMETHOD.
 
   METHOD get_timestampl.
     DATA(lv_ts) = zabaputil_cl_util_context=>time_get_timestampl( ).
@@ -2674,6 +2698,9 @@ CLASS ltcl_rtti_ext DEFINITION FINAL
     METHODS dfies_by_table_basic           FOR TESTING.
     METHODS dfies_by_table_has_fields      FOR TESTING.
     METHODS table_descr_basic              FOR TESTING.
+    METHODS dfies_by_rollname_basic        FOR TESTING.
+    METHODS dfies_by_rollname_unknown      FOR TESTING.
+    METHODS data_element_text_types        FOR TESTING.
 
 ENDCLASS.
 
@@ -2713,6 +2740,56 @@ CLASS ltcl_rtti_ext IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
     cl_abap_unit_assert=>assert_true( lv_found ).
+  ENDMETHOD.
+
+  METHOD dfies_by_rollname_basic.
+    DATA lo_descr TYPE REF TO cl_abap_typedescr.
+    IF check_dfies_available( ) = abap_false.
+      RETURN.
+    ENDIF.
+    " the JS runtime knows DFIES but not every DDIC data element
+    cl_abap_typedescr=>describe_by_name( EXPORTING  p_name         = `MANDT`
+                                         RECEIVING  p_descr_ref    = lo_descr
+                                         EXCEPTIONS type_not_found = 1
+                                                    OTHERS         = 2 ).
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    DATA(ls_result) = zabaputil_cl_util_context=>rtti_get_s_dfies_by_rollname( `MANDT` ).
+    " rollname and inttype hold on every runtime - DATATYPE and LENG do
+    " not: the JS runtime reports MANDT as CHAR of 6 bytes, a system as CLNT 3
+    cl_abap_unit_assert=>assert_equals( exp = `MANDT`
+                                        act = condense( CONV string( ls_result-rollname ) ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `C`
+                                        act = ls_result-inttype ).
+  ENDMETHOD.
+
+  METHOD dfies_by_rollname_unknown.
+    " no data element of that name - empty, not an exception; also the
+    " answer on ABAP Cloud and in the JS runtime, which have no DFIES
+    DATA(ls_result) = zabaputil_cl_util_context=>rtti_get_s_dfies_by_rollname( `ZZ_NO_SUCH_DATA_ELEMENT` ).
+    cl_abap_unit_assert=>assert_initial( ls_result ).
+  ENDMETHOD.
+
+  METHOD data_element_text_types.
+    " each type picks its field of rtti_get_data_element_texts - compared
+    " against that method, so the test holds whatever the texts are
+    DATA(ls_texts) = zabaputil_cl_util_context=>rtti_get_data_element_texts( `MANDT` ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = ls_texts-header
+        act = zabaputil_cl_util_context=>rtti_get_data_element_text( val = `MANDT` type = `H` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = ls_texts-medium
+        act = zabaputil_cl_util_context=>rtti_get_data_element_text( val = `MANDT` type = `m` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = ls_texts-long
+        act = zabaputil_cl_util_context=>rtti_get_data_element_text( val = `MANDT` type = `L` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = ls_texts-short
+        act = zabaputil_cl_util_context=>rtti_get_data_element_text( `MANDT` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = ls_texts-short
+        act = zabaputil_cl_util_context=>rtti_get_data_element_text( val = `MANDT` type = `X` ) ).
   ENDMETHOD.
 
   METHOD table_descr_basic.

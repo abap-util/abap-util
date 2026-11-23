@@ -786,6 +786,18 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE d.
 
+    "! A time stamp as readable ISO text: `2026-11-23 14:05:09`, the fraction
+    "! only when it is not zero (`2026-11-23 14:05:09,1234567`).
+    "! @parameter val       | the time stamp - a short TIMESTAMP is passed as CONV timestampl( )
+    "! @parameter time_zone | the zone to show it in; empty: UTC, as stored
+    "! @parameter result    | the text
+    CLASS-METHODS time_get_text_by_stampl
+      IMPORTING
+        val           TYPE timestampl
+        time_zone     TYPE clike OPTIONAL
+      RETURNING
+        VALUE(result) TYPE string.
+
     CLASS-METHODS conv_copy_ref_data
       IMPORTING
         !from         TYPE any
@@ -1382,6 +1394,17 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE ty_s_data_element_text.
 
+    "! One text of a data element, picked from rtti_get_data_element_texts.
+    "! @parameter val    | data element name
+    "! @parameter type   | H header, S short, M medium, L long; anything else is short
+    "! @parameter result | the text
+    CLASS-METHODS rtti_get_data_element_text
+      IMPORTING
+        val           TYPE clike
+        type          TYPE clike DEFAULT `S`
+      RETURNING
+        VALUE(result) TYPE string.
+
     CLASS-METHODS conv_decode_x_base64
       IMPORTING
         val           TYPE string
@@ -1573,6 +1596,17 @@ CLASS zabaputil_cl_util_context DEFINITION
         table_name    TYPE string
       RETURNING
         VALUE(result) TYPE ty_t_dfies.
+
+    "! The DDIC field description of a data element - length, type,
+    "! conversion exit, texts. Empty on ABAP Cloud, which has no DFIES,
+    "! and for a name that is no DDIC data element.
+    "! @parameter val    | data element name
+    "! @parameter result | the description
+    CLASS-METHODS rtti_get_s_dfies_by_rollname
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE ty_s_dfies.
 
     CLASS-METHODS tab_get_where_by_dfies
       IMPORTING
@@ -4099,6 +4133,23 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                                         off = lv_pos ) ).
       result-t_filter = filter_get_multi_by_sql_where( result-where ).
     ENDIF.
+
+  ENDMETHOD.
+
+  METHOD time_get_text_by_stampl.
+
+    DATA lv_zone TYPE c LENGTH 6.
+
+    IF time_zone IS INITIAL.
+      result = |{ val TIMESTAMP = ISO }|.
+    ELSE.
+      lv_zone = time_zone.
+      result = |{ val TIMESTAMP = ISO TIMEZONE = lv_zone }|.
+    ENDIF.
+
+    " 2026-11-23T14:05:09,0000000 -> 2026-11-23 14:05:09
+    REPLACE FIRST OCCURRENCE OF `T` IN result WITH ` `.
+    REPLACE FIRST OCCURRENCE OF `,0000000` IN result WITH ``.
 
   ENDMETHOD.
 
@@ -7152,6 +7203,27 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD rtti_get_data_element_text.
+
+    DATA texts TYPE ty_s_data_element_text.
+    DATA kind  TYPE string.
+
+    texts = rtti_get_data_element_texts( val ).
+    kind = to_upper( type ).
+
+    CASE kind.
+      WHEN `H`.
+        result = texts-header.
+      WHEN `M`.
+        result = texts-medium.
+      WHEN `L`.
+        result = texts-long.
+      WHEN OTHERS.
+        result = texts-short.
+    ENDCASE.
+
+  ENDMETHOD.
+
   METHOD rtti_get_data_element_texts.
 
     DATA data_element_name TYPE string.
@@ -8247,6 +8319,46 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
        ) INTO TABLE result.
 
     ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD rtti_get_s_dfies_by_rollname.
+
+    DATA lo_descr TYPE REF TO cl_abap_typedescr.
+    DATA lr_dfies TYPE REF TO data.
+    FIELD-SYMBOLS <dfies> TYPE any.
+
+    " DFIES and get_ddic_field( ) do not exist on ABAP Cloud - both are
+    " reached by name, so the class compiles there too
+    IF check_abap_cloud( ) = abap_true.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        cl_abap_typedescr=>describe_by_name( EXPORTING  p_name         = val
+                                             RECEIVING  p_descr_ref    = lo_descr
+                                             EXCEPTIONS type_not_found = 1
+                                                        OTHERS         = 2 ).
+        IF sy-subrc <> 0 OR lo_descr->kind <> cl_abap_typedescr=>kind_elem.
+          RETURN.
+        ENDIF.
+
+        CREATE DATA lr_dfies TYPE (`DFIES`).
+        ASSIGN lr_dfies->* TO <dfies>.
+
+        CALL METHOD lo_descr->(`GET_DDIC_FIELD`)
+          RECEIVING
+            p_flddescr   = <dfies>
+          EXCEPTIONS
+            not_found    = 1
+            no_ddic_type = 2
+            OTHERS       = 3.
+        IF sy-subrc = 0.
+          MOVE-CORRESPONDING <dfies> TO result.
+        ENDIF.
+
+      CATCH cx_root ##NO_HANDLER.
+    ENDTRY.
 
   ENDMETHOD.
 
