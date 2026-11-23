@@ -844,12 +844,31 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE string.
 
+    "! Run a conversion exit: CONVERSION_EXIT_&lt;convexit&gt;_INPUT, or _OUTPUT.
+    "!
+    "!   conv_exit( EXPORTING convexit = `MATN1` CHANGING value = lv_matnr ).
+    "!   conv_exit( EXPORTING convexit = `ALPHA` from = i_vbeln CHANGING value = lv_docno ).
+    "!
+    "! A value the exit refuses - a unit that does not exist, a material
+    "! number too long - raises zabaputil_cx_util_error with the exit's own
+    "! message; VALUE is then left as it was. A caller that can live with
+    "! the unconverted value catches it and carries on.
+    "!
+    "! @parameter convexit | the exit's name: ALPHA, MATN1, CUNIT, HUID, ...
+    "! @parameter output   | abap_true: the _OUTPUT direction
+    "! @parameter from     | the value to convert, when it is not VALUE itself. The
+    "!                       target's type decides the result - ALPHA pads to its length
+    "! @parameter value    | converted in place, or the target of FROM
+    "! @raising zabaputil_cx_util_error | the exit refused the value, or does not exist
     CLASS-METHODS conv_exit
       IMPORTING
         convexit TYPE clike
         output   TYPE abap_bool DEFAULT abap_false
+        from     TYPE any       OPTIONAL
       CHANGING
-        value    TYPE data.
+        value    TYPE data
+      RAISING
+        zabaputil_cx_util_error.
 
     CLASS-METHODS rtti_check_clike
       IMPORTING
@@ -4117,13 +4136,33 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD conv_exit.
 
+    DATA lv_message TYPE string.
+    DATA lx_error   TYPE REF TO cx_root.
+
     DATA(conex) = COND string( WHEN output = abap_true
                                THEN |CONVERSION_EXIT_{ convexit }_OUTPUT|
                                ELSE |CONVERSION_EXIT_{ convexit }_INPUT| ).
 
     TRY.
-        IF convexit = `CUNIT`.
-
+        " CUNIT reads the unit in a language; the others take no such parameter
+        IF from IS SUPPLIED AND convexit = `CUNIT`.
+          CALL FUNCTION conex
+            EXPORTING
+              input    = from
+              language = sy-langu
+            IMPORTING
+              output   = value
+            EXCEPTIONS
+              OTHERS   = 99.
+        ELSEIF from IS SUPPLIED.
+          CALL FUNCTION conex
+            EXPORTING
+              input  = from
+            IMPORTING
+              output = value
+            EXCEPTIONS
+              OTHERS = 99.
+        ELSEIF convexit = `CUNIT`.
           CALL FUNCTION conex
             EXPORTING
               input    = value
@@ -4132,9 +4171,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
               output   = value
             EXCEPTIONS
               OTHERS   = 99.
-
         ELSE.
-
           CALL FUNCTION conex
             EXPORTING
               input  = value
@@ -4142,11 +4179,28 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
               output = value
             EXCEPTIONS
               OTHERS = 99.
-
         ENDIF.
 
-      CATCH cx_root ##NO_HANDLER.
+      CATCH cx_root INTO lx_error.
+        " no such exit, or a parameter it does not accept
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = lx_error.
     ENDTRY.
+
+    IF sy-subrc <> 0.
+      " the exit raised its exception with MESSAGE ... RAISING, which leaves
+      " the message in sy-msg*
+      IF sy-msgid IS NOT INITIAL.
+        MESSAGE ID sy-msgid TYPE `E` NUMBER sy-msgno
+                WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4 INTO lv_message.
+      ELSE.
+        lv_message = |{ conex } failed|.
+      ENDIF.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = lv_message.
+    ENDIF.
 
   ENDMETHOD.
 

@@ -1075,6 +1075,10 @@ CLASS ltcl_filter_ops DEFINITION FINAL
     METHODS token_bt                       FOR TESTING.
     METHODS token_plain_value              FOR TESTING.
 
+    " conv_exit
+    METHODS conv_exit_unknown_exit         FOR TESTING.
+    METHODS conv_exit_alpha_from           FOR TESTING.
+
     " filter_get_range_by_value / filter_get_range_t_by_value_t
     METHODS value_eq                       FOR TESTING.
     METHODS value_cp                       FOR TESTING.
@@ -1106,6 +1110,37 @@ CLASS ltcl_filter_ops DEFINITION FINAL
 ENDCLASS.
 
 CLASS ltcl_filter_ops IMPLEMENTATION.
+
+  METHOD conv_exit_unknown_exit.
+    " an exit that does not exist raises, with a text - VALUE stays
+    DATA lv_value TYPE string VALUE `ABC`.
+    TRY.
+        zabaputil_cl_util_context=>conv_exit( EXPORTING convexit = `ZZNONE`
+                                              CHANGING  value    = lv_value ).
+        cl_abap_unit_assert=>fail( `no exception` ).
+      CATCH zabaputil_cx_util_error INTO DATA(lx_error).
+        cl_abap_unit_assert=>assert_not_initial( lx_error->get_text( ) ).
+    ENDTRY.
+    cl_abap_unit_assert=>assert_equals( exp = `ABC` act = lv_value ).
+  ENDMETHOD.
+
+  METHOD conv_exit_alpha_from.
+    " FROM into a longer target: ALPHA pads to the target's length
+    DATA lv_target TYPE c LENGTH 10.
+    DATA lo_descr  TYPE REF TO cl_abap_typedescr.
+    " the JS runtime has no function modules - nothing to run there
+    cl_abap_typedescr=>describe_by_name( EXPORTING  p_name         = `TFDIR`
+                                         RECEIVING  p_descr_ref    = lo_descr
+                                         EXCEPTIONS type_not_found = 1
+                                                    OTHERS         = 2 ).
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    zabaputil_cl_util_context=>conv_exit( EXPORTING convexit = `ALPHA`
+                                                    from     = `123`
+                                          CHANGING  value    = lv_target ).
+    cl_abap_unit_assert=>assert_equals( exp = `0000000123` act = lv_target ).
+  ENDMETHOD.
 
   METHOD value_eq.
     " no `*` - EQ; a `+` is no wildcard here, it stays a character
