@@ -14,6 +14,25 @@
     "errorNamespace": "."
   },
   "rules": {
+    // statements with a successor that this repository no longer uses -
+    // listed so they do not come back (abaplint 2.120.116+). The
+    // widely used READ TABLE / APPEND / CREATE OBJECT / ... follow
+    // once the code no longer has them
+    "forbidden_statement": {
+      "statements": [
+        "Describe",
+        "Refresh",
+        "Ranges",
+        "SelectLoop",
+        "Collect",
+        "Overlay",
+        "Leave",
+        "TypePools",
+        "Perform",
+        "Form",
+        "Write"
+      ]
+    },
     "downport": true,
     "begin_end_names": true,
     "check_ddic": true,
