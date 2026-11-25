@@ -7544,7 +7544,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    MOVE-CORRESPONDING <ddic> TO ddic.
+    ddic = CORRESPONDING #( BASE ( ddic ) <ddic> ).
     texts-header = ddic-reptext.
     texts-short  = ddic-scrtext_s.
     texts-medium = ddic-scrtext_m.
@@ -8619,7 +8619,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             no_ddic_type = 2
             OTHERS       = 3.
         IF sy-subrc = 0.
-          MOVE-CORRESPONDING <dfies> TO result.
+          result = CORRESPONDING #( BASE ( result ) <dfies> ).
         ENDIF.
 
       CATCH cx_root ##NO_HANDLER.
