@@ -8083,11 +8083,15 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     LOOP AT lt_attri REFERENCE INTO ls_attri.
       " the component's descriptor is already in the attribute table - no
       " ASSIGN and no describe_by_data per component
-      CHECK ls_attri->type->kind = cl_abap_typedescr=>kind_table.
+      IF ls_attri->type->kind <> cl_abap_typedescr=>kind_table.
+        CONTINUE.
+      ENDIF.
 
       TRY.
           DATA(lo_line) = CAST cl_abap_tabledescr( ls_attri->type )->get_table_line_type( ).
-          CHECK lo_line->kind = cl_abap_typedescr=>kind_struct.
+          IF lo_line->kind <> cl_abap_typedescr=>kind_struct.
+            CONTINUE.
+          ENDIF.
           DATA(lt_comps) = CAST cl_abap_structdescr( lo_line )->get_components( ).
           LOOP AT lt_comps REFERENCE INTO DATA(ls_comp).
             IF ls_comp->name = `%MSG` OR ls_comp->name = `%FAIL`.
@@ -8120,8 +8124,12 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA(lt_attri) = rtti_get_t_attri_by_any( val ).
     LOOP AT lt_attri REFERENCE INTO DATA(ls_attri).
       ASSIGN COMPONENT ls_attri->name OF STRUCTURE val TO FIELD-SYMBOL(<tab>).
-      CHECK sy-subrc = 0.
-      CHECK rtti_get_type_kind( <tab> ) = cl_abap_datadescr=>typekind_table.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      IF rtti_get_type_kind( <tab> ) <> cl_abap_datadescr=>typekind_table.
+        CONTINUE.
+      ENDIF.
 
       " guarded like data_render_tab, msg_get_internal and
       " data_get_headline - and here the symbol is LOOP-CARRIED, so an
@@ -8130,7 +8138,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       FIELD-SYMBOLS <ftab> TYPE ANY TABLE.
       UNASSIGN <ftab>.
       ASSIGN <tab> TO <ftab>.
-      CHECK <ftab> IS ASSIGNED.
+      IF <ftab> IS NOT ASSIGNED.
+        CONTINUE.
+      ENDIF.
 
       " the row kind is a property of the table TYPE - decided once per
       " table, not asked of every row (same idea as msg_get_internal_tab)
@@ -8251,11 +8261,19 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA(lv_len) = strlen( lv_prefix ).
     DATA(lt_attri) = rtti_get_t_attri_by_any( val ).
     LOOP AT lt_attri REFERENCE INTO DATA(ls_attri).
-      CHECK strlen( ls_attri->name ) > lv_len.
-      CHECK lv_len = 0 OR ls_attri->name(lv_len) = lv_prefix.
+      IF strlen( ls_attri->name ) <= lv_len.
+        CONTINUE.
+      ENDIF.
+      IF NOT ( lv_len = 0 OR ls_attri->name(lv_len) = lv_prefix ).
+        CONTINUE.
+      ENDIF.
       ASSIGN COMPONENT ls_attri->name OF STRUCTURE val TO FIELD-SYMBOL(<flag>).
-      CHECK sy-subrc = 0.
-      CHECK <flag> IS NOT INITIAL.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      IF <flag> IS INITIAL.
+        CONTINUE.
+      ENDIF.
       INSERT ls_attri->name+lv_len INTO TABLE result.
     ENDLOOP.
 
@@ -8322,7 +8340,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     LOOP AT lt_attri REFERENCE INTO DATA(ls_attri).
       ASSIGN COMPONENT ls_attri->name OF STRUCTURE val TO FIELD-SYMBOL(<comp>).
-      CHECK sy-subrc = 0.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
 
       DATA(lv_sub_kind) = rtti_get_type_kind( <comp> ).
       IF lv_sub_kind = cl_abap_datadescr=>typekind_struct1

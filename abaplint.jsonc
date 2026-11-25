@@ -35,7 +35,8 @@
         "Write",
         "ReadTable",
         "Append",
-        "GetReference"
+        "GetReference",
+        "Check"
       ]
     },
     "downport": true,
