@@ -3810,7 +3810,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         ENDIF.
         lv_index = lv_index + 1.
         DATA(lv_field_val) = |{ <field> }|.
-        REPLACE ALL OCCURRENCES OF `;` IN lv_field_val WITH `,`.
+        lv_field_val = replace( val = lv_field_val sub = `;` with = `,` occ = 0 ).
         lv_line = |{ lv_line }{ lv_field_val };|.
       ENDDO.
       INSERT lv_line INTO TABLE lt_lines.
@@ -3832,7 +3832,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     LOOP AT lt_cols REFERENCE INTO DATA(lr_col).
 
       DATA(lv_name) = c_trim_upper( lr_col->* ).
-      REPLACE ALL OCCURRENCES OF ` ` IN lv_name WITH `_`.
+      lv_name = replace( val = lv_name sub = ` ` with = `_` occ = 0 ).
 
       INSERT VALUE #( name = lv_name
                       type = cl_abap_elemdescr=>get_c( 40 ) ) INTO TABLE lt_comp.
@@ -4283,7 +4283,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA(lv_sql) = CONV string( val ).
 
     DATA(lv_squished) = lv_sql.
-    REPLACE ALL OCCURRENCES OF ` ` IN lv_squished WITH ``.
+    lv_squished = replace( val = lv_squished sub = ` ` with = `` occ = 0 ).
     lv_squished = to_upper( lv_squished ).
     SPLIT lv_squished AT `SELECTFROM` INTO DATA(lv_dummy) DATA(lv_tab).
     SPLIT lv_tab AT `FIELDS` INTO lv_tab lv_dummy.
@@ -4313,8 +4313,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDIF.
 
     " 2026-11-23T14:05:09,0000000 -> 2026-11-23 14:05:09
-    REPLACE FIRST OCCURRENCE OF `T` IN result WITH ` `.
-    REPLACE FIRST OCCURRENCE OF `,0000000` IN result WITH ``.
+    result = replace( val = result sub = `T` with = ` ` ).
+    result = replace( val = result sub = `,0000000` with = `` ).
 
   ENDMETHOD.
 
@@ -4966,8 +4966,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     IF lv_cond CS ` NOT LIKE `.
       SPLIT lv_cond AT ` NOT LIKE ` INTO fieldname lv_rest.
       lv_like = filter_sql_strip_quotes( lv_rest ).
-      REPLACE ALL OCCURRENCES OF `%` IN lv_like WITH `*`.
-      REPLACE ALL OCCURRENCES OF `_` IN lv_like WITH `+`.
+      lv_like = replace( val = lv_like sub = `%` with = `*` occ = 0 ).
+      lv_like = replace( val = lv_like sub = `_` with = `+` occ = 0 ).
       range-option = `NP`.
       range-low    = lv_like.
       RETURN.
@@ -4976,8 +4976,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     IF lv_cond CS ` LIKE `.
       SPLIT lv_cond AT ` LIKE ` INTO fieldname lv_rest.
       lv_like = filter_sql_strip_quotes( lv_rest ).
-      REPLACE ALL OCCURRENCES OF `%` IN lv_like WITH `*`.
-      REPLACE ALL OCCURRENCES OF `_` IN lv_like WITH `+`.
+      lv_like = replace( val = lv_like sub = `%` with = `*` occ = 0 ).
+      lv_like = replace( val = lv_like sub = `_` with = `+` occ = 0 ).
       range-option = `CP`.
       range-low    = lv_like.
       RETURN.
@@ -5356,14 +5356,16 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     IF result NA `\'` AND result NA cv_char_util_cr_lf.
       RETURN.
     ENDIF.
-    REPLACE ALL OCCURRENCES OF `\` IN result WITH `\\`.
-    REPLACE ALL OCCURRENCES OF `'` IN result WITH `\'`.
-    REPLACE ALL OCCURRENCES OF cv_char_util_cr_lf IN result WITH `\n`.
-    REPLACE ALL OCCURRENCES OF cv_char_util_newline IN result WITH `\n`.
+    result = replace( val = result sub = `\` with = `\\` occ = 0 ).
+    result = replace( val = result sub = `'` with = `\'` occ = 0 ).
+    result = replace( val = result sub = cv_char_util_cr_lf with = `\n` occ = 0 ).
+    result = replace( val = result sub = cv_char_util_newline with = `\n` occ = 0 ).
     " a standalone CR (not part of CR+LF, already collapsed above) is a JS
     " line terminator too and would break the '...' literal
-    REPLACE ALL OCCURRENCES OF cv_char_util_cr_lf(1)
-            IN result WITH `\r`.
+    result = replace( val  = result
+                      sub  = cv_char_util_cr_lf(1)
+                      with = `\r`
+                      occ  = 0 ).
 
   ENDMETHOD.
 
@@ -5757,9 +5759,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA(lv_day)   = lv_date+6(2).
 
     result = lv_fmt.
-    REPLACE `YYYY` IN result WITH lv_year.
-    REPLACE `MM`   IN result WITH lv_month.
-    REPLACE `DD`   IN result WITH lv_day.
+    result = replace( val = result sub = `YYYY` with = lv_year ).
+    result = replace( val = result sub = `MM` with = lv_month ).
+    result = replace( val = result sub = `DD` with = lv_day ).
 
   ENDMETHOD.
 
@@ -6172,7 +6174,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     " the remainder once per tag - quadratic over a long body, in the path
     " that renders an HTML message for the box
     result = val.
-    REPLACE ALL OCCURRENCES OF REGEX `<[^>]*>` IN result WITH ` ` ##REGEX_POSIX.
+    result = replace( val   = result
+                      regex = `<[^>]*>`
+                      with  = ` `
+                      occ   = 0 ) ##REGEX_POSIX.
     FIND `<` IN result MATCH OFFSET DATA(lv_open).
     IF sy-subrc = 0.
       result = substring( val = result
@@ -6180,10 +6185,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDIF.
 
     " the entities the stripped text would otherwise show as written
-    REPLACE ALL OCCURRENCES OF `&nbsp;` IN result WITH ` `.
-    REPLACE ALL OCCURRENCES OF `&lt;` IN result WITH `<`.
-    REPLACE ALL OCCURRENCES OF `&gt;` IN result WITH `>`.
-    REPLACE ALL OCCURRENCES OF `&amp;` IN result WITH `&`.
+    result = replace( val = result sub = `&nbsp;` with = ` ` occ = 0 ).
+    result = replace( val = result sub = `&lt;` with = `<` occ = 0 ).
+    result = replace( val = result sub = `&gt;` with = `>` occ = 0 ).
+    result = replace( val = result sub = `&amp;` with = `&` occ = 0 ).
     CONDENSE result.
 
     IF strlen( result ) > cv_data_max_text.
@@ -6412,7 +6417,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD c_replace_all.
 
     result = val.
-    REPLACE ALL OCCURRENCES OF sub IN result WITH new_val.
+    result = replace( val = result sub = sub with = new_val occ = 0 ).
 
   ENDMETHOD.
 
@@ -8778,7 +8783,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       ENDIF.
 
       DATA(default_value) = fieldrop-defaultval.
-      REPLACE ALL OCCURRENCES OF `'` IN default_value WITH ``.
+      default_value = replace( val = default_value sub = `'` with = `` occ = 0 ).
 
       ms_shlp-selopt = VALUE #( BASE ms_shlp-selopt
                                 ( shlpfield = fieldrop-fieldname
@@ -8943,10 +8948,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       " the value goes into a literal of a dynamic WHERE: the escape character
       " first, then the LIKE wildcards, so that they match only themselves,
       " and a quote is doubled so that it cannot end the literal
-      REPLACE ALL OCCURRENCES OF `#` IN val WITH `##`.
-      REPLACE ALL OCCURRENCES OF `%` IN val WITH `#%`.
-      REPLACE ALL OCCURRENCES OF `_` IN val WITH `#_`.
-      REPLACE ALL OCCURRENCES OF `'` IN val WITH `''`.
+      val = replace( val = val sub = `#` with = `##` occ = 0 ).
+      val = replace( val = val sub = `%` with = `#%` occ = 0 ).
+      val = replace( val = val sub = `_` with = `#_` occ = 0 ).
+      val = replace( val = val sub = `'` with = `''` occ = 0 ).
 
       result = |{ result }{ and } ( { dfies->fieldname } LIKE '%{ val }%' ESCAPE '#' )|.
 
@@ -11216,7 +11221,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         ENDLOOP.
 
         DATA(lv_name) = zabaputil_cl_util_context=>c_trim_upper( val ).
-        REPLACE `ENQUEUE_` IN lv_name WITH ``.
+        lv_name = replace( val = lv_name sub = `ENQUEUE_` with = `` ).
 
         LOOP AT lt_locks INTO DATA(ls_lock)
              WHERE lock_object CS lv_name.
@@ -12232,11 +12237,11 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     IF result NA `&<>"'`.
       RETURN.
     ENDIF.
-    REPLACE ALL OCCURRENCES OF `&` IN result WITH `&amp;`.
-    REPLACE ALL OCCURRENCES OF `<` IN result WITH `&lt;`.
-    REPLACE ALL OCCURRENCES OF `>` IN result WITH `&gt;`.
-    REPLACE ALL OCCURRENCES OF `"` IN result WITH `&quot;`.
-    REPLACE ALL OCCURRENCES OF `'` IN result WITH `&#39;`.
+    result = replace( val = result sub = `&` with = `&amp;` occ = 0 ).
+    result = replace( val = result sub = `<` with = `&lt;` occ = 0 ).
+    result = replace( val = result sub = `>` with = `&gt;` occ = 0 ).
+    result = replace( val = result sub = `"` with = `&quot;` occ = 0 ).
+    result = replace( val = result sub = `'` with = `&#39;` occ = 0 ).
 
   ENDMETHOD.
 
@@ -12861,7 +12866,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD uuid_conv_c36_to_c32.
 
     result = to_upper( c_trim( val ) ).
-    REPLACE ALL OCCURRENCES OF `-` IN result WITH ``.
+    result = replace( val = result sub = `-` with = `` occ = 0 ).
 
     IF strlen( result ) <> 32.
       x_raise( `INVALID_UUID_C36` ).
@@ -12935,8 +12940,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     CONSTANTS lc_b64 TYPE string VALUE `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_`.
 
     DATA(lv_c22) = c_trim( val ).
-    REPLACE ALL OCCURRENCES OF `+` IN lv_c22 WITH `-`.
-    REPLACE ALL OCCURRENCES OF `/` IN lv_c22 WITH `_`.
+    lv_c22 = replace( val = lv_c22 sub = `+` with = `-` occ = 0 ).
+    lv_c22 = replace( val = lv_c22 sub = `/` with = `_` occ = 0 ).
 
     IF strlen( lv_c22 ) <> 22.
       x_raise( `INVALID_UUID_C22` ).
