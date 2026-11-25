@@ -34,7 +34,8 @@
         "Form",
         "Write",
         "ReadTable",
-        "Append"
+        "Append",
+        "GetReference"
       ]
     },
     "downport": true,

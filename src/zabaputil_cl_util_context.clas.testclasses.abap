@@ -1932,7 +1932,7 @@ CLASS ltcl_rtti_ops IMPLEMENTATION.
     " anywhere - a bound data reference stays true
     DATA lr_ref TYPE REF TO data.
     DATA lv_str TYPE string VALUE `x`.
-    GET REFERENCE OF lv_str INTO lr_ref.
+    lr_ref = REF #( lv_str ).
     cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>rtti_check_ref_data( lr_ref ) ).
   ENDMETHOD.
 
@@ -2091,7 +2091,7 @@ CLASS ltcl_ref_ops IMPLEMENTATION.
   METHOD bound_not_initial_true.
     DATA lv_val TYPE string VALUE `hello`.
     DATA lr_ref TYPE REF TO data.
-    GET REFERENCE OF lv_val INTO lr_ref.
+    lr_ref = REF #( lv_val ).
     cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_bound_a_not_initial( lr_ref ) ).
   ENDMETHOD.
 
@@ -2103,7 +2103,7 @@ CLASS ltcl_ref_ops IMPLEMENTATION.
   METHOD bound_not_initial_initial.
     DATA lv_val TYPE string.
     DATA lr_ref TYPE REF TO data.
-    GET REFERENCE OF lv_val INTO lr_ref.
+    lr_ref = REF #( lv_val ).
     cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_bound_a_not_initial( lr_ref ) ).
   ENDMETHOD.
 
@@ -2115,14 +2115,14 @@ CLASS ltcl_ref_ops IMPLEMENTATION.
   METHOD unassign_initial_empty.
     DATA lv_val TYPE string.
     DATA lr_ref TYPE REF TO data.
-    GET REFERENCE OF lv_val INTO lr_ref.
+    lr_ref = REF #( lv_val ).
     cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_unassign_initial( lr_ref ) ).
   ENDMETHOD.
 
   METHOD unassign_initial_filled.
     DATA lv_val TYPE string VALUE `x`.
     DATA lr_ref TYPE REF TO data.
-    GET REFERENCE OF lv_val INTO lr_ref.
+    lr_ref = REF #( lv_val ).
     cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_unassign_initial( lr_ref ) ).
   ENDMETHOD.
 
@@ -2146,7 +2146,7 @@ CLASS ltcl_ref_ops IMPLEMENTATION.
   METHOD copy_ref_data_bound.
     DATA lv_val TYPE string VALUE `hello`.
     DATA lr_ref TYPE REF TO data.
-    GET REFERENCE OF lv_val INTO lr_ref.
+    lr_ref = REF #( lv_val ).
     DATA(lr_copy) = zabaputil_cl_util_context=>conv_copy_ref_data( lr_ref ).
     cl_abap_unit_assert=>assert_bound( lr_copy ).
     FIELD-SYMBOLS <copy> TYPE string.
@@ -3752,8 +3752,8 @@ CLASS ltcl_sync_back IMPLEMENTATION.
     DATA lr_outer TYPE REF TO data.
     FIELD-SYMBOLS <val> TYPE any.
 
-    GET REFERENCE OF lv_str INTO lr_inner.
-    GET REFERENCE OF lr_inner INTO lr_outer.
+    lr_inner = REF #( lv_str ).
+    lr_outer = REF #( lr_inner ).
 
     DATA(lr_act) = zabaputil_cl_util_context=>unassign_data( lr_outer ).
     cl_abap_unit_assert=>assert_bound( lr_act ).
@@ -3767,7 +3767,7 @@ CLASS ltcl_sync_back IMPLEMENTATION.
     DATA lr_outer TYPE REF TO data.
 
     lo_inner = NEW ltcl_test_app( ).
-    GET REFERENCE OF lo_inner INTO lr_outer.
+    lr_outer = REF #( lo_inner ).
 
     cl_abap_unit_assert=>assert_equals( act = zabaputil_cl_util_context=>unassign_object( lr_outer )
                                         exp = lo_inner ).
@@ -3783,8 +3783,8 @@ CLASS ltcl_sync_back IMPLEMENTATION.
     DATA lr_outer TYPE REF TO data.
     DATA lt_empty TYPE string_table.
 
-    GET REFERENCE OF lv_str INTO lr_inner.
-    GET REFERENCE OF lr_inner INTO lr_outer.
+    lr_inner = REF #( lv_str ).
+    lr_outer = REF #( lr_inner ).
 
     ASSIGN lt_empty[ 1 ] TO FIELD-SYMBOL(<lv_none>).
     cl_abap_unit_assert=>assert_differs( act = sy-subrc
@@ -4272,7 +4272,7 @@ CLASS ltcl_data_box IMPLEMENTATION.
     DATA lv_str  TYPE string VALUE `behind_the_reference`.
     DATA lr_data TYPE REF TO data.
 
-    GET REFERENCE OF lv_str INTO lr_data.
+    lr_data = REF #( lv_str ).
 
     cl_abap_unit_assert=>assert_char_cp(
         act = zabaputil_cl_util_context=>ui5_data_box_format( lr_data )-details
@@ -4285,7 +4285,7 @@ CLASS ltcl_data_box IMPLEMENTATION.
     DATA ls_node TYPE ty_s_node.
 
     ls_node-name = `loop`.
-    GET REFERENCE OF ls_node INTO ls_node-next.
+    ls_node-next = REF #( ls_node ).
 
     DATA(ls_box) = zabaputil_cl_util_context=>ui5_data_box_format( ls_node ).
     cl_abap_unit_assert=>assert_char_cp( act = ls_box-details
@@ -4359,7 +4359,7 @@ CLASS ltcl_data_box IMPLEMENTATION.
     DATA lt_tab  TYPE STANDARD TABLE OF string WITH EMPTY KEY.
     DATA lr_data TYPE REF TO data.
 
-    GET REFERENCE OF lt_tab INTO lr_data.
+    lr_data = REF #( lt_tab ).
 
     cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>rtti_check_table_standard( lr_data ) ).
   ENDMETHOD.
@@ -4368,7 +4368,7 @@ CLASS ltcl_data_box IMPLEMENTATION.
     DATA lt_tab  TYPE SORTED TABLE OF string WITH UNIQUE KEY table_line.
     DATA lr_data TYPE REF TO data.
 
-    GET REFERENCE OF lt_tab INTO lr_data.
+    lr_data = REF #( lt_tab ).
 
     cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_table_standard( lr_data ) ).
   ENDMETHOD.
@@ -4377,7 +4377,7 @@ CLASS ltcl_data_box IMPLEMENTATION.
     DATA lt_tab  TYPE HASHED TABLE OF string WITH UNIQUE KEY table_line.
     DATA lr_data TYPE REF TO data.
 
-    GET REFERENCE OF lt_tab INTO lr_data.
+    lr_data = REF #( lt_tab ).
 
     cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_table_standard( lr_data ) ).
   ENDMETHOD.
@@ -4389,7 +4389,7 @@ CLASS ltcl_data_box IMPLEMENTATION.
     DATA lv_str  TYPE string.
     DATA lr_data TYPE REF TO data.
 
-    GET REFERENCE OF lv_str INTO lr_data.
+    lr_data = REF #( lv_str ).
 
     cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_table_standard( lr_data ) ).
   ENDMETHOD.

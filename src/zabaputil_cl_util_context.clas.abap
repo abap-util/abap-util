@@ -11249,20 +11249,20 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
         ls_param-name = `GCLIENT`.
         ls_param-kind = abap_func_exporting.
-        GET REFERENCE OF lv_client INTO ls_param-value.
+        ls_param-value = REF #( lv_client ).
         INSERT ls_param INTO TABLE lt_param.
 
         ls_param-name = `GNAME`.
-        GET REFERENCE OF lv_name INTO ls_param-value.
+        ls_param-value = REF #( lv_name ).
         INSERT ls_param INTO TABLE lt_param.
 
         ls_param-name = `GUNAME`.
-        GET REFERENCE OF lv_uname INTO ls_param-value.
+        ls_param-value = REF #( lv_uname ).
         INSERT ls_param INTO TABLE lt_param.
 
         ls_param-name = `ENQ`.
         ls_param-kind = abap_func_tables.
-        GET REFERENCE OF <lt_enq> INTO ls_param-value.
+        ls_param-value = REF #( <lt_enq> ).
         INSERT ls_param INTO TABLE lt_param.
 
         ls_exception-name  = `OTHERS`.
@@ -11395,17 +11395,17 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
         ls_param-name = `CHECK_UPD_REQUESTS`.
         ls_param-kind = abap_func_exporting.
-        GET REFERENCE OF lv_check_upd INTO ls_param-value.
+        ls_param-value = REF #( lv_check_upd ).
         INSERT ls_param INTO TABLE lt_param.
 
         ls_param-name = `SUBRC`.
         ls_param-kind = abap_func_importing.
-        GET REFERENCE OF lv_subrc INTO ls_param-value.
+        ls_param-value = REF #( lv_subrc ).
         INSERT ls_param INTO TABLE lt_param.
 
         ls_param-name = `ENQ`.
         ls_param-kind = abap_func_tables.
-        GET REFERENCE OF <lt_enq> INTO ls_param-value.
+        ls_param-value = REF #( <lt_enq> ).
         INSERT ls_param INTO TABLE lt_param.
 
         ls_exception-name  = `OTHERS`.
