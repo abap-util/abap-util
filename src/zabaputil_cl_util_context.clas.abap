@@ -6178,8 +6178,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                       regex = `<[^>]*>`
                       with  = ` `
                       occ   = 0 ) ##REGEX_POSIX.
-    FIND `<` IN result MATCH OFFSET DATA(lv_open).
-    IF sy-subrc = 0.
+    DATA(lv_open) = find( val = result
+                          sub = `<` ).
+    IF lv_open >= 0.
       result = substring( val = result
                           len = lv_open ) && ` `.
     ENDIF.
@@ -6189,7 +6190,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     result = replace( val = result sub = `&lt;` with = `<` occ = 0 ).
     result = replace( val = result sub = `&gt;` with = `>` occ = 0 ).
     result = replace( val = result sub = `&amp;` with = `&` occ = 0 ).
-    CONDENSE result.
+    result = condense( result ).
 
     IF strlen( result ) > cv_data_max_text.
       result = substring( val = result
@@ -6520,8 +6521,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     " digit and at most one decimal point (e.g. European format `1.234,56`
     " normalizes to the invalid `1.234.56`). Return 0 for invalid input -
     " the JS transpiler converts such strings leniently instead of raising
-    DATA lv_dot_count TYPE i.
-    FIND ALL OCCURRENCES OF `.` IN lv_clean MATCH COUNT lv_dot_count.
+    DATA(lv_dot_count) = count( val = lv_clean
+                                sub = `.` ).
     IF lv_dot_count > 1 OR lv_clean NA `0123456789`.
       result = 0.
       RETURN.
@@ -8251,8 +8252,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     " two RAP prefixes never matched, and no message ever carried its
     " element or action
     DATA(lv_prefix) = CONV string( prefix ).
-    FIND FIRST OCCURRENCE OF `-` IN lv_prefix MATCH OFFSET DATA(lv_off).
-    IF sy-subrc = 0.
+    DATA(lv_off) = find( val = lv_prefix
+                         sub = `-` ).
+    IF lv_off >= 0.
       ASSIGN COMPONENT lv_prefix(lv_off) OF STRUCTURE val TO FIELD-SYMBOL(<sub>).
       IF sy-subrc <> 0.
         RETURN.
@@ -12540,7 +12542,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                                len = strlen( lv_etag ) - 1 ) && `-gzip"`.
     SPLIT lv_header AT `,` INTO TABLE DATA(lt_candidate).
     LOOP AT lt_candidate INTO DATA(lv_candidate).
-      CONDENSE lv_candidate.
+      lv_candidate = condense( lv_candidate ).
       IF strlen( lv_candidate ) > 2 AND substring( val = lv_candidate
                                                    len = 2 ) = `W/`.
         lv_candidate = substring( val = lv_candidate
@@ -12685,7 +12687,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA(lv_val) = CONV string( val ).
     DATA(lv_len) = strlen( lv_val ).
     DATA lv_i TYPE i.
-    DATA lv_xbuf TYPE xstring.
+    " the pending bytes as hex digits - a byte string has no expression
+    " that appends to it, the hex text converts back in one step
+    DATA lv_xbuf TYPE string.
 
     WHILE lv_i < lv_len.
 
@@ -12698,13 +12702,13 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         lv_x = to_upper( substring( val = lv_val
                                     off = lv_i + 1
                                     len = 2 ) ).
-        CONCATENATE lv_xbuf lv_x INTO lv_xbuf IN BYTE MODE.
+        lv_xbuf = |{ lv_xbuf }{ lv_x }|.
         lv_i = lv_i + 3.
         CONTINUE.
       ENDIF.
 
       IF lv_xbuf IS NOT INITIAL.
-        result = result && conv_get_string_by_xstring( lv_xbuf ).
+        result = result && conv_get_string_by_xstring( CONV xstring( lv_xbuf ) ).
         CLEAR lv_xbuf.
       ENDIF.
 
@@ -12718,7 +12722,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDWHILE.
 
     IF lv_xbuf IS NOT INITIAL.
-      result = result && conv_get_string_by_xstring( lv_xbuf ).
+      result = result && conv_get_string_by_xstring( CONV xstring( lv_xbuf ) ).
     ENDIF.
 
   ENDMETHOD.
@@ -12947,7 +12951,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       x_raise( `INVALID_UUID_C22` ).
     ENDIF.
 
-    DATA lv_x TYPE xstring.
+    " the 16 bytes as 32 hex digits, built byte by byte
+    DATA lv_hex TYPE string.
     DATA lv_xb TYPE x LENGTH 1.
     DATA lv_i TYPE i.
     DATA(lv_len) = strlen( lv_c22 ).
@@ -12968,8 +12973,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         DATA(lv_char) = substring( val = lv_c22
                                    off = lv_pos
                                    len = 1 ).
-        FIND lv_char IN lc_b64 MATCH OFFSET DATA(lv_idx).
-        IF sy-subrc <> 0.
+        DATA(lv_idx) = find( val = lc_b64
+                             sub = lv_char ).
+        IF lv_idx < 0.
           x_raise( `INVALID_UUID_C22` ).
         ENDIF.
         lv_n = lv_n * 64 + lv_idx.
@@ -12979,31 +12985,29 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       CASE lv_take.
         WHEN 4.
           lv_xb = lv_n DIV 65536.
-          CONCATENATE lv_x lv_xb INTO lv_x IN BYTE MODE.
+          lv_hex = |{ lv_hex }{ lv_xb }|.
           lv_xb = ( lv_n DIV 256 ) MOD 256.
-          CONCATENATE lv_x lv_xb INTO lv_x IN BYTE MODE.
+          lv_hex = |{ lv_hex }{ lv_xb }|.
           lv_xb = lv_n MOD 256.
-          CONCATENATE lv_x lv_xb INTO lv_x IN BYTE MODE.
+          lv_hex = |{ lv_hex }{ lv_xb }|.
         WHEN 3.
           lv_xb = lv_n DIV 1024.
-          CONCATENATE lv_x lv_xb INTO lv_x IN BYTE MODE.
+          lv_hex = |{ lv_hex }{ lv_xb }|.
           lv_xb = ( lv_n DIV 4 ) MOD 256.
-          CONCATENATE lv_x lv_xb INTO lv_x IN BYTE MODE.
+          lv_hex = |{ lv_hex }{ lv_xb }|.
         WHEN 2.
           lv_xb = lv_n DIV 16.
-          CONCATENATE lv_x lv_xb INTO lv_x IN BYTE MODE.
+          lv_hex = |{ lv_hex }{ lv_xb }|.
       ENDCASE.
 
       lv_i = lv_i + lv_take.
     ENDWHILE.
 
-    IF xstrlen( lv_x ) <> 16.
+    IF strlen( lv_hex ) <> 32.
       x_raise( `INVALID_UUID_C22` ).
     ENDIF.
 
-    DATA lv_c TYPE c LENGTH 32.
-    lv_c = lv_x.
-    result = lv_c.
+    result = lv_hex.
 
   ENDMETHOD.
 

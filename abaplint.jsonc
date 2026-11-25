@@ -37,7 +37,12 @@
         "Append",
         "GetReference",
         "Check",
-        "Replace"
+        "Replace",
+        "Concatenate",
+        "Condense",
+        "Translate",
+        "Find",
+        "Shift"
       ]
     },
     "downport": true,

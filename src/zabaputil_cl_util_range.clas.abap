@@ -222,11 +222,15 @@ CLASS zabaputil_cl_util_range IMPLEMENTATION.
           result = |{ result } NOT BETWEEN { quote( <lv_low> ) } AND { quote( <lv_high> ) }|.
 
         WHEN options-contains_pattern.
-          TRANSLATE <lv_low> USING `*%`.
+          <lv_low> = translate( val  = <lv_low>
+                                from = `*`
+                                to   = `%` ).
           result = |{ result } LIKE { quote( <lv_low> ) }|.
 
         WHEN options-not_contains_pattern.
-          TRANSLATE <lv_low> USING `*%`.
+          <lv_low> = translate( val  = <lv_low>
+                                from = `*`
+                                to   = `%` ).
           result = |{ result } NOT LIKE { quote( <lv_low> ) }|.
       ENDCASE.
     ENDLOOP.

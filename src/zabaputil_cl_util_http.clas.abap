@@ -897,7 +897,8 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
     result-url = url.
     DATA(lv_query) = CONV string( query ).
-    SHIFT lv_query LEFT DELETING LEADING `?`.
+    lv_query = shift_left( val = lv_query
+                           sub = `?` ).
 
     " by destination the url is the path below it (client_request; client_call
     " passes none), and the query follows that path
