@@ -3322,10 +3322,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
         " type descriptors are singletons, so the reference identifies the
         " type without converting/hashing the absolute name on every call
-        READ TABLE mt_bool_cache REFERENCE INTO DATA(lr_cache)
-             WITH TABLE KEY typedescr = lo_descr.
+        ASSIGN mt_bool_cache[ typedescr = lo_descr ] TO FIELD-SYMBOL(<ls_bool_cache>).
         IF sy-subrc = 0.
-          result = lr_cache->is_bool.
+          result = <ls_bool_cache>-is_bool.
           RETURN.
         ENDIF.
 
@@ -3665,7 +3664,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       DATA(lv_index) = 0.
       LOOP AT <lt_source> ASSIGNING FIELD-SYMBOL(<ls_source>).
         lv_index = lv_index + 1.
-        READ TABLE lt_tab INDEX lv_index ASSIGNING <ls_range>.
+        ASSIGN lt_tab[ lv_index ] TO <ls_range>.
         IF sy-subrc <> 0.
           EXIT.
         ENDIF.
@@ -3901,9 +3900,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA lv_name TYPE string.
     lv_name = to_upper( val ).
 
-    READ TABLE gt_class_exists REFERENCE INTO DATA(lr_hit) WITH TABLE KEY name = lv_name.
+    ASSIGN gt_class_exists[ name = lv_name ] TO FIELD-SYMBOL(<ls_hit>).
     IF sy-subrc = 0.
-      result = lr_hit->exists.
+      result = <ls_hit>-exists.
       RETURN.
     ENDIF.
 
@@ -4104,18 +4103,17 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     " descriptor instances are singletons per type, so the identity check
     " guards against absolute names reused by other (local/anonymous) types
     lv_absolute_name = lo_struct->absolute_name.
-    READ TABLE mt_attri_cache REFERENCE INTO DATA(lr_cache)
-         WITH TABLE KEY absolute_name = lv_absolute_name.
-    IF sy-subrc = 0 AND lr_cache->o_struct = lo_struct.
-      result = lr_cache->t_attri.
+    ASSIGN mt_attri_cache[ absolute_name = lv_absolute_name ] TO FIELD-SYMBOL(<ls_attri_cache>).
+    IF sy-subrc = 0 AND <ls_attri_cache>-o_struct = lo_struct.
+      result = <ls_attri_cache>-t_attri.
       RETURN.
     ENDIF.
 
     result = expand_components( lo_struct->get_components( ) ).
 
-    IF lr_cache IS BOUND.
-      lr_cache->o_struct = lo_struct.
-      lr_cache->t_attri  = result.
+    IF <ls_attri_cache> IS ASSIGNED.
+      <ls_attri_cache>-o_struct = lo_struct.
+      <ls_attri_cache>-t_attri  = result.
     ELSE.
       INSERT VALUE #( absolute_name = lv_absolute_name
                       o_struct      = lo_struct
@@ -6583,7 +6581,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     CLEAR tab.
     LOOP AT lt_key ASSIGNING <key>.
-      READ TABLE <tab_copy> INDEX <key>-idx ASSIGNING FIELD-SYMBOL(<src>).
+      ASSIGN <tab_copy>[ <key>-idx ] TO FIELD-SYMBOL(<src>).
       IF sy-subrc = 0.
         APPEND <src> TO tab.
       ENDIF.
@@ -6651,7 +6649,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CONTINUE.
       ENDIF.
       DATA(lv_val) = |{ <field> }|.
-      READ TABLE result ASSIGNING FIELD-SYMBOL(<entry>) WITH KEY n = lv_val.
+      ASSIGN result[ n = lv_val ] TO FIELD-SYMBOL(<entry>).
       IF sy-subrc = 0.
         DATA(lv_count) = CONV i( <entry>-v ) + 1.
         <entry>-v = |{ lv_count }|.
@@ -9381,7 +9379,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           CONTINUE.
         ELSE.
 
-          READ TABLE mt_data REFERENCE INTO DATA(data) WITH KEY task = <value>.
+          ASSIGN mt_data[ task = <value> ] TO FIELD-SYMBOL(<ls_data>).
           IF sy-subrc = 0.
 
             UNASSIGN <value>.
@@ -9390,7 +9388,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
               CONTINUE.
             ELSE.
 
-              data->short_description = <value>.
+              <ls_data>-short_description = <value>.
 
             ENDIF.
 
@@ -13009,8 +13007,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CONTINUE.
       ENDIF.
       DATA(lv_str) = CONV string( <val> ).
-      READ TABLE result WITH KEY table_line = lv_str TRANSPORTING NO FIELDS.
-      IF sy-subrc <> 0.
+      IF NOT line_exists( result[ table_line = lv_str ] ).
         APPEND lv_str TO result.
       ENDIF.
     ENDLOOP.
@@ -13043,7 +13040,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       ENDIF.
 
       DATA(lv_group) = CONV string( <group> ).
-      READ TABLE lt_sum ASSIGNING FIELD-SYMBOL(<sum>) WITH KEY n = lv_group.
+      ASSIGN lt_sum[ n = lv_group ] TO FIELD-SYMBOL(<sum>).
       IF sy-subrc <> 0.
         APPEND VALUE #( n = lv_group ) TO lt_sum ASSIGNING <sum>.
       ENDIF.
@@ -14061,11 +14058,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     lv_class = to_upper( class ).
     lv_intf  = to_upper( intf ).
 
-    READ TABLE gt_class_impl_intf REFERENCE INTO DATA(lr_hit)
-         WITH TABLE KEY name = lv_class
-                        intf = lv_intf.
+    ASSIGN gt_class_impl_intf[ name = lv_class
+                               intf = lv_intf ] TO FIELD-SYMBOL(<ls_hit>).
     IF sy-subrc = 0.
-      result = lr_hit->result.
+      result = <ls_hit>-result.
       RETURN.
     ENDIF.
 

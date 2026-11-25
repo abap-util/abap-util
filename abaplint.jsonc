@@ -15,10 +15,12 @@
   },
   "rules": {
     // statements with a successor that this repository no longer uses -
-    // listed so they do not come back (abaplint 2.120.116+). The
-    // widely used READ TABLE / APPEND / CREATE OBJECT / ... follow
-    // once the code no longer has them
+    // listed so they do not come back (abaplint 2.120.116+). src/00/ is
+    // excluded: the ajson (00/01) and S-RTTI (00/02) mirrors are synced
+    // from upstream unchanged and still use READ TABLE, APPEND, CREATE
+    // OBJECT and the other classic statements
     "forbidden_statement": {
+      "exclude": ["/src/00/"],
       "statements": [
         "Describe",
         "Refresh",
@@ -30,7 +32,8 @@
         "TypePools",
         "Perform",
         "Form",
-        "Write"
+        "Write",
+        "ReadTable"
       ]
     },
     "downport": true,

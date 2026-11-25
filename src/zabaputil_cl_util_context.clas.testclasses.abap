@@ -3786,7 +3786,7 @@ CLASS ltcl_sync_back IMPLEMENTATION.
     GET REFERENCE OF lv_str INTO lr_inner.
     GET REFERENCE OF lr_inner INTO lr_outer.
 
-    READ TABLE lt_empty TRANSPORTING NO FIELDS INDEX 1.
+    ASSIGN lt_empty[ 1 ] TO FIELD-SYMBOL(<lv_none>).
     cl_abap_unit_assert=>assert_differs( act = sy-subrc
                                          exp = 0 ).
 
@@ -3800,7 +3800,7 @@ CLASS ltcl_sync_back IMPLEMENTATION.
     DATA lt_one   TYPE string_table.
 
     INSERT `x` INTO TABLE lt_one.
-    READ TABLE lt_one TRANSPORTING NO FIELDS INDEX 1.
+    ASSIGN lt_one[ 1 ] TO FIELD-SYMBOL(<lv_one>).
     cl_abap_unit_assert=>assert_subrc( ).
 
     cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>unassign_data( lr_data ) ).
@@ -4803,8 +4803,7 @@ CLASS ltcl_coverage IMPLEMENTATION.
 
     cl_abap_unit_assert=>assert_equals( exp = 2
                                         act = lines( lt_comp ) ).
-    READ TABLE lt_comp WITH KEY as_include = abap_true TRANSPORTING NO FIELDS. "#EC CI_SORTSEQ
-    cl_abap_unit_assert=>assert_subrc( exp = 4 ).
+    cl_abap_unit_assert=>assert_false( xsdbool( line_exists( lt_comp[ as_include = abap_true ] ) ) ).
 
     " the recursion guard: past 16 levels the expansion refuses
     TRY.
@@ -4886,8 +4885,7 @@ CLASS ltcl_coverage IMPLEMENTATION.
 
     DATA(lt_attri) = zabaputil_cl_util_context=>rtti_get_t_attri_by_oref( lo_probe ).
 
-    READ TABLE lt_attri WITH KEY name = `MV_TEXT` TRANSPORTING NO FIELDS. "#EC CI_SORTSEQ
-    cl_abap_unit_assert=>assert_subrc( exp = 0 ).
+    cl_abap_unit_assert=>assert_true( xsdbool( line_exists( lt_attri[ name = `MV_TEXT` ] ) ) ).
 
   ENDMETHOD.
 
@@ -4913,8 +4911,7 @@ CLASS ltcl_coverage IMPLEMENTATION.
       CATCH cx_root.
         RETURN.
     ENDTRY.
-    READ TABLE lt_classes WITH KEY classname = `` TRANSPORTING NO FIELDS. "#EC CI_SORTSEQ
-    cl_abap_unit_assert=>assert_subrc( exp = 4 ).
+    cl_abap_unit_assert=>assert_false( xsdbool( line_exists( lt_classes[ classname = `` ] ) ) ).
 
     TRY.
         lt_classes = zabaputil_cl_util_context=>rtti_get_classes_impl_intf( `ZABAPUTIL_IF_DOES_NOT_EXIST` ).
