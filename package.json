@@ -12,7 +12,6 @@
   },
   "homepage": "https://github.com/abap-util/abap-util#readme",
   "dependencies": {
-    "@abaplint/cli": "^2.120.92",
     "@abaplint/database-sqlite": "^2.14.12",
     "@abaplint/runtime": "^2.14.15",
     "@abaplint/transpiler-cli": "^2.14.15",
@@ -37,5 +36,8 @@
     "lint:cloud": "abaplint .github/abaplint/abap_cloud.jsonc",
     "check": "npm run lint && npm run lint:cloud && npm run rename_test",
     "test": "npm run check"
+  },
+  "devDependencies": {
+    "@abaplint/cli": "^2.120.120"
   }
 }

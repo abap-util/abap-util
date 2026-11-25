@@ -304,13 +304,19 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
 
     LOOP AT lt_attri REFERENCE INTO ls_attri.
       ASSIGN COMPONENT ls_attri->name OF STRUCTURE val TO FIELD-SYMBOL(<tab>).
-      CHECK sy-subrc = 0.
-      CHECK zabaputil_cl_util_context=>rtti_get_type_kind( <tab> ) = cl_abap_datadescr=>typekind_table.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      IF zabaputil_cl_util_context=>rtti_get_type_kind( <tab> ) <> cl_abap_datadescr=>typekind_table.
+        CONTINUE.
+      ENDIF.
 
       TRY.
           DATA(lo_tab) = CAST cl_abap_tabledescr( cl_abap_typedescr=>describe_by_data( <tab> ) ).
           DATA(lo_line) = lo_tab->get_table_line_type( ).
-          CHECK lo_line->kind = cl_abap_typedescr=>kind_struct.
+          IF lo_line->kind <> cl_abap_typedescr=>kind_struct.
+            CONTINUE.
+          ENDIF.
           DATA(lt_comps) = CAST cl_abap_structdescr( lo_line )->get_components( ).
           LOOP AT lt_comps REFERENCE INTO DATA(ls_comp).
             IF ls_comp->name = `%MSG` OR ls_comp->name = `%FAIL`.
@@ -375,8 +381,12 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
     DATA(lt_attri) = zabaputil_cl_util_context=>rtti_get_t_attri_by_any( val ).
     LOOP AT lt_attri REFERENCE INTO DATA(ls_attri).
       ASSIGN COMPONENT ls_attri->name OF STRUCTURE val TO FIELD-SYMBOL(<tab>).
-      CHECK sy-subrc = 0.
-      CHECK zabaputil_cl_util_context=>rtti_get_type_kind( <tab> ) = cl_abap_datadescr=>typekind_table.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      IF zabaputil_cl_util_context=>rtti_get_type_kind( <tab> ) <> cl_abap_datadescr=>typekind_table.
+        CONTINUE.
+      ENDIF.
 
       FIELD-SYMBOLS <ftab> TYPE ANY TABLE.
       ASSIGN <tab> TO <ftab>.
@@ -402,11 +412,19 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
 
     DATA(lt_attri) = zabaputil_cl_util_context=>rtti_get_t_attri_by_any( val ).
     LOOP AT lt_attri REFERENCE INTO DATA(ls_attri).
-      CHECK strlen( ls_attri->name ) > 9.
-      CHECK ls_attri->name(9) = `%ELEMENT-`.
+      IF strlen( ls_attri->name ) <= 9.
+        CONTINUE.
+      ENDIF.
+      IF ls_attri->name(9) <> `%ELEMENT-`.
+        CONTINUE.
+      ENDIF.
       ASSIGN COMPONENT ls_attri->name OF STRUCTURE val TO FIELD-SYMBOL(<flag>).
-      CHECK sy-subrc = 0.
-      CHECK <flag> IS NOT INITIAL.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      IF <flag> IS INITIAL.
+        CONTINUE.
+      ENDIF.
 
       IF result IS INITIAL.
         result = ls_attri->name+9.
@@ -430,11 +448,19 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
 
     DATA(lt_attri) = zabaputil_cl_util_context=>rtti_get_t_attri_by_any( val ).
     LOOP AT lt_attri REFERENCE INTO DATA(ls_attri).
-      CHECK strlen( ls_attri->name ) > 12.
-      CHECK ls_attri->name(12) = `%OP-%ACTION-`.
+      IF strlen( ls_attri->name ) <= 12.
+        CONTINUE.
+      ENDIF.
+      IF ls_attri->name(12) <> `%OP-%ACTION-`.
+        CONTINUE.
+      ENDIF.
       ASSIGN COMPONENT ls_attri->name OF STRUCTURE val TO FIELD-SYMBOL(<flag>).
-      CHECK sy-subrc = 0.
-      CHECK <flag> IS NOT INITIAL.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      IF <flag> IS INITIAL.
+        CONTINUE.
+      ENDIF.
       result = ls_attri->name+12.
       RETURN.
     ENDLOOP.
@@ -480,7 +506,9 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
     DATA(lt_attri) = zabaputil_cl_util_context=>rtti_get_t_attri_by_any( val ).
     LOOP AT lt_attri REFERENCE INTO DATA(ls_attri).
       ASSIGN COMPONENT ls_attri->name OF STRUCTURE val TO FIELD-SYMBOL(<comp>).
-      CHECK sy-subrc = 0.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
 
       DATA(lv_sub_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( <comp> ).
       IF lv_sub_kind = cl_abap_datadescr=>typekind_struct1

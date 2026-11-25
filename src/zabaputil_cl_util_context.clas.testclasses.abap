@@ -1075,6 +1075,22 @@ CLASS ltcl_filter_ops DEFINITION FINAL
     METHODS token_bt                       FOR TESTING.
     METHODS token_plain_value              FOR TESTING.
 
+    " conv_get_bintab_by_xstring
+    METHODS bintab_flat_lines              FOR TESTING.
+    METHODS bintab_struct_lines            FOR TESTING.
+    METHODS bintab_empty                   FOR TESTING.
+
+    " conv_exit
+    METHODS conv_exit_unknown_exit         FOR TESTING.
+    METHODS conv_exit_alpha_from           FOR TESTING.
+
+    " filter_get_range_by_value / filter_get_range_t_by_value_t
+    METHODS value_eq                       FOR TESTING.
+    METHODS value_cp                       FOR TESTING.
+    METHODS value_initial                  FOR TESTING.
+    METHODS value_t_sorted_distinct        FOR TESTING.
+    METHODS value_t_keeps_blank            FOR TESTING.
+
     " filter_get_sql_where
     METHODS sql_where_eq                   FOR TESTING.
     METHODS sql_where_bt                   FOR TESTING.
@@ -1099,6 +1115,108 @@ CLASS ltcl_filter_ops DEFINITION FINAL
 ENDCLASS.
 
 CLASS ltcl_filter_ops IMPLEMENTATION.
+
+  METHOD bintab_flat_lines.
+    TYPES ty_x4 TYPE x LENGTH 4.
+    DATA lt_bin TYPE STANDARD TABLE OF ty_x4 WITH EMPTY KEY.
+    zabaputil_cl_util_context=>conv_get_bintab_by_xstring( EXPORTING val    = CONV xstring( `AABBCCDDEE` )
+                                                           IMPORTING result = lt_bin ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_bin ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV ty_x4( `AABBCCDD` ) act = lt_bin[ 1 ] ).
+    " the last line is padded with zero bytes
+    cl_abap_unit_assert=>assert_equals( exp = CONV ty_x4( `EE000000` ) act = lt_bin[ 2 ] ).
+  ENDMETHOD.
+
+  METHOD bintab_struct_lines.
+    " the BAPICONTEN shape: a structure whose first component holds the bytes
+    TYPES:
+      BEGIN OF ty_s_line,
+        line TYPE x LENGTH 3,
+      END OF ty_s_line.
+    DATA lt_bin TYPE STANDARD TABLE OF ty_s_line WITH EMPTY KEY.
+    zabaputil_cl_util_context=>conv_get_bintab_by_xstring( EXPORTING val    = CONV xstring( `010203040506` )
+                                                           IMPORTING result = lt_bin ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_bin ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV xstring( `040506` ) act = CONV xstring( lt_bin[ 2 ]-line ) ).
+  ENDMETHOD.
+
+  METHOD bintab_empty.
+    TYPES ty_x4 TYPE x LENGTH 4.
+    DATA lt_bin TYPE STANDARD TABLE OF ty_x4 WITH EMPTY KEY.
+    lt_bin = VALUE #( ( CONV ty_x4( `FFFFFFFF` ) ) ).
+    zabaputil_cl_util_context=>conv_get_bintab_by_xstring( EXPORTING val    = VALUE xstring( )
+                                                           IMPORTING result = lt_bin ).
+    cl_abap_unit_assert=>assert_initial( lt_bin ).
+  ENDMETHOD.
+
+  METHOD conv_exit_unknown_exit.
+    " an exit that does not exist raises, with a text - VALUE stays
+    DATA lv_value TYPE string VALUE `ABC`.
+    TRY.
+        zabaputil_cl_util_context=>conv_exit( EXPORTING convexit = `ZZNONE`
+                                              CHANGING  value    = lv_value ).
+        cl_abap_unit_assert=>fail( `no exception` ).
+      CATCH zabaputil_cx_util_error INTO DATA(lx_error).
+        cl_abap_unit_assert=>assert_not_initial( lx_error->get_text( ) ).
+    ENDTRY.
+    cl_abap_unit_assert=>assert_equals( exp = `ABC` act = lv_value ).
+  ENDMETHOD.
+
+  METHOD conv_exit_alpha_from.
+    " FROM into a longer target: ALPHA pads to the target's length
+    DATA lv_target TYPE c LENGTH 10.
+    DATA lo_descr  TYPE REF TO cl_abap_typedescr.
+    " the JS runtime has no function modules - nothing to run there
+    cl_abap_typedescr=>describe_by_name( EXPORTING  p_name         = `TFDIR`
+                                         RECEIVING  p_descr_ref    = lo_descr
+                                         EXCEPTIONS type_not_found = 1
+                                                    OTHERS         = 2 ).
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    zabaputil_cl_util_context=>conv_exit( EXPORTING convexit = `ALPHA`
+                                                    from     = `123`
+                                          CHANGING  value    = lv_target ).
+    cl_abap_unit_assert=>assert_equals( exp = `0000000123` act = lv_target ).
+  ENDMETHOD.
+
+  METHOD value_eq.
+    " no `*` - EQ; a `+` is no wildcard here, it stays a character
+    DATA(lt_range) = zabaputil_cl_util_context=>filter_get_range_by_value( `A+B` ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_range ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `I`   act = lt_range[ 1 ]-sign ).
+    cl_abap_unit_assert=>assert_equals( exp = `EQ`  act = lt_range[ 1 ]-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `A+B` act = lt_range[ 1 ]-low ).
+  ENDMETHOD.
+
+  METHOD value_cp.
+    DATA(lt_range) = zabaputil_cl_util_context=>filter_get_range_by_value( `MAT*` ).
+    cl_abap_unit_assert=>assert_equals( exp = `CP`   act = lt_range[ 1 ]-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `MAT*` act = lt_range[ 1 ]-low ).
+  ENDMETHOD.
+
+  METHOD value_initial.
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>filter_get_range_by_value( `` ) ).
+  ENDMETHOD.
+
+  METHOD value_t_sorted_distinct.
+    DATA(lt_range) = zabaputil_cl_util_context=>filter_get_range_t_by_value_t(
+        VALUE #( ( `B` ) ( `A*` ) ( `B` ) ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_range ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `A*` act = lt_range[ 1 ]-low ).
+    cl_abap_unit_assert=>assert_equals( exp = `CP` act = lt_range[ 1 ]-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `B`  act = lt_range[ 2 ]-low ).
+    cl_abap_unit_assert=>assert_equals( exp = `EQ` act = lt_range[ 2 ]-option ).
+  ENDMETHOD.
+
+  METHOD value_t_keeps_blank.
+    " an empty value asks for "blank" on purpose - it is not dropped
+    DATA(lt_range) = zabaputil_cl_util_context=>filter_get_range_t_by_value_t(
+        VALUE #( ( `` ) ( `X` ) ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_range ) ).
+    cl_abap_unit_assert=>assert_equals( exp = ``   act = lt_range[ 1 ]-low ).
+    cl_abap_unit_assert=>assert_equals( exp = `EQ` act = lt_range[ 1 ]-option ).
+  ENDMETHOD.
 
   METHOD token_eq.
     DATA(ls_range) = zabaputil_cl_util_context=>filter_get_range_by_token( `=100` ).
@@ -1814,7 +1932,7 @@ CLASS ltcl_rtti_ops IMPLEMENTATION.
     " anywhere - a bound data reference stays true
     DATA lr_ref TYPE REF TO data.
     DATA lv_str TYPE string VALUE `x`.
-    GET REFERENCE OF lv_str INTO lr_ref.
+    lr_ref = REF #( lv_str ).
     cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>rtti_check_ref_data( lr_ref ) ).
   ENDMETHOD.
 
@@ -1973,7 +2091,7 @@ CLASS ltcl_ref_ops IMPLEMENTATION.
   METHOD bound_not_initial_true.
     DATA lv_val TYPE string VALUE `hello`.
     DATA lr_ref TYPE REF TO data.
-    GET REFERENCE OF lv_val INTO lr_ref.
+    lr_ref = REF #( lv_val ).
     cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_bound_a_not_initial( lr_ref ) ).
   ENDMETHOD.
 
@@ -1985,7 +2103,7 @@ CLASS ltcl_ref_ops IMPLEMENTATION.
   METHOD bound_not_initial_initial.
     DATA lv_val TYPE string.
     DATA lr_ref TYPE REF TO data.
-    GET REFERENCE OF lv_val INTO lr_ref.
+    lr_ref = REF #( lv_val ).
     cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_bound_a_not_initial( lr_ref ) ).
   ENDMETHOD.
 
@@ -1997,14 +2115,14 @@ CLASS ltcl_ref_ops IMPLEMENTATION.
   METHOD unassign_initial_empty.
     DATA lv_val TYPE string.
     DATA lr_ref TYPE REF TO data.
-    GET REFERENCE OF lv_val INTO lr_ref.
+    lr_ref = REF #( lv_val ).
     cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_unassign_initial( lr_ref ) ).
   ENDMETHOD.
 
   METHOD unassign_initial_filled.
     DATA lv_val TYPE string VALUE `x`.
     DATA lr_ref TYPE REF TO data.
-    GET REFERENCE OF lv_val INTO lr_ref.
+    lr_ref = REF #( lv_val ).
     cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_unassign_initial( lr_ref ) ).
   ENDMETHOD.
 
@@ -2028,7 +2146,7 @@ CLASS ltcl_ref_ops IMPLEMENTATION.
   METHOD copy_ref_data_bound.
     DATA lv_val TYPE string VALUE `hello`.
     DATA lr_ref TYPE REF TO data.
-    GET REFERENCE OF lv_val INTO lr_ref.
+    lr_ref = REF #( lv_val ).
     DATA(lr_copy) = zabaputil_cl_util_context=>conv_copy_ref_data( lr_ref ).
     cl_abap_unit_assert=>assert_bound( lr_copy ).
     FIELD-SYMBOLS <copy> TYPE string.
@@ -2064,10 +2182,43 @@ CLASS ltcl_time_ops DEFINITION FINAL
     METHODS diff_seconds                   FOR TESTING.
     METHODS measure_start_stop             FOR TESTING.
     METHODS stampl_by_date_time            FOR TESTING.
+    METHODS text_by_stampl                 FOR TESTING.
+    METHODS get_timestamp_short            FOR TESTING.
+    METHODS text_by_stampl_fraction        FOR TESTING.
+    METHODS text_by_stampl_utc_zone        FOR TESTING.
 
 ENDCLASS.
 
 CLASS ltcl_time_ops IMPLEMENTATION.
+
+  METHOD get_timestamp_short.
+    " whole seconds, never ahead of the precise stamp taken right after
+    DATA(lv_short) = zabaputil_cl_util_context=>time_get_timestamp( ).
+    DATA(lv_long) = zabaputil_cl_util_context=>time_get_timestampl( ).
+    cl_abap_unit_assert=>assert_not_initial( lv_short ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_short <= lv_long ) ).
+  ENDMETHOD.
+
+  METHOD text_by_stampl.
+    " a fraction of zero is left out - the shape a short TIMESTAMP gives
+    cl_abap_unit_assert=>assert_equals(
+        exp = `2026-11-23 14:05:09`
+        act = zabaputil_cl_util_context=>time_get_text_by_stampl( CONV timestampl( `20261123140509` ) ) ).
+  ENDMETHOD.
+
+  METHOD text_by_stampl_fraction.
+    cl_abap_unit_assert=>assert_equals(
+        exp = `2026-11-23 14:05:09,1234567`
+        act = zabaputil_cl_util_context=>time_get_text_by_stampl( CONV timestampl( `20261123140509.1234567` ) ) ).
+  ENDMETHOD.
+
+  METHOD text_by_stampl_utc_zone.
+    " an explicit UTC changes nothing - the stamp is stored in UTC
+    cl_abap_unit_assert=>assert_equals(
+        exp = zabaputil_cl_util_context=>time_get_text_by_stampl( CONV timestampl( `20261123140509` ) )
+        act = zabaputil_cl_util_context=>time_get_text_by_stampl( val       = CONV timestampl( `20261123140509` )
+                                                                  time_zone = `UTC` ) ).
+  ENDMETHOD.
 
   METHOD get_timestampl.
     DATA(lv_ts) = zabaputil_cl_util_context=>time_get_timestampl( ).
@@ -2674,6 +2825,12 @@ CLASS ltcl_rtti_ext DEFINITION FINAL
     METHODS dfies_by_table_basic           FOR TESTING.
     METHODS dfies_by_table_has_fields      FOR TESTING.
     METHODS table_descr_basic              FOR TESTING.
+    METHODS dfies_by_rollname_basic        FOR TESTING.
+    METHODS tab_by_comps                   FOR TESTING.
+    METHODS table_buffer_reset_no_raise    FOR TESTING.
+    METHODS type_exists                    FOR TESTING.
+    METHODS dfies_by_rollname_unknown      FOR TESTING.
+    METHODS data_element_text_types        FOR TESTING.
 
 ENDCLASS.
 
@@ -2713,6 +2870,87 @@ CLASS ltcl_rtti_ext IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
     cl_abap_unit_assert=>assert_true( lv_found ).
+  ENDMETHOD.
+
+  METHOD table_buffer_reset_no_raise.
+    " no table of that name, or no SBUF_GENERIC_RESET (ABAP Cloud, the JS
+    " runtime): nothing happens, and nothing reaches the caller
+    zabaputil_cl_util_context=>db_reset_table_buffer( `ZZ_NO_SUCH_TABLE_AT_ALL` ).
+    cl_abap_unit_assert=>assert_true( abap_true ).
+  ENDMETHOD.
+
+  METHOD tab_by_comps.
+    DATA lv_id   TYPE string.
+    DATA lv_qty  TYPE i.
+    FIELD-SYMBOLS <tab> TYPE STANDARD TABLE.
+    DATA(lr_tab) = zabaputil_cl_util_context=>rtti_create_tab_by_comps( VALUE #(
+        ( name = `ID`  type = CAST #( cl_abap_datadescr=>describe_by_data( lv_id ) ) )
+        ( name = `QTY` type = CAST #( cl_abap_datadescr=>describe_by_data( lv_qty ) ) ) ) ).
+    cl_abap_unit_assert=>assert_bound( lr_tab ).
+    ASSIGN lr_tab->* TO <tab>.
+    cl_abap_unit_assert=>assert_initial( <tab> ).
+    INSERT INITIAL LINE INTO TABLE <tab> ASSIGNING FIELD-SYMBOL(<row>).
+    ASSIGN COMPONENT `QTY` OF STRUCTURE <row> TO FIELD-SYMBOL(<qty>).
+    cl_abap_unit_assert=>assert_subrc( ).
+    <qty> = 7.
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( <tab> ) ).
+  ENDMETHOD.
+
+  METHOD type_exists.
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>rtti_check_type_exists( `STRING` ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>rtti_check_type_exists( `ZABAPUTIL_CL_UTIL_CONTEXT` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_type_exists( `ZZ_NO_SUCH_TYPE_AT_ALL` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_type_exists( `` ) ).
+  ENDMETHOD.
+
+  METHOD dfies_by_rollname_basic.
+    DATA lo_descr TYPE REF TO cl_abap_typedescr.
+    IF check_dfies_available( ) = abap_false.
+      RETURN.
+    ENDIF.
+    " the JS runtime knows DFIES but not every DDIC data element
+    cl_abap_typedescr=>describe_by_name( EXPORTING  p_name         = `MANDT`
+                                         RECEIVING  p_descr_ref    = lo_descr
+                                         EXCEPTIONS type_not_found = 1
+                                                    OTHERS         = 2 ).
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    DATA(ls_result) = zabaputil_cl_util_context=>rtti_get_s_dfies_by_rollname( `MANDT` ).
+    " rollname and inttype hold on every runtime - DATATYPE and LENG do
+    " not: the JS runtime reports MANDT as CHAR of 6 bytes, a system as CLNT 3
+    cl_abap_unit_assert=>assert_equals( exp = `MANDT`
+                                        act = condense( CONV string( ls_result-rollname ) ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `C`
+                                        act = ls_result-inttype ).
+  ENDMETHOD.
+
+  METHOD dfies_by_rollname_unknown.
+    " no data element of that name - empty, not an exception; also the
+    " answer on ABAP Cloud and in the JS runtime, which have no DFIES
+    DATA(ls_result) = zabaputil_cl_util_context=>rtti_get_s_dfies_by_rollname( `ZZ_NO_SUCH_DATA_ELEMENT` ).
+    cl_abap_unit_assert=>assert_initial( ls_result ).
+  ENDMETHOD.
+
+  METHOD data_element_text_types.
+    " each type picks its field of rtti_get_data_element_texts - compared
+    " against that method, so the test holds whatever the texts are
+    DATA(ls_texts) = zabaputil_cl_util_context=>rtti_get_data_element_texts( `MANDT` ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = ls_texts-header
+        act = zabaputil_cl_util_context=>rtti_get_data_element_text( val = `MANDT` type = `H` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = ls_texts-medium
+        act = zabaputil_cl_util_context=>rtti_get_data_element_text( val = `MANDT` type = `m` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = ls_texts-long
+        act = zabaputil_cl_util_context=>rtti_get_data_element_text( val = `MANDT` type = `L` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = ls_texts-short
+        act = zabaputil_cl_util_context=>rtti_get_data_element_text( `MANDT` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = ls_texts-short
+        act = zabaputil_cl_util_context=>rtti_get_data_element_text( val = `MANDT` type = `X` ) ).
   ENDMETHOD.
 
   METHOD table_descr_basic.
@@ -3514,8 +3752,8 @@ CLASS ltcl_sync_back IMPLEMENTATION.
     DATA lr_outer TYPE REF TO data.
     FIELD-SYMBOLS <val> TYPE any.
 
-    GET REFERENCE OF lv_str INTO lr_inner.
-    GET REFERENCE OF lr_inner INTO lr_outer.
+    lr_inner = REF #( lv_str ).
+    lr_outer = REF #( lr_inner ).
 
     DATA(lr_act) = zabaputil_cl_util_context=>unassign_data( lr_outer ).
     cl_abap_unit_assert=>assert_bound( lr_act ).
@@ -3529,7 +3767,7 @@ CLASS ltcl_sync_back IMPLEMENTATION.
     DATA lr_outer TYPE REF TO data.
 
     lo_inner = NEW ltcl_test_app( ).
-    GET REFERENCE OF lo_inner INTO lr_outer.
+    lr_outer = REF #( lo_inner ).
 
     cl_abap_unit_assert=>assert_equals( act = zabaputil_cl_util_context=>unassign_object( lr_outer )
                                         exp = lo_inner ).
@@ -3545,10 +3783,10 @@ CLASS ltcl_sync_back IMPLEMENTATION.
     DATA lr_outer TYPE REF TO data.
     DATA lt_empty TYPE string_table.
 
-    GET REFERENCE OF lv_str INTO lr_inner.
-    GET REFERENCE OF lr_inner INTO lr_outer.
+    lr_inner = REF #( lv_str ).
+    lr_outer = REF #( lr_inner ).
 
-    READ TABLE lt_empty TRANSPORTING NO FIELDS INDEX 1.
+    ASSIGN lt_empty[ 1 ] TO FIELD-SYMBOL(<lv_none>).
     cl_abap_unit_assert=>assert_differs( act = sy-subrc
                                          exp = 0 ).
 
@@ -3562,7 +3800,7 @@ CLASS ltcl_sync_back IMPLEMENTATION.
     DATA lt_one   TYPE string_table.
 
     INSERT `x` INTO TABLE lt_one.
-    READ TABLE lt_one TRANSPORTING NO FIELDS INDEX 1.
+    ASSIGN lt_one[ 1 ] TO FIELD-SYMBOL(<lv_one>).
     cl_abap_unit_assert=>assert_subrc( ).
 
     cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>unassign_data( lr_data ) ).
@@ -4034,7 +4272,7 @@ CLASS ltcl_data_box IMPLEMENTATION.
     DATA lv_str  TYPE string VALUE `behind_the_reference`.
     DATA lr_data TYPE REF TO data.
 
-    GET REFERENCE OF lv_str INTO lr_data.
+    lr_data = REF #( lv_str ).
 
     cl_abap_unit_assert=>assert_char_cp(
         act = zabaputil_cl_util_context=>ui5_data_box_format( lr_data )-details
@@ -4047,7 +4285,7 @@ CLASS ltcl_data_box IMPLEMENTATION.
     DATA ls_node TYPE ty_s_node.
 
     ls_node-name = `loop`.
-    GET REFERENCE OF ls_node INTO ls_node-next.
+    ls_node-next = REF #( ls_node ).
 
     DATA(ls_box) = zabaputil_cl_util_context=>ui5_data_box_format( ls_node ).
     cl_abap_unit_assert=>assert_char_cp( act = ls_box-details
@@ -4121,7 +4359,7 @@ CLASS ltcl_data_box IMPLEMENTATION.
     DATA lt_tab  TYPE STANDARD TABLE OF string WITH EMPTY KEY.
     DATA lr_data TYPE REF TO data.
 
-    GET REFERENCE OF lt_tab INTO lr_data.
+    lr_data = REF #( lt_tab ).
 
     cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>rtti_check_table_standard( lr_data ) ).
   ENDMETHOD.
@@ -4130,7 +4368,7 @@ CLASS ltcl_data_box IMPLEMENTATION.
     DATA lt_tab  TYPE SORTED TABLE OF string WITH UNIQUE KEY table_line.
     DATA lr_data TYPE REF TO data.
 
-    GET REFERENCE OF lt_tab INTO lr_data.
+    lr_data = REF #( lt_tab ).
 
     cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_table_standard( lr_data ) ).
   ENDMETHOD.
@@ -4139,7 +4377,7 @@ CLASS ltcl_data_box IMPLEMENTATION.
     DATA lt_tab  TYPE HASHED TABLE OF string WITH UNIQUE KEY table_line.
     DATA lr_data TYPE REF TO data.
 
-    GET REFERENCE OF lt_tab INTO lr_data.
+    lr_data = REF #( lt_tab ).
 
     cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_table_standard( lr_data ) ).
   ENDMETHOD.
@@ -4151,7 +4389,7 @@ CLASS ltcl_data_box IMPLEMENTATION.
     DATA lv_str  TYPE string.
     DATA lr_data TYPE REF TO data.
 
-    GET REFERENCE OF lv_str INTO lr_data.
+    lr_data = REF #( lv_str ).
 
     cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_table_standard( lr_data ) ).
   ENDMETHOD.
@@ -4565,8 +4803,7 @@ CLASS ltcl_coverage IMPLEMENTATION.
 
     cl_abap_unit_assert=>assert_equals( exp = 2
                                         act = lines( lt_comp ) ).
-    READ TABLE lt_comp WITH KEY as_include = abap_true TRANSPORTING NO FIELDS. "#EC CI_SORTSEQ
-    cl_abap_unit_assert=>assert_subrc( exp = 4 ).
+    cl_abap_unit_assert=>assert_false( xsdbool( line_exists( lt_comp[ as_include = abap_true ] ) ) ).
 
     " the recursion guard: past 16 levels the expansion refuses
     TRY.
@@ -4648,8 +4885,7 @@ CLASS ltcl_coverage IMPLEMENTATION.
 
     DATA(lt_attri) = zabaputil_cl_util_context=>rtti_get_t_attri_by_oref( lo_probe ).
 
-    READ TABLE lt_attri WITH KEY name = `MV_TEXT` TRANSPORTING NO FIELDS. "#EC CI_SORTSEQ
-    cl_abap_unit_assert=>assert_subrc( exp = 0 ).
+    cl_abap_unit_assert=>assert_true( xsdbool( line_exists( lt_attri[ name = `MV_TEXT` ] ) ) ).
 
   ENDMETHOD.
 
@@ -4675,8 +4911,7 @@ CLASS ltcl_coverage IMPLEMENTATION.
       CATCH cx_root.
         RETURN.
     ENDTRY.
-    READ TABLE lt_classes WITH KEY classname = `` TRANSPORTING NO FIELDS. "#EC CI_SORTSEQ
-    cl_abap_unit_assert=>assert_subrc( exp = 4 ).
+    cl_abap_unit_assert=>assert_false( xsdbool( line_exists( lt_classes[ classname = `` ] ) ) ).
 
     TRY.
         lt_classes = zabaputil_cl_util_context=>rtti_get_classes_impl_intf( `ZABAPUTIL_IF_DOES_NOT_EXIST` ).
@@ -5023,7 +5258,7 @@ CLASS ltcl_sync_downstream IMPLEMENTATION.
     DATA lr_tab TYPE REF TO data.
     CREATE DATA lr_tab TYPE HANDLE lo_tab.
     ASSIGN lr_tab->* TO <tab>.
-    APPEND INITIAL LINE TO <tab> ASSIGNING <row>.
+    INSERT INITIAL LINE INTO TABLE <tab> ASSIGNING <row>.
     ASSIGN COMPONENT `COL1` OF STRUCTURE <row> TO <col>.
     cl_abap_unit_assert=>assert_subrc( ).
     <col> = `payload-value`.

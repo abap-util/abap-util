@@ -251,17 +251,17 @@ CLASS zabaputil_cl_util_xml IMPLEMENTATION.
                                                                    format = zabaputil_cl_util_context=>cv_format_e_xml_attr ) }"| ).
 
     IF mt_child IS INITIAL.
-      APPEND | <{ lv_tmp2 }{ mv_name }{ lv_tmp3 }/>| TO ct_parts.
+      INSERT | <{ lv_tmp2 }{ mv_name }{ lv_tmp3 }/>| INTO TABLE ct_parts.
       RETURN.
     ENDIF.
 
-    APPEND | <{ lv_tmp2 }{ mv_name }{ lv_tmp3 }>| TO ct_parts.
+    INSERT | <{ lv_tmp2 }{ mv_name }{ lv_tmp3 }>| INTO TABLE ct_parts.
 
     LOOP AT mt_child INTO DATA(lr_child).
       CAST zabaputil_cl_util_xml( lr_child )->xml_get_parts( CHANGING ct_parts = ct_parts ).
     ENDLOOP.
 
-    APPEND |</{ lv_tmp2 }{ mv_name }>| TO ct_parts.
+    INSERT |</{ lv_tmp2 }{ mv_name }>| INTO TABLE ct_parts.
 
   ENDMETHOD.
 
@@ -284,18 +284,18 @@ CLASS zabaputil_cl_util_xml IMPLEMENTATION.
                                                                    format = zabaputil_cl_util_context=>cv_format_e_xml_attr ) }"| ).
 
     IF mt_child IS INITIAL.
-      APPEND |{ lv_pad }<{ lv_ns }{ mv_name }{ lv_attr }/>| TO ct_parts.
+      INSERT |{ lv_pad }<{ lv_ns }{ mv_name }{ lv_attr }/>| INTO TABLE ct_parts.
       RETURN.
     ENDIF.
 
-    APPEND |{ lv_pad }<{ lv_ns }{ mv_name }{ lv_attr }>| TO ct_parts.
+    INSERT |{ lv_pad }<{ lv_ns }{ mv_name }{ lv_attr }>| INTO TABLE ct_parts.
 
     LOOP AT mt_child INTO DATA(lr_child).
       CAST zabaputil_cl_util_xml( lr_child )->xml_get_parts_indent( EXPORTING iv_depth = iv_depth + 1
                                                                  CHANGING ct_parts = ct_parts ).
     ENDLOOP.
 
-    APPEND |{ lv_pad }</{ lv_ns }{ mv_name }>| TO ct_parts.
+    INSERT |{ lv_pad }</{ lv_ns }{ mv_name }>| INTO TABLE ct_parts.
 
   ENDMETHOD.
 

@@ -634,6 +634,13 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE timestampl.
 
+    "! The current time stamp in whole seconds, as GET TIME STAMP fills a
+    "! TIMESTAMP: truncated. time_get_timestampl assigned to a TIMESTAMP
+    "! field rounds instead, and can land a second in the future.
+    CLASS-METHODS time_get_timestamp
+      RETURNING
+        VALUE(result) TYPE timestamp.
+
     CLASS-METHODS time_subtract_seconds
       IMPORTING
         !time         TYPE timestampl
@@ -695,6 +702,25 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO data.
 
+    "! A standard table whose line is built from components - the
+    "! structdescr, the tabledescr and the CREATE DATA in one call.
+    "! cx_sy_struct_creation and cx_sy_table_creation reach the caller.
+    "! @parameter val    | the components, e.g. from rtti_get_t_attri_by_table_name
+    "! @parameter result | a reference to the new, empty table
+    CLASS-METHODS rtti_create_tab_by_comps
+      IMPORTING
+        val           TYPE abap_component_tab
+      RETURNING
+        VALUE(result) TYPE REF TO data.
+
+    "! Whether a type of that name exists - a DDIC object, a class, an
+    "! interface. Never raises.
+    CLASS-METHODS rtti_check_type_exists
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE abap_bool.
+
     CLASS-METHODS rtti_check_type_kind_dref
       IMPORTING
         val           TYPE any
@@ -737,6 +763,27 @@ CLASS zabaputil_cl_util_context DEFINITION
         val           TYPE string
       RETURNING
         VALUE(result) TYPE ty_s_range.
+
+    "! A range for one value the user typed: CP when it holds a `*`, EQ
+    "! otherwise - the select-option behaviour of a search field.
+    "! @parameter val    | the value; initial gives an empty range, which selects everything
+    "! @parameter result | one line, sign I
+    CLASS-METHODS filter_get_range_by_value
+      IMPORTING
+        val           TYPE any
+      RETURNING
+        VALUE(result) TYPE ty_t_range.
+
+    "! A range for a list of values, one line per distinct value - CP for a
+    "! value with a `*`, EQ otherwise. An empty value is kept as EQ space,
+    "! so a list can ask for "blank" on purpose.
+    "! @parameter val    | the values, in any order, duplicates allowed
+    "! @parameter result | sorted by value, sign I; empty for an empty list
+    CLASS-METHODS filter_get_range_t_by_value_t
+      IMPORTING
+        val           TYPE string_table
+      RETURNING
+        VALUE(result) TYPE ty_t_range.
 
     CLASS-METHODS filter_get_token_t_by_range_t
       IMPORTING
@@ -786,6 +833,18 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE d.
 
+    "! A time stamp as readable ISO text: `2026-11-23 14:05:09`, the fraction
+    "! only when it is not zero (`2026-11-23 14:05:09,1234567`).
+    "! @parameter val       | the time stamp - a short TIMESTAMP is passed as CONV timestampl( )
+    "! @parameter time_zone | the zone to show it in; empty: UTC, as stored
+    "! @parameter result    | the text
+    CLASS-METHODS time_get_text_by_stampl
+      IMPORTING
+        val           TYPE timestampl
+        time_zone     TYPE clike OPTIONAL
+      RETURNING
+        VALUE(result) TYPE string.
+
     CLASS-METHODS conv_copy_ref_data
       IMPORTING
         !from         TYPE any
@@ -804,12 +863,31 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE string.
 
+    "! Run a conversion exit: CONVERSION_EXIT_&lt;convexit&gt;_INPUT, or _OUTPUT.
+    "!
+    "!   conv_exit( EXPORTING convexit = `MATN1` CHANGING value = lv_matnr ).
+    "!   conv_exit( EXPORTING convexit = `ALPHA` from = i_vbeln CHANGING value = lv_docno ).
+    "!
+    "! A value the exit refuses - a unit that does not exist, a material
+    "! number too long - raises zabaputil_cx_util_error with the exit's own
+    "! message; VALUE is then left as it was. A caller that can live with
+    "! the unconverted value catches it and carries on.
+    "!
+    "! @parameter convexit | the exit's name: ALPHA, MATN1, CUNIT, HUID, ...
+    "! @parameter output   | abap_true: the _OUTPUT direction
+    "! @parameter from     | the value to convert, when it is not VALUE itself. The
+    "!                       target's type decides the result - ALPHA pads to its length
+    "! @parameter value    | converted in place, or the target of FROM
+    "! @raising zabaputil_cx_util_error | the exit refused the value, or does not exist
     CLASS-METHODS conv_exit
       IMPORTING
         convexit TYPE clike
         output   TYPE abap_bool DEFAULT abap_false
+        from     TYPE any       OPTIONAL
       CHANGING
-        value    TYPE data.
+        value    TYPE data
+      RAISING
+        zabaputil_cx_util_error.
 
     CLASS-METHODS rtti_check_clike
       IMPORTING
@@ -1382,6 +1460,17 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE ty_s_data_element_text.
 
+    "! One text of a data element, picked from rtti_get_data_element_texts.
+    "! @parameter val    | data element name
+    "! @parameter type   | H header, S short, M medium, L long; anything else is short
+    "! @parameter result | the text
+    CLASS-METHODS rtti_get_data_element_text
+      IMPORTING
+        val           TYPE clike
+        type          TYPE clike DEFAULT `S`
+      RETURNING
+        VALUE(result) TYPE string.
+
     CLASS-METHODS conv_decode_x_base64
       IMPORTING
         val           TYPE string
@@ -1405,6 +1494,20 @@ CLASS zabaputil_cl_util_context DEFINITION
         val           TYPE string
       RETURNING
         VALUE(result) TYPE xstring.
+
+    "! Cut an XSTRING into the lines of a binary table, as
+    "! SCMS_XSTRING_TO_BINARY does - without the function module, so it
+    "! runs on ABAP Cloud too. The line length comes from the table: a line
+    "! of one byte field (x255, SOLIX) or a structure whose first component
+    "! is one (BAPICONTEN-LINE, x1022). The last line is padded with zero
+    "! bytes; xstrlen( val ) is the real length.
+    "! @parameter val    | the bytes
+    "! @parameter result | the binary table, any of the two line shapes
+    CLASS-METHODS conv_get_bintab_by_xstring
+      IMPORTING
+        val    TYPE xstring
+      EXPORTING
+        result TYPE STANDARD TABLE.
 
     " read_description defaults to off: filling it costs one repository
     " read PER implementing class (SEO_CLASS_READ / XCO), and the common
@@ -1573,6 +1676,17 @@ CLASS zabaputil_cl_util_context DEFINITION
         table_name    TYPE string
       RETURNING
         VALUE(result) TYPE ty_t_dfies.
+
+    "! The DDIC field description of a data element - length, type,
+    "! conversion exit, texts. Empty on ABAP Cloud, which has no DFIES,
+    "! and for a name that is no DDIC data element.
+    "! @parameter val    | data element name
+    "! @parameter result | the description
+    CLASS-METHODS rtti_get_s_dfies_by_rollname
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE ty_s_dfies.
 
     CLASS-METHODS tab_get_where_by_dfies
       IMPORTING
@@ -2484,6 +2598,15 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE ty_s_http_response.
 
+    "! Reset the table buffer of a database table on the application server,
+    "! so a buffered customizing table shows a change at once and not only
+    "! after the buffer synchronisation. Nothing happens on ABAP Cloud, which
+    "! has no SBUF_GENERIC_RESET, nor for an unbuffered table.
+    "! @parameter val | the database table
+    CLASS-METHODS db_reset_table_buffer
+      IMPORTING
+        val TYPE clike.
+
     CLASS-METHODS db_check_table_exists
       IMPORTING
         val           TYPE clike
@@ -3199,10 +3322,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
         " type descriptors are singletons, so the reference identifies the
         " type without converting/hashing the absolute name on every call
-        READ TABLE mt_bool_cache REFERENCE INTO DATA(lr_cache)
-             WITH TABLE KEY typedescr = lo_descr.
+        ASSIGN mt_bool_cache[ typedescr = lo_descr ] TO FIELD-SYMBOL(<ls_bool_cache>).
         IF sy-subrc = 0.
-          result = lr_cache->is_bool.
+          result = <ls_bool_cache>-is_bool.
           RETURN.
         ENDIF.
 
@@ -3366,6 +3488,49 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD filter_get_range_by_value.
+
+    DATA ls_range TYPE ty_s_range.
+
+    IF val IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    ls_range-sign = `I`.
+    ls_range-low  = val.
+    IF ls_range-low CA `*`.
+      ls_range-option = `CP`.
+    ELSE.
+      ls_range-option = `EQ`.
+    ENDIF.
+    INSERT ls_range INTO TABLE result.
+
+  ENDMETHOD.
+
+  METHOD filter_get_range_t_by_value_t.
+
+    DATA lt_val   TYPE string_table.
+    DATA lv_val   TYPE string.
+    DATA ls_range TYPE ty_s_range.
+
+    lt_val = val.
+    SORT lt_val.
+    DELETE ADJACENT DUPLICATES FROM lt_val.
+
+    LOOP AT lt_val INTO lv_val.
+      CLEAR ls_range.
+      ls_range-sign = `I`.
+      ls_range-low  = lv_val.
+      IF lv_val CA `*`.
+        ls_range-option = `CP`.
+      ELSE.
+        ls_range-option = `EQ`.
+      ENDIF.
+      INSERT ls_range INTO TABLE result.
+    ENDLOOP.
+
+  ENDMETHOD.
+
   METHOD filter_get_range_by_token.
 
     DATA(lv_value) = val.
@@ -3499,7 +3664,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       DATA(lv_index) = 0.
       LOOP AT <lt_source> ASSIGNING FIELD-SYMBOL(<ls_source>).
         lv_index = lv_index + 1.
-        READ TABLE lt_tab INDEX lv_index ASSIGNING <ls_range>.
+        ASSIGN lt_tab[ lv_index ] TO <ls_range>.
         IF sy-subrc <> 0.
           EXIT.
         ENDIF.
@@ -3645,7 +3810,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         ENDIF.
         lv_index = lv_index + 1.
         DATA(lv_field_val) = |{ <field> }|.
-        REPLACE ALL OCCURRENCES OF `;` IN lv_field_val WITH `,`.
+        lv_field_val = replace( val = lv_field_val sub = `;` with = `,` occ = 0 ).
         lv_line = |{ lv_line }{ lv_field_val };|.
       ENDDO.
       INSERT lv_line INTO TABLE lt_lines.
@@ -3667,7 +3832,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     LOOP AT lt_cols REFERENCE INTO DATA(lr_col).
 
       DATA(lv_name) = c_trim_upper( lr_col->* ).
-      REPLACE ALL OCCURRENCES OF ` ` IN lv_name WITH `_`.
+      lv_name = replace( val = lv_name sub = ` ` with = `_` occ = 0 ).
 
       INSERT VALUE #( name = lv_name
                       type = cl_abap_elemdescr=>get_c( 40 ) ) INTO TABLE lt_comp.
@@ -3735,9 +3900,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA lv_name TYPE string.
     lv_name = to_upper( val ).
 
-    READ TABLE gt_class_exists REFERENCE INTO DATA(lr_hit) WITH TABLE KEY name = lv_name.
+    ASSIGN gt_class_exists[ name = lv_name ] TO FIELD-SYMBOL(<ls_hit>).
     IF sy-subrc = 0.
-      result = lr_hit->exists.
+      result = <ls_hit>-exists.
       RETURN.
     ENDIF.
 
@@ -3938,18 +4103,17 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     " descriptor instances are singletons per type, so the identity check
     " guards against absolute names reused by other (local/anonymous) types
     lv_absolute_name = lo_struct->absolute_name.
-    READ TABLE mt_attri_cache REFERENCE INTO DATA(lr_cache)
-         WITH TABLE KEY absolute_name = lv_absolute_name.
-    IF sy-subrc = 0 AND lr_cache->o_struct = lo_struct.
-      result = lr_cache->t_attri.
+    ASSIGN mt_attri_cache[ absolute_name = lv_absolute_name ] TO FIELD-SYMBOL(<ls_attri_cache>).
+    IF sy-subrc = 0 AND <ls_attri_cache>-o_struct = lo_struct.
+      result = <ls_attri_cache>-t_attri.
       RETURN.
     ENDIF.
 
     result = expand_components( lo_struct->get_components( ) ).
 
-    IF lr_cache IS BOUND.
-      lr_cache->o_struct = lo_struct.
-      lr_cache->t_attri  = result.
+    IF <ls_attri_cache> IS ASSIGNED.
+      <ls_attri_cache>-o_struct = lo_struct.
+      <ls_attri_cache>-t_attri  = result.
     ELSE.
       INSERT VALUE #( absolute_name = lv_absolute_name
                       o_struct      = lo_struct
@@ -4012,13 +4176,33 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD conv_exit.
 
+    DATA lv_message TYPE string.
+    DATA lx_error   TYPE REF TO cx_root.
+
     DATA(conex) = COND string( WHEN output = abap_true
                                THEN |CONVERSION_EXIT_{ convexit }_OUTPUT|
                                ELSE |CONVERSION_EXIT_{ convexit }_INPUT| ).
 
     TRY.
-        IF convexit = `CUNIT`.
-
+        " CUNIT reads the unit in a language; the others take no such parameter
+        IF from IS SUPPLIED AND convexit = `CUNIT`.
+          CALL FUNCTION conex
+            EXPORTING
+              input    = from
+              language = sy-langu
+            IMPORTING
+              output   = value
+            EXCEPTIONS
+              OTHERS   = 99.
+        ELSEIF from IS SUPPLIED.
+          CALL FUNCTION conex
+            EXPORTING
+              input  = from
+            IMPORTING
+              output = value
+            EXCEPTIONS
+              OTHERS = 99.
+        ELSEIF convexit = `CUNIT`.
           CALL FUNCTION conex
             EXPORTING
               input    = value
@@ -4027,9 +4211,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
               output   = value
             EXCEPTIONS
               OTHERS   = 99.
-
         ELSE.
-
           CALL FUNCTION conex
             EXPORTING
               input  = value
@@ -4037,11 +4219,28 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
               output = value
             EXCEPTIONS
               OTHERS = 99.
-
         ENDIF.
 
-      CATCH cx_root ##NO_HANDLER.
+      CATCH cx_root INTO lx_error.
+        " no such exit, or a parameter it does not accept
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = lx_error.
     ENDTRY.
+
+    IF sy-subrc <> 0.
+      " the exit raised its exception with MESSAGE ... RAISING, which leaves
+      " the message in sy-msg*
+      IF sy-msgid IS NOT INITIAL.
+        MESSAGE ID sy-msgid TYPE `E` NUMBER sy-msgno
+                WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4 INTO lv_message.
+      ELSE.
+        lv_message = |{ conex } failed|.
+      ENDIF.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = lv_message.
+    ENDIF.
 
   ENDMETHOD.
 
@@ -4084,7 +4283,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA(lv_sql) = CONV string( val ).
 
     DATA(lv_squished) = lv_sql.
-    REPLACE ALL OCCURRENCES OF ` ` IN lv_squished WITH ``.
+    lv_squished = replace( val = lv_squished sub = ` ` with = `` occ = 0 ).
     lv_squished = to_upper( lv_squished ).
     SPLIT lv_squished AT `SELECTFROM` INTO DATA(lv_dummy) DATA(lv_tab).
     SPLIT lv_tab AT `FIELDS` INTO lv_tab lv_dummy.
@@ -4102,9 +4301,30 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD time_get_text_by_stampl.
+
+    DATA lv_zone TYPE c LENGTH 6.
+
+    IF time_zone IS INITIAL.
+      result = |{ val TIMESTAMP = ISO }|.
+    ELSE.
+      lv_zone = time_zone.
+      result = |{ val TIMESTAMP = ISO TIMEZONE = lv_zone }|.
+    ENDIF.
+
+    " 2026-11-23T14:05:09,0000000 -> 2026-11-23 14:05:09
+    result = replace( val = result sub = `T` with = ` ` ).
+    result = replace( val = result sub = `,0000000` with = `` ).
+
+  ENDMETHOD.
+
   METHOD time_get_date_by_stampl.
     DATA(ls_sy) = zabaputil_cl_util_context=>context_get_sy( ).
     CONVERT TIME STAMP val TIME ZONE ls_sy-zonlo INTO DATE result TIME DATA(lv_dummy).
+  ENDMETHOD.
+
+  METHOD time_get_timestamp.
+    GET TIME STAMP FIELD result.
   ENDMETHOD.
 
   METHOD time_get_timestampl.
@@ -4438,7 +4658,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     FIELD-SYMBOLS <row_out> TYPE any.
 
     LOOP AT val ASSIGNING <row_in>.
-      APPEND INITIAL LINE TO tab ASSIGNING <row_out>.
+      INSERT INITIAL LINE INTO TABLE tab ASSIGNING <row_out>.
       MOVE-CORRESPONDING <row_in> TO <row_out>.
     ENDLOOP.
 
@@ -4746,8 +4966,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     IF lv_cond CS ` NOT LIKE `.
       SPLIT lv_cond AT ` NOT LIKE ` INTO fieldname lv_rest.
       lv_like = filter_sql_strip_quotes( lv_rest ).
-      REPLACE ALL OCCURRENCES OF `%` IN lv_like WITH `*`.
-      REPLACE ALL OCCURRENCES OF `_` IN lv_like WITH `+`.
+      lv_like = replace( val = lv_like sub = `%` with = `*` occ = 0 ).
+      lv_like = replace( val = lv_like sub = `_` with = `+` occ = 0 ).
       range-option = `NP`.
       range-low    = lv_like.
       RETURN.
@@ -4756,8 +4976,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     IF lv_cond CS ` LIKE `.
       SPLIT lv_cond AT ` LIKE ` INTO fieldname lv_rest.
       lv_like = filter_sql_strip_quotes( lv_rest ).
-      REPLACE ALL OCCURRENCES OF `%` IN lv_like WITH `*`.
-      REPLACE ALL OCCURRENCES OF `_` IN lv_like WITH `+`.
+      lv_like = replace( val = lv_like sub = `%` with = `*` occ = 0 ).
+      lv_like = replace( val = lv_like sub = `_` with = `+` occ = 0 ).
       range-option = `CP`.
       range-low    = lv_like.
       RETURN.
@@ -5136,14 +5356,16 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     IF result NA `\'` AND result NA cv_char_util_cr_lf.
       RETURN.
     ENDIF.
-    REPLACE ALL OCCURRENCES OF `\` IN result WITH `\\`.
-    REPLACE ALL OCCURRENCES OF `'` IN result WITH `\'`.
-    REPLACE ALL OCCURRENCES OF cv_char_util_cr_lf IN result WITH `\n`.
-    REPLACE ALL OCCURRENCES OF cv_char_util_newline IN result WITH `\n`.
+    result = replace( val = result sub = `\` with = `\\` occ = 0 ).
+    result = replace( val = result sub = `'` with = `\'` occ = 0 ).
+    result = replace( val = result sub = cv_char_util_cr_lf with = `\n` occ = 0 ).
+    result = replace( val = result sub = cv_char_util_newline with = `\n` occ = 0 ).
     " a standalone CR (not part of CR+LF, already collapsed above) is a JS
     " line terminator too and would break the '...' literal
-    REPLACE ALL OCCURRENCES OF cv_char_util_cr_lf(1)
-            IN result WITH `\r`.
+    result = replace( val  = result
+                      sub  = cv_char_util_cr_lf(1)
+                      with = `\r`
+                      occ  = 0 ).
 
   ENDMETHOD.
 
@@ -5187,6 +5409,36 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDWHILE.
 
     result = xsdbool( lv_depth = 0 AND lv_quote IS INITIAL ).
+
+  ENDMETHOD.
+
+  METHOD rtti_create_tab_by_comps.
+
+    DATA lo_struct TYPE REF TO cl_abap_structdescr.
+    DATA lo_table  TYPE REF TO cl_abap_tabledescr.
+
+    lo_struct = cl_abap_structdescr=>create( val ).
+    lo_table = cl_abap_tabledescr=>create( p_line_type  = lo_struct
+                                           p_table_kind = cl_abap_tabledescr=>tablekind_std ).
+    CREATE DATA result TYPE HANDLE lo_table.
+
+  ENDMETHOD.
+
+  METHOD rtti_check_type_exists.
+
+    DATA lv_name TYPE string.
+
+    IF val IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    lv_name = val.
+    " the non-functional form: an unknown name comes back as sy-subrc,
+    " where the functional one ends in a classic exception
+    cl_abap_typedescr=>describe_by_name( EXPORTING  p_name         = lv_name
+                                         EXCEPTIONS type_not_found = 1
+                                                    OTHERS         = 2 ).
+    result = xsdbool( sy-subrc = 0 ).
 
   ENDMETHOD.
 
@@ -5507,9 +5759,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA(lv_day)   = lv_date+6(2).
 
     result = lv_fmt.
-    REPLACE `YYYY` IN result WITH lv_year.
-    REPLACE `MM`   IN result WITH lv_month.
-    REPLACE `DD`   IN result WITH lv_day.
+    result = replace( val = result sub = `YYYY` with = lv_year ).
+    result = replace( val = result sub = `MM` with = lv_month ).
+    result = replace( val = result sub = `DD` with = lv_day ).
 
   ENDMETHOD.
 
@@ -5922,19 +6174,23 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     " the remainder once per tag - quadratic over a long body, in the path
     " that renders an HTML message for the box
     result = val.
-    REPLACE ALL OCCURRENCES OF REGEX `<[^>]*>` IN result WITH ` ` ##REGEX_POSIX.
-    FIND `<` IN result MATCH OFFSET DATA(lv_open).
-    IF sy-subrc = 0.
+    result = replace( val   = result
+                      regex = `<[^>]*>`
+                      with  = ` `
+                      occ   = 0 ) ##REGEX_POSIX.
+    DATA(lv_open) = find( val = result
+                          sub = `<` ).
+    IF lv_open >= 0.
       result = substring( val = result
                           len = lv_open ) && ` `.
     ENDIF.
 
     " the entities the stripped text would otherwise show as written
-    REPLACE ALL OCCURRENCES OF `&nbsp;` IN result WITH ` `.
-    REPLACE ALL OCCURRENCES OF `&lt;` IN result WITH `<`.
-    REPLACE ALL OCCURRENCES OF `&gt;` IN result WITH `>`.
-    REPLACE ALL OCCURRENCES OF `&amp;` IN result WITH `&`.
-    CONDENSE result.
+    result = replace( val = result sub = `&nbsp;` with = ` ` occ = 0 ).
+    result = replace( val = result sub = `&lt;` with = `<` occ = 0 ).
+    result = replace( val = result sub = `&gt;` with = `>` occ = 0 ).
+    result = replace( val = result sub = `&amp;` with = `&` occ = 0 ).
+    result = condense( result ).
 
     IF strlen( result ) > cv_data_max_text.
       result = substring( val = result
@@ -5991,7 +6247,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             CLEAR result.
             RETURN.
           ENDIF.
-          APPEND ls_flat TO result.
+          INSERT ls_flat INTO TABLE result.
         ENDLOOP.
       CATCH cx_root.
         CLEAR result.
@@ -6162,7 +6418,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD c_replace_all.
 
     result = val.
-    REPLACE ALL OCCURRENCES OF sub IN result WITH new_val.
+    result = replace( val = result sub = sub with = new_val occ = 0 ).
 
   ENDMETHOD.
 
@@ -6265,8 +6521,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     " digit and at most one decimal point (e.g. European format `1.234,56`
     " normalizes to the invalid `1.234.56`). Return 0 for invalid input -
     " the JS transpiler converts such strings leniently instead of raising
-    DATA lv_dot_count TYPE i.
-    FIND ALL OCCURRENCES OF `.` IN lv_clean MATCH COUNT lv_dot_count.
+    DATA(lv_dot_count) = count( val = lv_clean
+                                sub = `.` ).
     IF lv_dot_count > 1 OR lv_clean NA `0123456789`.
       result = 0.
       RETURN.
@@ -6308,7 +6564,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       IF lv_tabix = 1.
         lv_numeric = rtti_check_numeric( <val> ).
       ENDIF.
-      APPEND INITIAL LINE TO lt_key ASSIGNING FIELD-SYMBOL(<key>).
+      INSERT INITIAL LINE INTO TABLE lt_key ASSIGNING FIELD-SYMBOL(<key>).
       IF lv_numeric = abap_true.
         <key>-key_num = <val>.
       ELSE.
@@ -6331,9 +6587,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     CLEAR tab.
     LOOP AT lt_key ASSIGNING <key>.
-      READ TABLE <tab_copy> INDEX <key>-idx ASSIGNING FIELD-SYMBOL(<src>).
+      ASSIGN <tab_copy>[ <key>-idx ] TO FIELD-SYMBOL(<src>).
       IF sy-subrc = 0.
-        APPEND <src> TO tab.
+        INSERT <src> INTO TABLE tab.
       ENDIF.
     ENDLOOP.
 
@@ -6399,7 +6655,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CONTINUE.
       ENDIF.
       DATA(lv_val) = |{ <field> }|.
-      READ TABLE result ASSIGNING FIELD-SYMBOL(<entry>) WITH KEY n = lv_val.
+      ASSIGN result[ n = lv_val ] TO FIELD-SYMBOL(<entry>).
       IF sy-subrc = 0.
         DATA(lv_count) = CONV i( <entry>-v ) + 1.
         <entry>-v = |{ lv_count }|.
@@ -6914,6 +7170,45 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD conv_get_bintab_by_xstring.
+
+    DATA lr_line   TYPE REF TO data.
+    DATA lv_len    TYPE i.
+    DATA lv_total  TYPE i.
+    DATA lv_offset TYPE i.
+    DATA lv_chunk  TYPE i.
+    FIELD-SYMBOLS <line>  TYPE any.
+    FIELD-SYMBOLS <field> TYPE any.
+
+    CLEAR result.
+
+    CREATE DATA lr_line LIKE LINE OF result.
+    ASSIGN lr_line->* TO <line>.
+
+    " BAPICONTEN-LINE and the like: the bytes go into the first component
+    ASSIGN COMPONENT 1 OF STRUCTURE <line> TO <field>.
+    IF sy-subrc <> 0.
+      ASSIGN <line> TO <field>.
+    ENDIF.
+
+    " the byte length - DESCRIBE FIELD is no statement of ABAP Cloud
+    lv_len = cl_abap_typedescr=>describe_by_data( <field> )->length.
+    IF lv_len <= 0.
+      RETURN.
+    ENDIF.
+
+    lv_total = xstrlen( val ).
+    WHILE lv_offset < lv_total.
+      lv_chunk = nmin( val1 = lv_len
+                       val2 = lv_total - lv_offset ).
+      CLEAR <line>.
+      <field> = val+lv_offset(lv_chunk).
+      INSERT <line> INTO TABLE result.
+      lv_offset = lv_offset + lv_chunk.
+    ENDWHILE.
+
+  ENDMETHOD.
+
   METHOD conv_get_xstring_by_string.
 
     DATA conv           TYPE REF TO object.
@@ -7152,6 +7447,27 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD rtti_get_data_element_text.
+
+    DATA texts TYPE ty_s_data_element_text.
+    DATA kind  TYPE string.
+
+    texts = rtti_get_data_element_texts( val ).
+    kind = to_upper( type ).
+
+    CASE kind.
+      WHEN `H`.
+        result = texts-header.
+      WHEN `M`.
+        result = texts-medium.
+      WHEN `L`.
+        result = texts-long.
+      WHEN OTHERS.
+        result = texts-short.
+    ENDCASE.
+
+  ENDMETHOD.
+
   METHOD rtti_get_data_element_texts.
 
     DATA data_element_name TYPE string.
@@ -7228,7 +7544,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    MOVE-CORRESPONDING <ddic> TO ddic.
+    ddic = CORRESPONDING #( BASE ( ddic ) <ddic> ).
     texts-header = ddic-reptext.
     texts-short  = ddic-scrtext_s.
     texts-medium = ddic-scrtext_m.
@@ -7773,11 +8089,15 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     LOOP AT lt_attri REFERENCE INTO ls_attri.
       " the component's descriptor is already in the attribute table - no
       " ASSIGN and no describe_by_data per component
-      CHECK ls_attri->type->kind = cl_abap_typedescr=>kind_table.
+      IF ls_attri->type->kind <> cl_abap_typedescr=>kind_table.
+        CONTINUE.
+      ENDIF.
 
       TRY.
           DATA(lo_line) = CAST cl_abap_tabledescr( ls_attri->type )->get_table_line_type( ).
-          CHECK lo_line->kind = cl_abap_typedescr=>kind_struct.
+          IF lo_line->kind <> cl_abap_typedescr=>kind_struct.
+            CONTINUE.
+          ENDIF.
           DATA(lt_comps) = CAST cl_abap_structdescr( lo_line )->get_components( ).
           LOOP AT lt_comps REFERENCE INTO DATA(ls_comp).
             IF ls_comp->name = `%MSG` OR ls_comp->name = `%FAIL`.
@@ -7810,8 +8130,12 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA(lt_attri) = rtti_get_t_attri_by_any( val ).
     LOOP AT lt_attri REFERENCE INTO DATA(ls_attri).
       ASSIGN COMPONENT ls_attri->name OF STRUCTURE val TO FIELD-SYMBOL(<tab>).
-      CHECK sy-subrc = 0.
-      CHECK rtti_get_type_kind( <tab> ) = cl_abap_datadescr=>typekind_table.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      IF rtti_get_type_kind( <tab> ) <> cl_abap_datadescr=>typekind_table.
+        CONTINUE.
+      ENDIF.
 
       " guarded like data_render_tab, msg_get_internal and
       " data_get_headline - and here the symbol is LOOP-CARRIED, so an
@@ -7820,7 +8144,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       FIELD-SYMBOLS <ftab> TYPE ANY TABLE.
       UNASSIGN <ftab>.
       ASSIGN <tab> TO <ftab>.
-      CHECK <ftab> IS ASSIGNED.
+      IF <ftab> IS NOT ASSIGNED.
+        CONTINUE.
+      ENDIF.
 
       " the row kind is a property of the table TYPE - decided once per
       " table, not asked of every row (same idea as msg_get_internal_tab)
@@ -7926,8 +8252,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     " two RAP prefixes never matched, and no message ever carried its
     " element or action
     DATA(lv_prefix) = CONV string( prefix ).
-    FIND FIRST OCCURRENCE OF `-` IN lv_prefix MATCH OFFSET DATA(lv_off).
-    IF sy-subrc = 0.
+    DATA(lv_off) = find( val = lv_prefix
+                         sub = `-` ).
+    IF lv_off >= 0.
       ASSIGN COMPONENT lv_prefix(lv_off) OF STRUCTURE val TO FIELD-SYMBOL(<sub>).
       IF sy-subrc <> 0.
         RETURN.
@@ -7941,12 +8268,20 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA(lv_len) = strlen( lv_prefix ).
     DATA(lt_attri) = rtti_get_t_attri_by_any( val ).
     LOOP AT lt_attri REFERENCE INTO DATA(ls_attri).
-      CHECK strlen( ls_attri->name ) > lv_len.
-      CHECK lv_len = 0 OR ls_attri->name(lv_len) = lv_prefix.
+      IF strlen( ls_attri->name ) <= lv_len.
+        CONTINUE.
+      ENDIF.
+      IF NOT ( lv_len = 0 OR ls_attri->name(lv_len) = lv_prefix ).
+        CONTINUE.
+      ENDIF.
       ASSIGN COMPONENT ls_attri->name OF STRUCTURE val TO FIELD-SYMBOL(<flag>).
-      CHECK sy-subrc = 0.
-      CHECK <flag> IS NOT INITIAL.
-      APPEND ls_attri->name+lv_len TO result.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      IF <flag> IS INITIAL.
+        CONTINUE.
+      ENDIF.
+      INSERT ls_attri->name+lv_len INTO TABLE result.
     ENDLOOP.
 
   ENDMETHOD.
@@ -8012,14 +8347,16 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     LOOP AT lt_attri REFERENCE INTO DATA(ls_attri).
       ASSIGN COMPONENT ls_attri->name OF STRUCTURE val TO FIELD-SYMBOL(<comp>).
-      CHECK sy-subrc = 0.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
 
       DATA(lv_sub_kind) = rtti_get_type_kind( <comp> ).
       IF lv_sub_kind = cl_abap_datadescr=>typekind_struct1
           OR lv_sub_kind = cl_abap_datadescr=>typekind_struct2.
         DATA(lv_sub) = msg_get_rap_flatten( <comp> ).
         IF lv_sub IS NOT INITIAL.
-          APPEND lv_sub TO lt_part.
+          INSERT lv_sub INTO TABLE lt_part.
         ENDIF.
       ELSEIF <comp> IS NOT INITIAL AND rtti_check_printable( <comp> ) = abap_true.
         " the printable test does what the TRY around this could not: a
@@ -8030,7 +8367,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         TRY.
             DATA lv_str TYPE string.
             lv_str = <comp>.
-            APPEND |{ ls_attri->name }={ lv_str }| TO lt_part.
+            INSERT |{ ls_attri->name }={ lv_str }| INTO TABLE lt_part.
           CATCH cx_root ##NO_HANDLER.
         ENDTRY.
       ENDIF.
@@ -8167,7 +8504,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
           ENDLOOP.
 
-          APPEND s_dfies TO result.
+          INSERT s_dfies INTO TABLE result.
           CLEAR s_dfies.
 
         ENDLOOP.
@@ -8222,7 +8559,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
               ENDIF.
               ASSIGN COMPONENT `FIELDNAME` OF STRUCTURE <any> TO <field>.
               ASSERT sy-subrc = 0.
-              APPEND <field> TO names.
+              INSERT <field> INTO TABLE names.
             ENDLOOP.
         ENDTRY.
       CATCH cx_root ##NO_HANDLER.
@@ -8247,6 +8584,46 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
        ) INTO TABLE result.
 
     ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD rtti_get_s_dfies_by_rollname.
+
+    DATA lo_descr TYPE REF TO cl_abap_typedescr.
+    DATA lr_dfies TYPE REF TO data.
+    FIELD-SYMBOLS <dfies> TYPE any.
+
+    " DFIES and get_ddic_field( ) do not exist on ABAP Cloud - both are
+    " reached by name, so the class compiles there too
+    IF check_abap_cloud( ) = abap_true.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        cl_abap_typedescr=>describe_by_name( EXPORTING  p_name         = val
+                                             RECEIVING  p_descr_ref    = lo_descr
+                                             EXCEPTIONS type_not_found = 1
+                                                        OTHERS         = 2 ).
+        IF sy-subrc <> 0 OR lo_descr->kind <> cl_abap_typedescr=>kind_elem.
+          RETURN.
+        ENDIF.
+
+        CREATE DATA lr_dfies TYPE (`DFIES`).
+        ASSIGN lr_dfies->* TO <dfies>.
+
+        CALL METHOD lo_descr->(`GET_DDIC_FIELD`)
+          RECEIVING
+            p_flddescr   = <dfies>
+          EXCEPTIONS
+            not_found    = 1
+            no_ddic_type = 2
+            OTHERS       = 3.
+        IF sy-subrc = 0.
+          result = CORRESPONDING #( BASE ( result ) <dfies> ).
+        ENDIF.
+
+      CATCH cx_root ##NO_HANDLER.
+    ENDTRY.
 
   ENDMETHOD.
 
@@ -8408,7 +8785,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       ENDIF.
 
       DATA(default_value) = fieldrop-defaultval.
-      REPLACE ALL OCCURRENCES OF `'` IN default_value WITH ``.
+      default_value = replace( val = default_value sub = `'` with = `` occ = 0 ).
 
       ms_shlp-selopt = VALUE #( BASE ms_shlp-selopt
                                 ( shlpfield = fieldrop-fieldname
@@ -8441,7 +8818,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
       ls_comp-name  = descption-fieldname.
       ls_comp-type ?= cl_abap_datadescr=>describe_by_name( descption-rollname ).
-      APPEND ls_comp TO lt_comps.
+      INSERT ls_comp INTO TABLE lt_comps.
 
     ENDLOOP.
 
@@ -8449,7 +8826,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       lo_datadescr ?= cl_abap_datadescr=>describe_by_name( `INT4` ).
       ls_comp-name  = `ROW_ID`.
       ls_comp-type ?= lo_datadescr.
-      APPEND ls_comp TO lt_comps.
+      INSERT ls_comp INTO TABLE lt_comps.
     ENDIF.
 
     DATA(strucdescr) = cl_abap_structdescr=>create( p_components = lt_comps ).
@@ -8573,10 +8950,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       " the value goes into a literal of a dynamic WHERE: the escape character
       " first, then the LIKE wildcards, so that they match only themselves,
       " and a quote is doubled so that it cannot end the literal
-      REPLACE ALL OCCURRENCES OF `#` IN val WITH `##`.
-      REPLACE ALL OCCURRENCES OF `%` IN val WITH `#%`.
-      REPLACE ALL OCCURRENCES OF `_` IN val WITH `#_`.
-      REPLACE ALL OCCURRENCES OF `'` IN val WITH `''`.
+      val = replace( val = val sub = `#` with = `##` occ = 0 ).
+      val = replace( val = val sub = `%` with = `#%` occ = 0 ).
+      val = replace( val = val sub = `_` with = `#_` occ = 0 ).
+      val = replace( val = val sub = `'` with = `''` occ = 0 ).
 
       result = |{ result }{ and } ( { dfies->fieldname } LIKE '%{ val }%' ESCAPE '#' )|.
 
@@ -8780,7 +9157,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                                      line  = <line> ).
       ENDIF.
 
-      APPEND <s_e071k> TO <t_e071k>.
+      INSERT <s_e071k> INTO TABLE <t_e071k>.
 
     ENDLOOP.
 
@@ -8851,7 +9228,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDIF.
     UNASSIGN <value>.
 
-    APPEND <s_e071> TO <t_e071>.
+    INSERT <s_e071> INTO TABLE <t_e071>.
 
     result = t_e071.
 
@@ -8925,7 +9302,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
       UNASSIGN <value>.
 
-      APPEND ls_data TO mt_data.
+      INSERT ls_data INTO TABLE mt_data.
 
     ENDLOOP.
 
@@ -9029,7 +9406,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           CONTINUE.
         ELSE.
 
-          READ TABLE mt_data REFERENCE INTO DATA(data) WITH KEY task = <value>.
+          ASSIGN mt_data[ task = <value> ] TO FIELD-SYMBOL(<ls_data>).
           IF sy-subrc = 0.
 
             UNASSIGN <value>.
@@ -9038,7 +9415,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
               CONTINUE.
             ELSE.
 
-              data->short_description = <value>.
+              <ls_data>-short_description = <value>.
 
             ENDIF.
 
@@ -10787,6 +11164,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD lock_set_wait.
 
+    DATA lv_seconds TYPE i.
+    DATA lv_fm      TYPE string.
+
     DATA(lv_remaining) = retries.
 
     WHILE lv_remaining > 0.
@@ -10797,7 +11177,19 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       ENDIF.
       lv_remaining = lv_remaining - 1.
       IF lv_remaining > 0.
-        WAIT UP TO delay_ms / 1000 SECONDS.
+        " WAIT UP TO is no statement of ABAP Cloud, where this class has to
+        " activate as well: the pause is a function module called by name.
+        " ENQUE_SLEEP takes whole seconds - delay_ms is rounded up, so a
+        " caller never waits less than it asked for. Where the module cannot
+        " be called the tries follow without a pause.
+        lv_seconds = ( delay_ms + 999 ) DIV 1000.
+        TRY.
+            lv_fm = `ENQUE_SLEEP`.
+            CALL FUNCTION lv_fm
+              EXPORTING
+                seconds = lv_seconds.
+          CATCH cx_root ##NO_HANDLER.
+        ENDTRY.
       ENDIF.
     ENDWHILE.
 
@@ -10831,7 +11223,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         ENDLOOP.
 
         DATA(lv_name) = zabaputil_cl_util_context=>c_trim_upper( val ).
-        REPLACE `ENQUEUE_` IN lv_name WITH ``.
+        lv_name = replace( val = lv_name sub = `ENQUEUE_` with = `` ).
 
         LOOP AT lt_locks INTO DATA(ls_lock)
              WHERE lock_object CS lv_name.
@@ -10884,20 +11276,20 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
         ls_param-name = `GCLIENT`.
         ls_param-kind = abap_func_exporting.
-        GET REFERENCE OF lv_client INTO ls_param-value.
+        ls_param-value = REF #( lv_client ).
         INSERT ls_param INTO TABLE lt_param.
 
         ls_param-name = `GNAME`.
-        GET REFERENCE OF lv_name INTO ls_param-value.
+        ls_param-value = REF #( lv_name ).
         INSERT ls_param INTO TABLE lt_param.
 
         ls_param-name = `GUNAME`.
-        GET REFERENCE OF lv_uname INTO ls_param-value.
+        ls_param-value = REF #( lv_uname ).
         INSERT ls_param INTO TABLE lt_param.
 
         ls_param-name = `ENQ`.
         ls_param-kind = abap_func_tables.
-        GET REFERENCE OF <lt_enq> INTO ls_param-value.
+        ls_param-value = REF #( <lt_enq> ).
         INSERT ls_param INTO TABLE lt_param.
 
         ls_exception-name  = `OTHERS`.
@@ -11030,17 +11422,17 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
         ls_param-name = `CHECK_UPD_REQUESTS`.
         ls_param-kind = abap_func_exporting.
-        GET REFERENCE OF lv_check_upd INTO ls_param-value.
+        ls_param-value = REF #( lv_check_upd ).
         INSERT ls_param INTO TABLE lt_param.
 
         ls_param-name = `SUBRC`.
         ls_param-kind = abap_func_importing.
-        GET REFERENCE OF lv_subrc INTO ls_param-value.
+        ls_param-value = REF #( lv_subrc ).
         INSERT ls_param INTO TABLE lt_param.
 
         ls_param-name = `ENQ`.
         ls_param-kind = abap_func_tables.
-        GET REFERENCE OF <lt_enq> INTO ls_param-value.
+        ls_param-value = REF #( <lt_enq> ).
         INSERT ls_param INTO TABLE lt_param.
 
         ls_exception-name  = `OTHERS`.
@@ -11847,11 +12239,11 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     IF result NA `&<>"'`.
       RETURN.
     ENDIF.
-    REPLACE ALL OCCURRENCES OF `&` IN result WITH `&amp;`.
-    REPLACE ALL OCCURRENCES OF `<` IN result WITH `&lt;`.
-    REPLACE ALL OCCURRENCES OF `>` IN result WITH `&gt;`.
-    REPLACE ALL OCCURRENCES OF `"` IN result WITH `&quot;`.
-    REPLACE ALL OCCURRENCES OF `'` IN result WITH `&#39;`.
+    result = replace( val = result sub = `&` with = `&amp;` occ = 0 ).
+    result = replace( val = result sub = `<` with = `&lt;` occ = 0 ).
+    result = replace( val = result sub = `>` with = `&gt;` occ = 0 ).
+    result = replace( val = result sub = `"` with = `&quot;` occ = 0 ).
+    result = replace( val = result sub = `'` with = `&#39;` occ = 0 ).
 
   ENDMETHOD.
 
@@ -12150,7 +12542,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                                len = strlen( lv_etag ) - 1 ) && `-gzip"`.
     SPLIT lv_header AT `,` INTO TABLE DATA(lt_candidate).
     LOOP AT lt_candidate INTO DATA(lv_candidate).
-      CONDENSE lv_candidate.
+      lv_candidate = condense( lv_candidate ).
       IF strlen( lv_candidate ) > 2 AND substring( val = lv_candidate
                                                    len = 2 ) = `W/`.
         lv_candidate = substring( val = lv_candidate
@@ -12221,7 +12613,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA lv_j TYPE i.
 
     WHILE lv_j <= lv_lb.
-      APPEND lv_j TO lt_prev.
+      INSERT lv_j INTO TABLE lt_prev.
       lv_j = lv_j + 1.
     ENDWHILE.
 
@@ -12229,7 +12621,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     WHILE lv_i < lv_la.
 
       CLEAR lt_curr.
-      APPEND lv_i + 1 TO lt_curr.
+      INSERT lv_i + 1 INTO TABLE lt_curr.
 
       lv_j = 0.
       WHILE lv_j < lv_lb.
@@ -12244,7 +12636,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         IF lv_sub < lv_min.
           lv_min = lv_sub.
         ENDIF.
-        APPEND lv_min TO lt_curr.
+        INSERT lv_min INTO TABLE lt_curr.
 
         lv_j = lv_j + 1.
       ENDWHILE.
@@ -12295,7 +12687,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA(lv_val) = CONV string( val ).
     DATA(lv_len) = strlen( lv_val ).
     DATA lv_i TYPE i.
-    DATA lv_xbuf TYPE xstring.
+    " the pending bytes as hex digits - a byte string has no expression
+    " that appends to it, the hex text converts back in one step
+    DATA lv_xbuf TYPE string.
 
     WHILE lv_i < lv_len.
 
@@ -12308,13 +12702,13 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         lv_x = to_upper( substring( val = lv_val
                                     off = lv_i + 1
                                     len = 2 ) ).
-        CONCATENATE lv_xbuf lv_x INTO lv_xbuf IN BYTE MODE.
+        lv_xbuf = |{ lv_xbuf }{ lv_x }|.
         lv_i = lv_i + 3.
         CONTINUE.
       ENDIF.
 
       IF lv_xbuf IS NOT INITIAL.
-        result = result && conv_get_string_by_xstring( lv_xbuf ).
+        result = result && conv_get_string_by_xstring( CONV xstring( lv_xbuf ) ).
         CLEAR lv_xbuf.
       ENDIF.
 
@@ -12328,7 +12722,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDWHILE.
 
     IF lv_xbuf IS NOT INITIAL.
-      result = result && conv_get_string_by_xstring( lv_xbuf ).
+      result = result && conv_get_string_by_xstring( CONV xstring( lv_xbuf ) ).
     ENDIF.
 
   ENDMETHOD.
@@ -12407,9 +12801,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         EXIT.
       ENDIF.
 
-      APPEND substring( val = lv_val
+      INSERT substring( val = lv_val
                         off = lv_off
-                        len = lv_len ) TO result.
+                        len = lv_len ) INTO TABLE result.
     ENDDO.
 
   ENDMETHOD.
@@ -12476,7 +12870,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD uuid_conv_c36_to_c32.
 
     result = to_upper( c_trim( val ) ).
-    REPLACE ALL OCCURRENCES OF `-` IN result WITH ``.
+    result = replace( val = result sub = `-` with = `` occ = 0 ).
 
     IF strlen( result ) <> 32.
       x_raise( `INVALID_UUID_C36` ).
@@ -12550,14 +12944,15 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     CONSTANTS lc_b64 TYPE string VALUE `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_`.
 
     DATA(lv_c22) = c_trim( val ).
-    REPLACE ALL OCCURRENCES OF `+` IN lv_c22 WITH `-`.
-    REPLACE ALL OCCURRENCES OF `/` IN lv_c22 WITH `_`.
+    lv_c22 = replace( val = lv_c22 sub = `+` with = `-` occ = 0 ).
+    lv_c22 = replace( val = lv_c22 sub = `/` with = `_` occ = 0 ).
 
     IF strlen( lv_c22 ) <> 22.
       x_raise( `INVALID_UUID_C22` ).
     ENDIF.
 
-    DATA lv_x TYPE xstring.
+    " the 16 bytes as 32 hex digits, built byte by byte
+    DATA lv_hex TYPE string.
     DATA lv_xb TYPE x LENGTH 1.
     DATA lv_i TYPE i.
     DATA(lv_len) = strlen( lv_c22 ).
@@ -12578,8 +12973,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         DATA(lv_char) = substring( val = lv_c22
                                    off = lv_pos
                                    len = 1 ).
-        FIND lv_char IN lc_b64 MATCH OFFSET DATA(lv_idx).
-        IF sy-subrc <> 0.
+        DATA(lv_idx) = find( val = lc_b64
+                             sub = lv_char ).
+        IF lv_idx < 0.
           x_raise( `INVALID_UUID_C22` ).
         ENDIF.
         lv_n = lv_n * 64 + lv_idx.
@@ -12589,31 +12985,29 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       CASE lv_take.
         WHEN 4.
           lv_xb = lv_n DIV 65536.
-          CONCATENATE lv_x lv_xb INTO lv_x IN BYTE MODE.
+          lv_hex = |{ lv_hex }{ lv_xb }|.
           lv_xb = ( lv_n DIV 256 ) MOD 256.
-          CONCATENATE lv_x lv_xb INTO lv_x IN BYTE MODE.
+          lv_hex = |{ lv_hex }{ lv_xb }|.
           lv_xb = lv_n MOD 256.
-          CONCATENATE lv_x lv_xb INTO lv_x IN BYTE MODE.
+          lv_hex = |{ lv_hex }{ lv_xb }|.
         WHEN 3.
           lv_xb = lv_n DIV 1024.
-          CONCATENATE lv_x lv_xb INTO lv_x IN BYTE MODE.
+          lv_hex = |{ lv_hex }{ lv_xb }|.
           lv_xb = ( lv_n DIV 4 ) MOD 256.
-          CONCATENATE lv_x lv_xb INTO lv_x IN BYTE MODE.
+          lv_hex = |{ lv_hex }{ lv_xb }|.
         WHEN 2.
           lv_xb = lv_n DIV 16.
-          CONCATENATE lv_x lv_xb INTO lv_x IN BYTE MODE.
+          lv_hex = |{ lv_hex }{ lv_xb }|.
       ENDCASE.
 
       lv_i = lv_i + lv_take.
     ENDWHILE.
 
-    IF xstrlen( lv_x ) <> 16.
+    IF strlen( lv_hex ) <> 32.
       x_raise( `INVALID_UUID_C22` ).
     ENDIF.
 
-    DATA lv_c TYPE c LENGTH 32.
-    lv_c = lv_x.
-    result = lv_c.
+    result = lv_hex.
 
   ENDMETHOD.
 
@@ -12642,9 +13036,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CONTINUE.
       ENDIF.
       DATA(lv_str) = CONV string( <val> ).
-      READ TABLE result WITH KEY table_line = lv_str TRANSPORTING NO FIELDS.
-      IF sy-subrc <> 0.
-        APPEND lv_str TO result.
+      IF NOT line_exists( result[ table_line = lv_str ] ).
+        INSERT lv_str INTO TABLE result.
       ENDIF.
     ENDLOOP.
 
@@ -12676,17 +13069,17 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       ENDIF.
 
       DATA(lv_group) = CONV string( <group> ).
-      READ TABLE lt_sum ASSIGNING FIELD-SYMBOL(<sum>) WITH KEY n = lv_group.
+      ASSIGN lt_sum[ n = lv_group ] TO FIELD-SYMBOL(<sum>).
       IF sy-subrc <> 0.
-        APPEND VALUE #( n = lv_group ) TO lt_sum ASSIGNING <sum>.
+        INSERT VALUE #( n = lv_group ) INTO TABLE lt_sum ASSIGNING <sum>.
       ENDIF.
       <sum>-sum = <sum>-sum + <val>.
 
     ENDLOOP.
 
     LOOP AT lt_sum ASSIGNING <sum>.
-      APPEND VALUE #( n = <sum>-n
-                      v = |{ <sum>-sum }| ) TO result.
+      INSERT VALUE #( n = <sum>-n
+                      v = |{ <sum>-sum }| ) INTO TABLE result.
     ENDLOOP.
 
   ENDMETHOD.
@@ -13403,6 +13796,29 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD db_reset_table_buffer.
+
+    DATA lv_fm      TYPE c LENGTH 30 VALUE `SBUF_GENERIC_RESET`.
+    DATA lv_tabname TYPE c LENGTH 30.
+
+    IF check_abap_cloud( ) = abap_true.
+      RETURN.
+    ENDIF.
+
+    lv_tabname = val.
+    " called by name, so the class compiles where the module does not exist
+    TRY.
+        CALL FUNCTION lv_fm
+          EXPORTING
+            sync    = abap_true
+            tabname = lv_tabname
+          EXCEPTIONS
+            OTHERS  = 1.
+      CATCH cx_root ##NO_HANDLER.
+    ENDTRY.
+
+  ENDMETHOD.
+
   METHOD db_check_table_exists.
 
     DATA lr_data TYPE REF TO data.
@@ -13671,11 +14087,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     lv_class = to_upper( class ).
     lv_intf  = to_upper( intf ).
 
-    READ TABLE gt_class_impl_intf REFERENCE INTO DATA(lr_hit)
-         WITH TABLE KEY name = lv_class
-                        intf = lv_intf.
+    ASSIGN gt_class_impl_intf[ name = lv_class
+                               intf = lv_intf ] TO FIELD-SYMBOL(<ls_hit>).
     IF sy-subrc = 0.
-      result = lr_hit->result.
+      result = <ls_hit>-result.
       RETURN.
     ENDIF.
 
