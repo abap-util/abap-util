@@ -33,7 +33,8 @@
         "Perform",
         "Form",
         "Write",
-        "ReadTable"
+        "ReadTable",
+        "Append"
       ]
     },
     "downport": true,

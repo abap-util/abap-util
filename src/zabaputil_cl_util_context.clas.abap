@@ -4658,7 +4658,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     FIELD-SYMBOLS <row_out> TYPE any.
 
     LOOP AT val ASSIGNING <row_in>.
-      APPEND INITIAL LINE TO tab ASSIGNING <row_out>.
+      INSERT INITIAL LINE INTO TABLE tab ASSIGNING <row_out>.
       MOVE-CORRESPONDING <row_in> TO <row_out>.
     ENDLOOP.
 
@@ -6241,7 +6241,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             CLEAR result.
             RETURN.
           ENDIF.
-          APPEND ls_flat TO result.
+          INSERT ls_flat INTO TABLE result.
         ENDLOOP.
       CATCH cx_root.
         CLEAR result.
@@ -6558,7 +6558,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       IF lv_tabix = 1.
         lv_numeric = rtti_check_numeric( <val> ).
       ENDIF.
-      APPEND INITIAL LINE TO lt_key ASSIGNING FIELD-SYMBOL(<key>).
+      INSERT INITIAL LINE INTO TABLE lt_key ASSIGNING FIELD-SYMBOL(<key>).
       IF lv_numeric = abap_true.
         <key>-key_num = <val>.
       ELSE.
@@ -6583,7 +6583,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     LOOP AT lt_key ASSIGNING <key>.
       ASSIGN <tab_copy>[ <key>-idx ] TO FIELD-SYMBOL(<src>).
       IF sy-subrc = 0.
-        APPEND <src> TO tab.
+        INSERT <src> INTO TABLE tab.
       ENDIF.
     ENDLOOP.
 
@@ -7197,7 +7197,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                        val2 = lv_total - lv_offset ).
       CLEAR <line>.
       <field> = val+lv_offset(lv_chunk).
-      APPEND <line> TO result.
+      INSERT <line> INTO TABLE result.
       lv_offset = lv_offset + lv_chunk.
     ENDWHILE.
 
@@ -8256,7 +8256,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       ASSIGN COMPONENT ls_attri->name OF STRUCTURE val TO FIELD-SYMBOL(<flag>).
       CHECK sy-subrc = 0.
       CHECK <flag> IS NOT INITIAL.
-      APPEND ls_attri->name+lv_len TO result.
+      INSERT ls_attri->name+lv_len INTO TABLE result.
     ENDLOOP.
 
   ENDMETHOD.
@@ -8329,7 +8329,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           OR lv_sub_kind = cl_abap_datadescr=>typekind_struct2.
         DATA(lv_sub) = msg_get_rap_flatten( <comp> ).
         IF lv_sub IS NOT INITIAL.
-          APPEND lv_sub TO lt_part.
+          INSERT lv_sub INTO TABLE lt_part.
         ENDIF.
       ELSEIF <comp> IS NOT INITIAL AND rtti_check_printable( <comp> ) = abap_true.
         " the printable test does what the TRY around this could not: a
@@ -8340,7 +8340,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         TRY.
             DATA lv_str TYPE string.
             lv_str = <comp>.
-            APPEND |{ ls_attri->name }={ lv_str }| TO lt_part.
+            INSERT |{ ls_attri->name }={ lv_str }| INTO TABLE lt_part.
           CATCH cx_root ##NO_HANDLER.
         ENDTRY.
       ENDIF.
@@ -8477,7 +8477,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
           ENDLOOP.
 
-          APPEND s_dfies TO result.
+          INSERT s_dfies INTO TABLE result.
           CLEAR s_dfies.
 
         ENDLOOP.
@@ -8532,7 +8532,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
               ENDIF.
               ASSIGN COMPONENT `FIELDNAME` OF STRUCTURE <any> TO <field>.
               ASSERT sy-subrc = 0.
-              APPEND <field> TO names.
+              INSERT <field> INTO TABLE names.
             ENDLOOP.
         ENDTRY.
       CATCH cx_root ##NO_HANDLER.
@@ -8791,7 +8791,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
       ls_comp-name  = descption-fieldname.
       ls_comp-type ?= cl_abap_datadescr=>describe_by_name( descption-rollname ).
-      APPEND ls_comp TO lt_comps.
+      INSERT ls_comp INTO TABLE lt_comps.
 
     ENDLOOP.
 
@@ -8799,7 +8799,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       lo_datadescr ?= cl_abap_datadescr=>describe_by_name( `INT4` ).
       ls_comp-name  = `ROW_ID`.
       ls_comp-type ?= lo_datadescr.
-      APPEND ls_comp TO lt_comps.
+      INSERT ls_comp INTO TABLE lt_comps.
     ENDIF.
 
     DATA(strucdescr) = cl_abap_structdescr=>create( p_components = lt_comps ).
@@ -9130,7 +9130,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                                      line  = <line> ).
       ENDIF.
 
-      APPEND <s_e071k> TO <t_e071k>.
+      INSERT <s_e071k> INTO TABLE <t_e071k>.
 
     ENDLOOP.
 
@@ -9201,7 +9201,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDIF.
     UNASSIGN <value>.
 
-    APPEND <s_e071> TO <t_e071>.
+    INSERT <s_e071> INTO TABLE <t_e071>.
 
     result = t_e071.
 
@@ -9275,7 +9275,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
       UNASSIGN <value>.
 
-      APPEND ls_data TO mt_data.
+      INSERT ls_data INTO TABLE mt_data.
 
     ENDLOOP.
 
@@ -12586,7 +12586,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA lv_j TYPE i.
 
     WHILE lv_j <= lv_lb.
-      APPEND lv_j TO lt_prev.
+      INSERT lv_j INTO TABLE lt_prev.
       lv_j = lv_j + 1.
     ENDWHILE.
 
@@ -12594,7 +12594,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     WHILE lv_i < lv_la.
 
       CLEAR lt_curr.
-      APPEND lv_i + 1 TO lt_curr.
+      INSERT lv_i + 1 INTO TABLE lt_curr.
 
       lv_j = 0.
       WHILE lv_j < lv_lb.
@@ -12609,7 +12609,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         IF lv_sub < lv_min.
           lv_min = lv_sub.
         ENDIF.
-        APPEND lv_min TO lt_curr.
+        INSERT lv_min INTO TABLE lt_curr.
 
         lv_j = lv_j + 1.
       ENDWHILE.
@@ -12772,9 +12772,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         EXIT.
       ENDIF.
 
-      APPEND substring( val = lv_val
+      INSERT substring( val = lv_val
                         off = lv_off
-                        len = lv_len ) TO result.
+                        len = lv_len ) INTO TABLE result.
     ENDDO.
 
   ENDMETHOD.
@@ -13008,7 +13008,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       ENDIF.
       DATA(lv_str) = CONV string( <val> ).
       IF NOT line_exists( result[ table_line = lv_str ] ).
-        APPEND lv_str TO result.
+        INSERT lv_str INTO TABLE result.
       ENDIF.
     ENDLOOP.
 
@@ -13042,15 +13042,15 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       DATA(lv_group) = CONV string( <group> ).
       ASSIGN lt_sum[ n = lv_group ] TO FIELD-SYMBOL(<sum>).
       IF sy-subrc <> 0.
-        APPEND VALUE #( n = lv_group ) TO lt_sum ASSIGNING <sum>.
+        INSERT VALUE #( n = lv_group ) INTO TABLE lt_sum ASSIGNING <sum>.
       ENDIF.
       <sum>-sum = <sum>-sum + <val>.
 
     ENDLOOP.
 
     LOOP AT lt_sum ASSIGNING <sum>.
-      APPEND VALUE #( n = <sum>-n
-                      v = |{ <sum>-sum }| ) TO result.
+      INSERT VALUE #( n = <sum>-n
+                      v = |{ <sum>-sum }| ) INTO TABLE result.
     ENDLOOP.
 
   ENDMETHOD.

@@ -2889,7 +2889,7 @@ CLASS ltcl_rtti_ext IMPLEMENTATION.
     cl_abap_unit_assert=>assert_bound( lr_tab ).
     ASSIGN lr_tab->* TO <tab>.
     cl_abap_unit_assert=>assert_initial( <tab> ).
-    APPEND INITIAL LINE TO <tab> ASSIGNING FIELD-SYMBOL(<row>).
+    INSERT INITIAL LINE INTO TABLE <tab> ASSIGNING FIELD-SYMBOL(<row>).
     ASSIGN COMPONENT `QTY` OF STRUCTURE <row> TO FIELD-SYMBOL(<qty>).
     cl_abap_unit_assert=>assert_subrc( ).
     <qty> = 7.
@@ -5258,7 +5258,7 @@ CLASS ltcl_sync_downstream IMPLEMENTATION.
     DATA lr_tab TYPE REF TO data.
     CREATE DATA lr_tab TYPE HANDLE lo_tab.
     ASSIGN lr_tab->* TO <tab>.
-    APPEND INITIAL LINE TO <tab> ASSIGNING <row>.
+    INSERT INITIAL LINE INTO TABLE <tab> ASSIGNING <row>.
     ASSIGN COMPONENT `COL1` OF STRUCTURE <row> TO <col>.
     cl_abap_unit_assert=>assert_subrc( ).
     <col> = `payload-value`.
