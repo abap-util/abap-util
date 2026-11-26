@@ -1146,6 +1146,82 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE abap_bool.
 
+    " ========== Barcodes (GS1) ==========
+
+    "! one element string of a GS1 barcode (GS1-128, GS1 DataMatrix, GS1 QR)
+    TYPES:
+      BEGIN OF ty_s_gs1,
+        "! application identifier, e.g. `01`, `10`, `3103`
+        ai       TYPE string,
+        "! GS1 data title, e.g. `GTIN`, `BATCH/LOT`, `NET WEIGHT (kg)`
+        title    TYPE string,
+        "! the data field as scanned, without AI and separator
+        value    TYPE string,
+        "! implied decimal places of a measure or amount AI (31nn-36nn, 39nn)
+        decimals TYPE i,
+        "! the value as a date for the date AIs (11, 12, 13, 15, 16, 17, 7006)
+        date     TYPE d,
+      END OF ty_s_gs1.
+    TYPES ty_t_gs1 TYPE STANDARD TABLE OF ty_s_gs1 WITH EMPTY KEY.
+
+    "! Splits a GS1 barcode into its element strings. Accepts the raw scanner
+    "! output (optional symbology identifier such as `]C1`/`]d2`/`]Q3`,
+    "! variable-length fields terminated by the group separator GS, ASCII 29)
+    "! and the human-readable form `(01)09506000134352(10)ABC123`.
+    "! Raises zabaputil_cx_util_error for an unknown AI, a field that is too
+    "! short or too long, non-digits in a numeric field, an invalid date or
+    "! (check_digit = abap_true) a wrong check digit in SSCC, GTIN and GLN.
+    "! @parameter separator | additional group separator a scanner sends
+    "!                        instead of GS, e.g. `|` or `~`
+    "! @parameter ref_date  | reference date for the century of YYMMDD dates
+    "!                        (GS1 sliding window), default today
+    CLASS-METHODS barcode_gs1_parse
+      IMPORTING
+        val           TYPE clike
+        separator     TYPE clike     OPTIONAL
+        check_digit   TYPE abap_bool DEFAULT abap_true
+        ref_date      TYPE d         OPTIONAL
+      RETURNING
+        VALUE(result) TYPE ty_t_gs1.
+
+    "! Builds a GS1 element string from AI/value pairs - the inverse of
+    "! barcode_gs1_parse. A group separator is inserted after every
+    "! variable-length field that is followed by another field.
+    "! @parameter separator      | separator instead of GS (ASCII 29)
+    "! @parameter human_readable | abap_true: `(01)...(10)...` for the label text
+    CLASS-METHODS barcode_gs1_build
+      IMPORTING
+        t_gs1          TYPE ty_t_gs1
+        separator      TYPE clike     OPTIONAL
+        human_readable TYPE abap_bool DEFAULT abap_false
+      RETURNING
+        VALUE(result)  TYPE string.
+
+    "! The value of an AI in a parsed barcode, initial if it is missing.
+    "! A three-digit AI matches the four-digit measure AIs, so `310` finds
+    "! `3103` whatever the decimal places are.
+    CLASS-METHODS barcode_gs1_get_value
+      IMPORTING
+        t_gs1         TYPE ty_t_gs1
+        ai            TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! The GS1 check digit (modulo 10, weights 3-1 from the right) for the
+    "! digits of a GTIN-8/12/13/14, GLN, SSCC etc. without the check digit.
+    CLASS-METHODS barcode_gs1_calc_check_digit
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! abap_true if the last digit of val is the correct GS1 check digit
+    CLASS-METHODS check_is_gs1_check_digit
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE abap_bool.
+
     " ========== Deep Comparison ==========
 
     CLASS-METHODS data_equals
@@ -2998,6 +3074,56 @@ CLASS zabaputil_cl_util_context DEFINITION
         VALUE(result) TYPE ty_t_dfies ##NEEDED.
 
   PRIVATE SECTION.
+
+    " barcode_gs1_*: one row per application identifier (or per three-digit
+    " prefix of the four-digit measure/amount AIs)
+    TYPES:
+      BEGIN OF ty_s_gs1_rule,
+        prefix   TYPE string,
+        ai_len   TYPE i,
+        " fixed length of the data field, or its maximum when var = abap_true
+        len      TYPE i,
+        var      TYPE abap_bool,
+        numeric  TYPE abap_bool,
+        title    TYPE string,
+        is_date  TYPE abap_bool,
+        " the fourth AI digit is the number of implied decimal places
+        decimals TYPE abap_bool,
+        " the data field is a GS1 key ending with a check digit
+        check    TYPE abap_bool,
+      END OF ty_s_gs1_rule.
+    TYPES ty_t_gs1_rule TYPE STANDARD TABLE OF ty_s_gs1_rule WITH EMPTY KEY.
+
+    CLASS-DATA gt_gs1_rule TYPE ty_t_gs1_rule.
+
+    CLASS-METHODS barcode_gs1_get_rules
+      RETURNING
+        VALUE(result) TYPE ty_t_gs1_rule.
+
+    " the rule of the AI val starts with, initial if there is none
+    CLASS-METHODS barcode_gs1_find_rule
+      IMPORTING
+        val           TYPE string
+      RETURNING
+        VALUE(result) TYPE ty_s_gs1_rule.
+
+    CLASS-METHODS barcode_gs1_get_element
+      IMPORTING
+        rule          TYPE ty_s_gs1_rule
+        ai            TYPE string
+        value         TYPE string
+        check_digit   TYPE abap_bool
+        ref_date      TYPE d
+      RETURNING
+        VALUE(result) TYPE ty_s_gs1.
+
+    " YYMMDD to a date: century by the GS1 sliding window, day 00 = last day
+    CLASS-METHODS barcode_gs1_get_date
+      IMPORTING
+        val           TYPE string
+        ref_date      TYPE d
+      RETURNING
+        VALUE(result) TYPE d.
 
     TYPES ty_p_seconds TYPE p LENGTH 16 DECIMALS 7.
 
@@ -14471,6 +14597,492 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       CATCH cx_root.
         CLEAR result.
     ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD barcode_gs1_parse.
+
+    DATA lv_gs TYPE string.
+    DATA lv_value TYPE string.
+    DATA lv_ai TYPE string.
+
+    lv_gs = conv_get_string_by_xstring( CONV xstring( `1D` ) ).
+    DATA(lv_val) = CONV string( val ).
+    DATA(lv_sep) = CONV string( separator ).
+    IF lv_sep IS NOT INITIAL.
+      lv_val = replace( val  = lv_val
+                        sub  = lv_sep
+                        with = lv_gs
+                        occ  = 0 ).
+    ENDIF.
+    " scanners in keyboard mode end the scan with CR/LF
+    lv_val = replace( val  = lv_val
+                      sub  = cv_char_util_cr_lf
+                      with = ``
+                      occ  = 0 ).
+    lv_val = replace( val  = lv_val
+                      sub  = cv_char_util_newline
+                      with = ``
+                      occ  = 0 ).
+    lv_val = c_trim( lv_val ).
+
+    " symbology identifier: ]C1 GS1-128, ]e0 DataBar, ]d2 DataMatrix, ]Q3 QR
+    IF strlen( lv_val ) >= 3 AND lv_val(1) = `]`.
+      lv_val = substring( val = lv_val
+                          off = 3 ).
+    ENDIF.
+
+    DATA(lv_ref_date) = COND d( WHEN ref_date IS INITIAL THEN sy-datum ELSE ref_date ).
+
+    IF strlen( lv_val ) > 0 AND lv_val(1) = `(`.
+
+      " human-readable form (AI)value(AI)value
+      SPLIT lv_val AT `(` INTO TABLE DATA(lt_part).
+      LOOP AT lt_part INTO DATA(lv_part).
+        IF lv_part IS INITIAL.
+          CONTINUE.
+        ENDIF.
+        DATA(lv_close) = find( val = lv_part
+                               sub = `)` ).
+        IF lv_close <= 0.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |GS1: missing closing bracket after ({ lv_part }|.
+        ENDIF.
+        lv_ai = lv_part(lv_close).
+        lv_value = substring( val = lv_part
+                              off = lv_close + 1 ).
+        lv_value = replace( val  = lv_value
+                            sub  = lv_gs
+                            with = ``
+                            occ  = 0 ).
+        DATA(ls_rule) = barcode_gs1_find_rule( lv_ai ).
+        IF ls_rule IS INITIAL OR ls_rule-ai_len <> strlen( lv_ai ) OR lv_ai CN `0123456789`.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |GS1: unknown application identifier ({ lv_ai })|.
+        ENDIF.
+        IF ls_rule-var = abap_false AND strlen( lv_value ) <> ls_rule-len.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |GS1: AI ({ lv_ai }) needs exactly { ls_rule-len } characters|.
+        ENDIF.
+        INSERT barcode_gs1_get_element( rule        = ls_rule
+                                        ai          = lv_ai
+                                        value       = lv_value
+                                        check_digit = check_digit
+                                        ref_date    = lv_ref_date ) INTO TABLE result.
+      ENDLOOP.
+      RETURN.
+
+    ENDIF.
+
+    DATA(lv_len) = strlen( lv_val ).
+    DATA(lv_pos) = 0.
+    WHILE lv_pos < lv_len.
+
+      " a separator at the start (FNC1 sent as GS) or after a fixed-length
+      " field is allowed and carries no data
+      IF substring( val = lv_val
+                    off = lv_pos
+                    len = 1 ) = lv_gs.
+        lv_pos = lv_pos + 1.
+        CONTINUE.
+      ENDIF.
+
+      DATA(lv_rest) = substring( val = lv_val
+                                 off = lv_pos ).
+      ls_rule = barcode_gs1_find_rule( lv_rest ).
+      IF ls_rule IS INITIAL OR strlen( lv_rest ) < ls_rule-ai_len.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |GS1: unknown application identifier at position { lv_pos + 1 }: { c_truncate( val = lv_rest
+                                                                                              max = 8 ) }|.
+      ENDIF.
+      lv_ai = lv_rest(ls_rule-ai_len).
+      IF lv_ai CN `0123456789`.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |GS1: unknown application identifier ({ lv_ai })|.
+      ENDIF.
+      DATA(lv_data) = substring( val = lv_rest
+                                 off = ls_rule-ai_len ).
+
+      IF ls_rule-var = abap_false.
+        IF strlen( lv_data ) < ls_rule-len.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |GS1: AI ({ lv_ai }) needs { ls_rule-len } characters, only { strlen( lv_data ) } left|.
+        ENDIF.
+        lv_value = lv_data(ls_rule-len).
+      ELSE.
+        DATA(lv_end) = find( val = lv_data
+                             sub = lv_gs ).
+        IF lv_end < 0.
+          lv_value = lv_data.
+        ELSE.
+          lv_value = lv_data(lv_end).
+        ENDIF.
+      ENDIF.
+
+      INSERT barcode_gs1_get_element( rule        = ls_rule
+                                      ai          = lv_ai
+                                      value       = lv_value
+                                      check_digit = check_digit
+                                      ref_date    = lv_ref_date ) INTO TABLE result.
+      lv_pos = lv_pos + ls_rule-ai_len + strlen( lv_value ).
+
+    ENDWHILE.
+
+  ENDMETHOD.
+
+  METHOD barcode_gs1_get_element.
+
+    DATA(lv_len) = strlen( value ).
+    IF lv_len = 0.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |GS1: AI ({ ai }) has no value|.
+    ENDIF.
+    IF lv_len > rule-len.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |GS1: AI ({ ai }) allows at most { rule-len } characters, got { lv_len }|.
+    ENDIF.
+    IF rule-numeric = abap_true AND value CN `0123456789`.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |GS1: AI ({ ai }) allows digits only: { value }|.
+    ENDIF.
+    IF rule-check = abap_true AND check_digit = abap_true AND check_is_gs1_check_digit( value ) = abap_false.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |GS1: wrong check digit in AI ({ ai }): { value }|.
+    ENDIF.
+
+    result-ai    = ai.
+    result-title = rule-title.
+    result-value = value.
+    IF rule-decimals = abap_true.
+      result-decimals = substring( val = ai
+                                   off = 3
+                                   len = 1 ).
+    ENDIF.
+    IF rule-is_date = abap_true.
+      result-date = barcode_gs1_get_date( val      = value
+                                          ref_date = ref_date ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD barcode_gs1_get_date.
+
+    DATA lv_next TYPE d.
+
+    DATA(lv_yy) = CONV i( val(2) ).
+    DATA(lv_mm) = CONV i( val+2(2) ).
+    DATA(lv_dd) = CONV i( val+4(2) ).
+
+    " GS1 General Specifications 7.12: a year more than 50 years ahead is in
+    " the past century, one more than 49 years back in the next century
+    DATA(lv_ref_year) = CONV i( ref_date(4) ).
+    DATA(lv_century) = lv_ref_year - lv_ref_year MOD 100.
+    DATA(lv_diff) = lv_yy - lv_ref_year MOD 100.
+    IF lv_diff >= 51.
+      lv_century = lv_century - 100.
+    ELSEIF lv_diff <= -50.
+      lv_century = lv_century + 100.
+    ENDIF.
+    DATA(lv_year) = lv_century + lv_yy.
+
+    IF lv_mm < 1 OR lv_mm > 12.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |GS1: invalid date { val }|.
+    ENDIF.
+
+    " last day of the month = first day of the next month - 1
+    IF lv_mm = 12.
+      lv_next = |{ lv_year + 1 WIDTH = 4 ALIGN = RIGHT PAD = `0` }0101|.
+    ELSE.
+      lv_next = |{ lv_year WIDTH = 4 ALIGN = RIGHT PAD = `0` }{ lv_mm + 1 WIDTH = 2 ALIGN = RIGHT PAD = `0` }01|.
+    ENDIF.
+    DATA(lv_last) = CONV d( lv_next - 1 ).
+    DATA(lv_last_day) = CONV i( lv_last+6(2) ).
+
+    IF lv_dd = 0.
+      result = lv_last.
+    ELSEIF lv_dd > lv_last_day.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |GS1: invalid date { val }|.
+    ELSE.
+      result = |{ lv_year WIDTH = 4 ALIGN = RIGHT PAD = `0` }{ val+2(4) }|.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD barcode_gs1_build.
+
+    DATA lv_need_sep TYPE abap_bool.
+
+    DATA(lv_sep) = CONV string( separator ).
+    IF lv_sep IS INITIAL.
+      lv_sep = conv_get_string_by_xstring( CONV xstring( `1D` ) ).
+    ENDIF.
+
+    LOOP AT t_gs1 INTO DATA(ls_gs1).
+      IF human_readable = abap_true.
+        result = |{ result }({ ls_gs1-ai }){ ls_gs1-value }|.
+        CONTINUE.
+      ENDIF.
+      DATA(ls_rule) = barcode_gs1_find_rule( ls_gs1-ai ).
+      IF ls_rule IS INITIAL OR ls_rule-ai_len <> strlen( ls_gs1-ai ).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |GS1: unknown application identifier ({ ls_gs1-ai })|.
+      ENDIF.
+      IF lv_need_sep = abap_true.
+        result = result && lv_sep.
+      ENDIF.
+      result = result && ls_gs1-ai && ls_gs1-value.
+      lv_need_sep = ls_rule-var.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD barcode_gs1_get_value.
+
+    DATA(lv_ai) = CONV string( ai ).
+
+    LOOP AT t_gs1 INTO DATA(ls_gs1) WHERE ai = lv_ai.
+      result = ls_gs1-value.
+      RETURN.
+    ENDLOOP.
+
+    DATA(lv_len) = strlen( lv_ai ).
+    LOOP AT t_gs1 INTO ls_gs1.
+      IF strlen( ls_gs1-ai ) > lv_len AND substring( val = ls_gs1-ai
+                                                     len = lv_len ) = lv_ai.
+        result = ls_gs1-value.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD barcode_gs1_calc_check_digit.
+
+    DATA lv_sum TYPE i.
+
+    DATA(lv_val) = c_trim( CONV string( val ) ).
+    IF lv_val IS INITIAL OR lv_val CN `0123456789`.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |GS1: check digit needs digits only: { lv_val }|.
+    ENDIF.
+
+    " weights 3, 1, 3, 1, ... starting with the rightmost digit
+    DATA(lv_weight) = 3.
+    DATA(lv_pos) = strlen( lv_val ) - 1.
+    WHILE lv_pos >= 0.
+      lv_sum = lv_sum + CONV i( substring( val = lv_val
+                                           off = lv_pos
+                                           len = 1 ) ) * lv_weight.
+      lv_weight = 4 - lv_weight.
+      lv_pos = lv_pos - 1.
+    ENDWHILE.
+
+    result = |{ ( 10 - lv_sum MOD 10 ) MOD 10 }|.
+
+  ENDMETHOD.
+
+  METHOD check_is_gs1_check_digit.
+
+    DATA(lv_val) = c_trim( CONV string( val ) ).
+    DATA(lv_len) = strlen( lv_val ).
+    IF lv_len < 2 OR lv_val CN `0123456789`.
+      result = abap_false.
+      RETURN.
+    ENDIF.
+
+    DATA(lv_body) = substring( val = lv_val
+                               len = lv_len - 1 ).
+    DATA(lv_digit) = substring( val = lv_val
+                                off = lv_len - 1 ).
+    result = xsdbool( barcode_gs1_calc_check_digit( lv_body ) = lv_digit ).
+
+  ENDMETHOD.
+
+  METHOD barcode_gs1_find_rule.
+
+    IF gt_gs1_rule IS INITIAL.
+      gt_gs1_rule = barcode_gs1_get_rules( ).
+    ENDIF.
+
+    " the longest prefix first: 4-digit AIs (7003), then the 3-digit ones and
+    " the 3-digit prefixes of the measure AIs (310n), then the 2-digit AIs
+    DATA(lv_len) = 4.
+    WHILE lv_len >= 2.
+      IF strlen( val ) >= lv_len.
+        DATA(lv_prefix) = substring( val = val
+                                     len = lv_len ).
+        LOOP AT gt_gs1_rule INTO result WHERE prefix = lv_prefix.
+          RETURN.
+        ENDLOOP.
+      ENDIF.
+      lv_len = lv_len - 1.
+    ENDWHILE.
+    CLEAR result.
+
+  ENDMETHOD.
+
+  METHOD barcode_gs1_get_rules.
+
+    " GS1 General Specifications, section 3 (application identifiers):
+    " len = fixed length, or the maximum length with var = abap_true
+    result = VALUE #(
+      ( prefix = `00`   ai_len = 2 len = 18 numeric = abap_true check = abap_true title = `SSCC` )
+      ( prefix = `01`   ai_len = 2 len = 14 numeric = abap_true check = abap_true title = `GTIN` )
+      ( prefix = `02`   ai_len = 2 len = 14 numeric = abap_true check = abap_true title = `CONTENT` )
+      ( prefix = `03`   ai_len = 2 len = 14 numeric = abap_true check = abap_true title = `MTO GTIN` )
+      ( prefix = `10`   ai_len = 2 len = 20 var = abap_true title = `BATCH/LOT` )
+      ( prefix = `11`   ai_len = 2 len = 6 numeric = abap_true is_date = abap_true title = `PROD DATE` )
+      ( prefix = `12`   ai_len = 2 len = 6 numeric = abap_true is_date = abap_true title = `DUE DATE` )
+      ( prefix = `13`   ai_len = 2 len = 6 numeric = abap_true is_date = abap_true title = `PACK DATE` )
+      ( prefix = `15`   ai_len = 2 len = 6 numeric = abap_true is_date = abap_true title = `BEST BEFORE or BEST BY` )
+      ( prefix = `16`   ai_len = 2 len = 6 numeric = abap_true is_date = abap_true title = `SELL BY` )
+      ( prefix = `17`   ai_len = 2 len = 6 numeric = abap_true is_date = abap_true title = `USE BY or EXPIRY` )
+      ( prefix = `20`   ai_len = 2 len = 2 numeric = abap_true title = `VARIANT` )
+      ( prefix = `21`   ai_len = 2 len = 20 var = abap_true title = `SERIAL` )
+      ( prefix = `22`   ai_len = 2 len = 20 var = abap_true title = `CPV` )
+      ( prefix = `235`  ai_len = 3 len = 28 var = abap_true title = `TPX` )
+      ( prefix = `240`  ai_len = 3 len = 30 var = abap_true title = `ADDITIONAL ID` )
+      ( prefix = `241`  ai_len = 3 len = 30 var = abap_true title = `CUST. PART No.` )
+      ( prefix = `242`  ai_len = 3 len = 6 var = abap_true numeric = abap_true title = `MTO VARIANT` )
+      ( prefix = `243`  ai_len = 3 len = 20 var = abap_true title = `PCN` )
+      ( prefix = `250`  ai_len = 3 len = 30 var = abap_true title = `SECONDARY SERIAL` )
+      ( prefix = `251`  ai_len = 3 len = 30 var = abap_true title = `REF. TO SOURCE` )
+      ( prefix = `253`  ai_len = 3 len = 30 var = abap_true title = `GDTI` )
+      ( prefix = `254`  ai_len = 3 len = 20 var = abap_true title = `GLN EXTENSION COMPONENT` )
+      ( prefix = `255`  ai_len = 3 len = 25 var = abap_true numeric = abap_true title = `GCN` )
+      ( prefix = `30`   ai_len = 2 len = 8 var = abap_true numeric = abap_true title = `VAR. COUNT` )
+      ( prefix = `310`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `NET WEIGHT (kg)` )
+      ( prefix = `311`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `LENGTH (m)` )
+      ( prefix = `312`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `WIDTH (m)` )
+      ( prefix = `313`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `HEIGHT (m)` )
+      ( prefix = `314`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `AREA (m2)` )
+      ( prefix = `315`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `NET VOLUME (l)` )
+      ( prefix = `316`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `NET VOLUME (m3)` )
+      ( prefix = `320`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `NET WEIGHT (lb)` )
+      ( prefix = `321`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `LENGTH (in)` )
+      ( prefix = `322`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `LENGTH (ft)` )
+      ( prefix = `323`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `LENGTH (yd)` )
+      ( prefix = `324`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `WIDTH (in)` )
+      ( prefix = `325`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `WIDTH (ft)` )
+      ( prefix = `326`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `WIDTH (yd)` )
+      ( prefix = `327`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `HEIGHT (in)` )
+      ( prefix = `328`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `HEIGHT (ft)` )
+      ( prefix = `329`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `HEIGHT (yd)` )
+      ( prefix = `330`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `GROSS WEIGHT (kg)` )
+      ( prefix = `331`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `LENGTH (m), log` )
+      ( prefix = `332`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `WIDTH (m), log` )
+      ( prefix = `333`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `HEIGHT (m), log` )
+      ( prefix = `334`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `AREA (m2), log` )
+      ( prefix = `335`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `VOLUME (l), log` )
+      ( prefix = `336`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `VOLUME (m3), log` )
+      ( prefix = `337`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `KG PER m2` )
+      ( prefix = `340`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `GROSS WEIGHT (lb)` )
+      ( prefix = `341`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `LENGTH (in), log` )
+      ( prefix = `342`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `LENGTH (ft), log` )
+      ( prefix = `343`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `LENGTH (yd), log` )
+      ( prefix = `344`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `WIDTH (in), log` )
+      ( prefix = `345`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `WIDTH (ft), log` )
+      ( prefix = `346`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `WIDTH (yd), log` )
+      ( prefix = `347`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `HEIGHT (in), log` )
+      ( prefix = `348`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `HEIGHT (ft), log` )
+      ( prefix = `349`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `HEIGHT (yd), log` )
+      ( prefix = `350`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `AREA (in2)` )
+      ( prefix = `351`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `AREA (ft2)` )
+      ( prefix = `352`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `AREA (yd2)` )
+      ( prefix = `353`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `AREA (in2), log` )
+      ( prefix = `354`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `AREA (ft2), log` )
+      ( prefix = `355`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `AREA (yd2), log` )
+      ( prefix = `356`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `NET WEIGHT (t oz)` )
+      ( prefix = `357`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `NET VOLUME (oz)` )
+      ( prefix = `360`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `NET VOLUME (qt)` )
+      ( prefix = `361`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `NET VOLUME (g)` )
+      ( prefix = `362`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `VOLUME (qt), log` )
+      ( prefix = `363`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `VOLUME (g), log` )
+      ( prefix = `364`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `VOLUME (in3)` )
+      ( prefix = `365`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `VOLUME (ft3)` )
+      ( prefix = `366`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `VOLUME (yd3)` )
+      ( prefix = `367`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `VOLUME (in3), log` )
+      ( prefix = `368`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `VOLUME (ft3), log` )
+      ( prefix = `369`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `VOLUME (yd3), log` )
+      ( prefix = `37`   ai_len = 2 len = 8 var = abap_true numeric = abap_true title = `COUNT` )
+      ( prefix = `390`  ai_len = 4 len = 15 var = abap_true numeric = abap_true decimals = abap_true title = `AMOUNT` )
+      ( prefix = `391`  ai_len = 4 len = 18 var = abap_true numeric = abap_true decimals = abap_true title = `AMOUNT` )
+      ( prefix = `392`  ai_len = 4 len = 15 var = abap_true numeric = abap_true decimals = abap_true title = `PRICE` )
+      ( prefix = `393`  ai_len = 4 len = 18 var = abap_true numeric = abap_true decimals = abap_true title = `PRICE` )
+      ( prefix = `394`  ai_len = 4 len = 4 numeric = abap_true decimals = abap_true title = `PRCNT OFF` )
+      ( prefix = `395`  ai_len = 4 len = 6 numeric = abap_true decimals = abap_true title = `PRICE/UoM` )
+      ( prefix = `400`  ai_len = 3 len = 30 var = abap_true title = `ORDER NUMBER` )
+      ( prefix = `401`  ai_len = 3 len = 30 var = abap_true title = `GINC` )
+      ( prefix = `402`  ai_len = 3 len = 17 numeric = abap_true title = `GSIN` )
+      ( prefix = `403`  ai_len = 3 len = 30 var = abap_true title = `ROUTE` )
+      ( prefix = `410`  ai_len = 3 len = 13 numeric = abap_true check = abap_true title = `SHIP TO LOC` )
+      ( prefix = `411`  ai_len = 3 len = 13 numeric = abap_true check = abap_true title = `BILL TO` )
+      ( prefix = `412`  ai_len = 3 len = 13 numeric = abap_true check = abap_true title = `PURCHASE FROM` )
+      ( prefix = `413`  ai_len = 3 len = 13 numeric = abap_true check = abap_true title = `SHIP FOR LOC` )
+      ( prefix = `414`  ai_len = 3 len = 13 numeric = abap_true check = abap_true title = `LOC No.` )
+      ( prefix = `415`  ai_len = 3 len = 13 numeric = abap_true check = abap_true title = `PAY TO` )
+      ( prefix = `416`  ai_len = 3 len = 13 numeric = abap_true check = abap_true title = `PROD/SERV LOC` )
+      ( prefix = `417`  ai_len = 3 len = 13 numeric = abap_true check = abap_true title = `PARTY` )
+      ( prefix = `420`  ai_len = 3 len = 20 var = abap_true title = `SHIP TO POST` )
+      ( prefix = `421`  ai_len = 3 len = 12 var = abap_true title = `SHIP TO POST` )
+      ( prefix = `422`  ai_len = 3 len = 3 numeric = abap_true title = `ORIGIN` )
+      ( prefix = `423`  ai_len = 3 len = 15 var = abap_true numeric = abap_true title = `COUNTRY - INITIAL PROCESS.` )
+      ( prefix = `424`  ai_len = 3 len = 3 numeric = abap_true title = `COUNTRY - PROCESS.` )
+      ( prefix = `425`  ai_len = 3 len = 15 var = abap_true numeric = abap_true title = `COUNTRY - DISASSEMBLY` )
+      ( prefix = `426`  ai_len = 3 len = 3 numeric = abap_true title = `COUNTRY - FULL PROCESS` )
+      ( prefix = `7001` ai_len = 4 len = 13 numeric = abap_true title = `NSN` )
+      ( prefix = `7002` ai_len = 4 len = 30 var = abap_true title = `MEAT CUT` )
+      ( prefix = `7003` ai_len = 4 len = 10 numeric = abap_true title = `EXPIRY TIME` )
+      ( prefix = `7004` ai_len = 4 len = 4 var = abap_true numeric = abap_true title = `ACTIVE POTENCY` )
+      ( prefix = `7005` ai_len = 4 len = 12 var = abap_true title = `CATCH AREA` )
+      ( prefix = `7006` ai_len = 4 len = 6 numeric = abap_true is_date = abap_true title = `FIRST FREEZE DATE` )
+      ( prefix = `7007` ai_len = 4 len = 12 var = abap_true numeric = abap_true title = `HARVEST DATE` )
+      ( prefix = `7008` ai_len = 4 len = 3 var = abap_true title = `AQUATIC SPECIES` )
+      ( prefix = `7009` ai_len = 4 len = 10 var = abap_true title = `FISHING GEAR TYPE` )
+      ( prefix = `7010` ai_len = 4 len = 2 var = abap_true title = `PROD METHOD` )
+      ( prefix = `8001` ai_len = 4 len = 14 numeric = abap_true title = `DIMENSIONS` )
+      ( prefix = `8002` ai_len = 4 len = 20 var = abap_true title = `CMT No.` )
+      ( prefix = `8003` ai_len = 4 len = 30 var = abap_true title = `GRAI` )
+      ( prefix = `8004` ai_len = 4 len = 30 var = abap_true title = `GIAI` )
+      ( prefix = `8005` ai_len = 4 len = 6 numeric = abap_true title = `PRICE PER UNIT` )
+      ( prefix = `8006` ai_len = 4 len = 18 numeric = abap_true title = `ITIP` )
+      ( prefix = `8007` ai_len = 4 len = 34 var = abap_true title = `IBAN` )
+      ( prefix = `8008` ai_len = 4 len = 12 var = abap_true numeric = abap_true title = `PROD TIME` )
+      ( prefix = `8010` ai_len = 4 len = 30 var = abap_true title = `CPID` )
+      ( prefix = `8011` ai_len = 4 len = 12 var = abap_true numeric = abap_true title = `CPID SERIAL` )
+      ( prefix = `8012` ai_len = 4 len = 20 var = abap_true title = `VERSION` )
+      ( prefix = `8013` ai_len = 4 len = 25 var = abap_true title = `GMN` )
+      ( prefix = `8017` ai_len = 4 len = 18 numeric = abap_true check = abap_true title = `GSRN - PROVIDER` )
+      ( prefix = `8018` ai_len = 4 len = 18 numeric = abap_true check = abap_true title = `GSRN - RECIPIENT` )
+      ( prefix = `8019` ai_len = 4 len = 10 var = abap_true numeric = abap_true title = `SRIN` )
+      ( prefix = `8020` ai_len = 4 len = 25 var = abap_true title = `REF No.` )
+      ( prefix = `8200` ai_len = 4 len = 70 var = abap_true title = `PRODUCT URL` )
+      ( prefix = `90`   ai_len = 2 len = 30 var = abap_true title = `INTERNAL` )
+      ( prefix = `91`   ai_len = 2 len = 90 var = abap_true title = `INTERNAL` )
+      ( prefix = `92`   ai_len = 2 len = 90 var = abap_true title = `INTERNAL` )
+      ( prefix = `93`   ai_len = 2 len = 90 var = abap_true title = `INTERNAL` )
+      ( prefix = `94`   ai_len = 2 len = 90 var = abap_true title = `INTERNAL` )
+      ( prefix = `95`   ai_len = 2 len = 90 var = abap_true title = `INTERNAL` )
+      ( prefix = `96`   ai_len = 2 len = 90 var = abap_true title = `INTERNAL` )
+      ( prefix = `97`   ai_len = 2 len = 90 var = abap_true title = `INTERNAL` )
+      ( prefix = `98`   ai_len = 2 len = 90 var = abap_true title = `INTERNAL` )
+      ( prefix = `99`   ai_len = 2 len = 90 var = abap_true title = `INTERNAL` ) ).
 
   ENDMETHOD.
 

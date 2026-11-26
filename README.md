@@ -379,6 +379,30 @@ DATA(lv_due)  = zabaputil_cl_util_context=>cal_add_workdays(   date = sy-datum  
 DATA(lv_days) = zabaputil_cl_util_context=>cal_count_workdays( date_from = lv_start_date  date_to = lv_end_date ).
 ```
 
+###### Barcodes (GS1)
+```abap
+" Parse a scanned GS1-128 / GS1 DataMatrix / GS1 QR code (raw with GS separators or human-readable)
+DATA(lt_gs1) = zabaputil_cl_util_context=>barcode_gs1_parse( `(01)09506000134352(17)251231(10)ABC123` ).
+" => ai = `01` title = `GTIN` value = `09506000134352`
+"    ai = `17` title = `USE BY or EXPIRY` value = `251231` date = 20251231
+"    ai = `10` title = `BATCH/LOT` value = `ABC123`
+
+" Scanner sends `|` instead of GS? Pass it as separator
+lt_gs1 = zabaputil_cl_util_context=>barcode_gs1_parse( val = lv_scan  separator = `|` ).
+
+" Read single values - a three-digit AI also finds the measure AIs (3103 = kg with 3 decimals)
+DATA(lv_batch)  = zabaputil_cl_util_context=>barcode_gs1_get_value( t_gs1 = lt_gs1  ai = `10` ).
+DATA(lv_weight) = zabaputil_cl_util_context=>barcode_gs1_get_value( t_gs1 = lt_gs1  ai = `310` ).
+
+" Build the element string for a label (GS after variable-length fields)
+DATA(lv_code)  = zabaputil_cl_util_context=>barcode_gs1_build( lt_gs1 ).
+DATA(lv_text)  = zabaputil_cl_util_context=>barcode_gs1_build( t_gs1 = lt_gs1  human_readable = abap_true ).
+
+" Check digits of GTIN, GLN, SSCC
+DATA(lv_digit) = zabaputil_cl_util_context=>barcode_gs1_calc_check_digit( `0950600013435` ). " => '2'
+DATA(lv_ok)    = zabaputil_cl_util_context=>check_is_gs1_check_digit( `09506000134352` ).    " => abap_true
+```
+
 ###### Error Handling
 ```abap
 " Raise exception conditionally
