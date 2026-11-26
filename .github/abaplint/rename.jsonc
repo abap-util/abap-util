@@ -1,4 +1,12 @@
 {
+    // Namespace rename. Renames every object from zabaputil_ to the placeholder
+    // prefix "znamespace_"; the build_rename workflow replaces the placeholder
+    // with the chosen prefix - "<name>_" for a customer name (max. 10
+    // characters) or a registered namespace (max. 10 characters with both
+    // slashes). `npm run rename` (test_rename) runs it against the placeholder,
+    // the longest prefix allowed: every object name stays at 29 characters or
+    // less, so the 11-character placeholder (zabaputil_ has 10) reaches the
+    // 30-character limit at most.
     "global": {
       "files": "/../../src/**/*.*"
     },
@@ -13,8 +21,8 @@
       "patterns": [
         {
           "type": "CLAS|INTF|TABL",
-          "oldName": "zabaputil_(.*)",
-          "newName": "zoblomov_$1"
+          "oldName": "^zabaputil_(.*)$",
+          "newName": "znamespace_$1"
         }
       ]
     },
