@@ -20,4 +20,4 @@ jobs:
       with:
         node-version: '22'
     - run: npm ci
-    - run: npm run rename_test
+    - run: npm run rename
