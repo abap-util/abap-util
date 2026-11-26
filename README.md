@@ -379,6 +379,30 @@ DATA(lv_due)  = zabaputil_cl_util_context=>cal_add_workdays(   date = sy-datum  
 DATA(lv_days) = zabaputil_cl_util_context=>cal_count_workdays( date_from = lv_start_date  date_to = lv_end_date ).
 ```
 
+###### Barcodes (GS1)
+```abap
+" Parse a scanned GS1-128 / GS1 DataMatrix / GS1 QR code (raw with GS separators or human-readable)
+DATA(lt_gs1) = zabaputil_cl_util_context=>barcode_gs1_parse( `(01)09506000134352(17)251231(10)ABC123` ).
+" => ai = `01` title = `GTIN` value = `09506000134352`
+"    ai = `17` title = `USE BY or EXPIRY` value = `251231` date = 20251231
+"    ai = `10` title = `BATCH/LOT` value = `ABC123`
+
+" Scanner sends `|` instead of GS? Pass it as separator
+lt_gs1 = zabaputil_cl_util_context=>barcode_gs1_parse( val = lv_scan  separator = `|` ).
+
+" Read single values - a three-digit AI also finds the measure AIs (3103 = kg with 3 decimals)
+DATA(lv_batch)  = zabaputil_cl_util_context=>barcode_gs1_get_value( t_gs1 = lt_gs1  ai = `10` ).
+DATA(lv_weight) = zabaputil_cl_util_context=>barcode_gs1_get_value( t_gs1 = lt_gs1  ai = `310` ).
+
+" Build the element string for a label (GS after variable-length fields)
+DATA(lv_code)  = zabaputil_cl_util_context=>barcode_gs1_build( lt_gs1 ).
+DATA(lv_text)  = zabaputil_cl_util_context=>barcode_gs1_build( t_gs1 = lt_gs1  human_readable = abap_true ).
+
+" Check digits of GTIN, GLN, SSCC
+DATA(lv_digit) = zabaputil_cl_util_context=>barcode_gs1_calc_check_digit( `0950600013435` ). " => '2'
+DATA(lv_ok)    = zabaputil_cl_util_context=>check_is_gs1_check_digit( `09506000134352` ).    " => abap_true
+```
+
 ###### Error Handling
 ```abap
 " Raise exception conditionally
@@ -543,6 +567,79 @@ DATA(lv_dist) = zabaputil_cl_util_context=>c_levenshtein( val1 = `kitten`  val2 
 DATA(lv_mime) = zabaputil_cl_util_context=>file_get_mimetype( `report.xlsx` ).
 DATA(lv_val)  = zabaputil_cl_util_context=>num_round( val = CONV decfloat34( '2.345' )  decimals = 2 ). " => 2.35
 ```
+
+###### Parallel Processing
+```abap
+" every task implements IF_ABAP_PARALLEL (method DO) and carries its input and result in attributes
+DATA(lt_result) = zabaputil_cl_util_context=>parallel_run( t_task = lt_tasks  tasks = 4 ).
+LOOP AT lt_result INTO DATA(ls_result).
+  DATA(lo_task) = CAST zcl_my_task( ls_result-task ).  " the copy that ran, with its results
+ENDLOOP.
+
+" debugging, or a release without CL_ABAP_PARALLEL: one after the other in this session
+lt_result = zabaputil_cl_util_context=>parallel_run( t_task = lt_tasks  sequential = abap_true  method = `RUN` ).
+```
+
+###### Long Texts (SAPscript)
+```abap
+DATA(lv_text) = zabaputil_cl_util_context=>longtext_read( object = `VBBK`  id = `0001`  name = lv_vbeln ).
+zabaputil_cl_util_context=>longtext_save(   object = `VBBK`  id = `0001`  name = lv_vbeln  val = lv_text ).
+zabaputil_cl_util_context=>longtext_delete( object = `VBBK`  id = `0001`  name = lv_vbeln ).
+
+" the line format conversion on its own (132 characters, `*` paragraph, `=` continuation)
+DATA(lt_lines) = zabaputil_cl_util_context=>longtext_to_lines( lv_text ).
+lv_text        = zabaputil_cl_util_context=>longtext_from_lines( lt_lines ).
+```
+
+###### RFC
+```abap
+" call any function module by name, parameters and result as JSON - locally or remote
+DATA(lv_json) = zabaputil_cl_util_context=>rfc_call_dynamic(
+    function    = `BAPI_USER_GET_DETAIL`
+    params      = `{"USERNAME":"DEVELOPER"}`
+    destination = `NONE` ).
+
+" is the destination reachable?
+IF zabaputil_cl_util_context=>rfc_check_destination( `ZMY_DEST` ) = abap_false.
+  zabaputil_cl_util_context=>rfc_ping( `ZMY_DEST` ).  " raises with the communication error text
+ENDIF.
+```
+
+###### MIME Repository, Spool & Forms
+```abap
+DATA(lv_logo) = zabaputil_cl_util_context=>mime_read( `/SAP/PUBLIC/ZMY_APP/logo.png` ).
+zabaputil_cl_util_context=>mime_save( url = `/SAP/PUBLIC/ZMY_APP/logo.png`  content = lv_logo ).
+
+" spool request (SAPscript, Smart Forms, ABAP list, Adobe form) as PDF
+DATA(lv_pdf) = zabaputil_cl_util_context=>spool_get_pdf( lv_spool_id ).
+
+" Adobe form as PDF - the components of data are the form interface parameters
+lv_pdf = zabaputil_cl_util_context=>form_get_pdf( form_name = `ZMY_FORM`  data = ls_form_data ).
+
+" binary tables to xstring (the inverse of conv_get_bintab_by_xstring)
+DATA(lv_x) = zabaputil_cl_util_context=>conv_get_xstring_by_bintab( val = lt_solix  length = lv_size ).
+```
+
+###### Report Variants
+```abap
+DATA(lt_variants) = zabaputil_cl_util_context=>variant_list( `ZMY_REPORT` ).
+DATA(lt_values)   = zabaputil_cl_util_context=>variant_read( report = `ZMY_REPORT`  variant = `DEFAULT` ).
+```
+
+###### ABAP Messaging Channels
+```abap
+zabaputil_cl_util_context=>amc_send( application_id = `ZMY_AMC`  channel_id = `/updates`  message = `refresh` ).
+```
+
+###### Attachments (GOS)
+```abap
+DATA(lv_doc_id) = zabaputil_cl_util_context=>gos_attach( object_type = `BUS2012`  object_key = lv_ebeln
+                                                         file_name   = `offer.pdf`  content = lv_pdf ).
+DATA(lt_files)  = zabaputil_cl_util_context=>gos_list( object_type = `BUS2012`  object_key = lv_ebeln ).
+DATA(lv_file)   = zabaputil_cl_util_context=>gos_read( lt_files[ 1 ]-doc_id ).
+```
+
+The long text, RFC, MIME, spool, form, variant, AMC and GOS methods need Standard ABAP; on ABAP Cloud they raise `zabaputil_cx_util_error` (`rfc_ping` and `rfc_check_destination` take a BTP destination there).
 
 ###### XML Builder
 Fluent builder for nested XML / UI5 view fragments.

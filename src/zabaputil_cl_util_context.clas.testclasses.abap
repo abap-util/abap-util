@@ -5540,3 +5540,416 @@ CLASS ltcl_ui5_binding IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+
+CLASS ltcl_barcode_gs1 DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+    CLASS-METHODS gs
+      RETURNING
+        VALUE(result) TYPE string.
+
+    METHODS parse_raw_with_gs        FOR TESTING.
+    METHODS parse_human_readable     FOR TESTING.
+    METHODS parse_custom_separator   FOR TESTING.
+    METHODS parse_measure_decimals   FOR TESTING.
+    METHODS parse_sscc_and_gln       FOR TESTING.
+    METHODS parse_date_day_zero      FOR TESTING.
+    METHODS parse_date_century       FOR TESTING.
+    METHODS parse_trailing_cr_lf     FOR TESTING.
+    METHODS parse_check_digit_off    FOR TESTING.
+    METHODS parse_errors             FOR TESTING.
+    METHODS build_roundtrip          FOR TESTING.
+    METHODS build_human_readable     FOR TESTING.
+    METHODS get_value_prefix         FOR TESTING.
+    METHODS check_digit              FOR TESTING.
+
+ENDCLASS.
+
+
+CLASS ltcl_barcode_gs1 IMPLEMENTATION.
+
+  METHOD gs.
+
+    result = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `1D` ) ).
+
+  ENDMETHOD.
+
+  METHOD parse_raw_with_gs.
+
+    DATA(lt_gs1) = zabaputil_cl_util_context=>barcode_gs1_parse(
+        val      = |]C10109506000134352172512311010ABC123{ gs( ) }21XYZ|
+        ref_date = `20250601` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 4
+                                        act = lines( lt_gs1 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `01`
+                                        act = lt_gs1[ 1 ]-ai ).
+    cl_abap_unit_assert=>assert_equals( exp = `GTIN`
+                                        act = lt_gs1[ 1 ]-title ).
+    cl_abap_unit_assert=>assert_equals( exp = `09506000134352`
+                                        act = lt_gs1[ 1 ]-value ).
+    cl_abap_unit_assert=>assert_equals( exp = `17`
+                                        act = lt_gs1[ 2 ]-ai ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV d( `20251231` )
+                                        act = lt_gs1[ 2 ]-date ).
+    cl_abap_unit_assert=>assert_equals( exp = `10`
+                                        act = lt_gs1[ 3 ]-ai ).
+    cl_abap_unit_assert=>assert_equals( exp = `10ABC123`
+                                        act = lt_gs1[ 3 ]-value ).
+    cl_abap_unit_assert=>assert_equals( exp = `21`
+                                        act = lt_gs1[ 4 ]-ai ).
+    cl_abap_unit_assert=>assert_equals( exp = `XYZ`
+                                        act = lt_gs1[ 4 ]-value ).
+
+  ENDMETHOD.
+
+  METHOD parse_human_readable.
+
+    DATA(lt_gs1) = zabaputil_cl_util_context=>barcode_gs1_parse(
+        val      = `(01)09506000134352(17)251231(10)ABC123(21)XYZ`
+        ref_date = `20250601` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 4
+                                        act = lines( lt_gs1 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `ABC123`
+                                        act = lt_gs1[ 3 ]-value ).
+    cl_abap_unit_assert=>assert_equals( exp = `BATCH/LOT`
+                                        act = lt_gs1[ 3 ]-title ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV d( `20251231` )
+                                        act = lt_gs1[ 2 ]-date ).
+
+  ENDMETHOD.
+
+  METHOD parse_custom_separator.
+
+    DATA(lt_gs1) = zabaputil_cl_util_context=>barcode_gs1_parse( val       = `10LOT42|3712|0109506000134352`
+                                                                 separator = `|` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lines( lt_gs1 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `LOT42`
+                                        act = lt_gs1[ 1 ]-value ).
+    cl_abap_unit_assert=>assert_equals( exp = `12`
+                                        act = lt_gs1[ 2 ]-value ).
+    cl_abap_unit_assert=>assert_equals( exp = `COUNT`
+                                        act = lt_gs1[ 2 ]-title ).
+
+  ENDMETHOD.
+
+  METHOD parse_measure_decimals.
+
+    DATA(lt_gs1) = zabaputil_cl_util_context=>barcode_gs1_parse( `01095060001343523103001250` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `3103`
+                                        act = lt_gs1[ 2 ]-ai ).
+    cl_abap_unit_assert=>assert_equals( exp = `001250`
+                                        act = lt_gs1[ 2 ]-value ).
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lt_gs1[ 2 ]-decimals ).
+    cl_abap_unit_assert=>assert_equals( exp = `NET WEIGHT (kg)`
+                                        act = lt_gs1[ 2 ]-title ).
+
+  ENDMETHOD.
+
+  METHOD parse_sscc_and_gln.
+
+    DATA(lt_gs1) = zabaputil_cl_util_context=>barcode_gs1_parse( `001061414112345678974109506000000008` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `SSCC`
+                                        act = lt_gs1[ 1 ]-title ).
+    cl_abap_unit_assert=>assert_equals( exp = `106141411234567897`
+                                        act = lt_gs1[ 1 ]-value ).
+    cl_abap_unit_assert=>assert_equals( exp = `410`
+                                        act = lt_gs1[ 2 ]-ai ).
+    cl_abap_unit_assert=>assert_equals( exp = `9506000000008`
+                                        act = lt_gs1[ 2 ]-value ).
+
+  ENDMETHOD.
+
+  METHOD parse_date_day_zero.
+
+    " day 00 means the last day of the month - February of a leap year
+    DATA(lt_gs1) = zabaputil_cl_util_context=>barcode_gs1_parse( val      = `15240200`
+                                                                 ref_date = `20250101` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = CONV d( `20240229` )
+                                        act = lt_gs1[ 1 ]-date ).
+
+    lt_gs1 = zabaputil_cl_util_context=>barcode_gs1_parse( val      = `17251200`
+                                                          ref_date = `20250101` ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV d( `20251231` )
+                                        act = lt_gs1[ 1 ]-date ).
+
+  ENDMETHOD.
+
+  METHOD parse_date_century.
+
+    " sliding window: up to 50 years ahead stays in this century, further
+    " ahead belongs to the past one
+    DATA(lt_gs1) = zabaputil_cl_util_context=>barcode_gs1_parse( val      = `11750101`
+                                                                 ref_date = `20250101` ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV d( `20750101` )
+                                        act = lt_gs1[ 1 ]-date ).
+
+    lt_gs1 = zabaputil_cl_util_context=>barcode_gs1_parse( val      = `11760101`
+                                                          ref_date = `20250101` ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV d( `19760101` )
+                                        act = lt_gs1[ 1 ]-date ).
+
+    lt_gs1 = zabaputil_cl_util_context=>barcode_gs1_parse( val      = `11020101`
+                                                          ref_date = `20980101` ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV d( `21020101` )
+                                        act = lt_gs1[ 1 ]-date ).
+
+  ENDMETHOD.
+
+  METHOD parse_trailing_cr_lf.
+
+    DATA(lt_gs1) = zabaputil_cl_util_context=>barcode_gs1_parse(
+        |10ABC{ zabaputil_cl_util_context=>cv_char_util_cr_lf }| ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = lines( lt_gs1 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `ABC`
+                                        act = lt_gs1[ 1 ]-value ).
+
+  ENDMETHOD.
+
+  METHOD parse_check_digit_off.
+
+    DATA(lt_gs1) = zabaputil_cl_util_context=>barcode_gs1_parse( val         = `0109506000134353`
+                                                                 check_digit = abap_false ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `09506000134353`
+                                        act = lt_gs1[ 1 ]-value ).
+
+  ENDMETHOD.
+
+  METHOD parse_errors.
+
+    DATA lt_bad TYPE string_table.
+
+    lt_bad = VALUE #( ( `0409506000134352` )                " unknown AI
+                      ( `010950600013435` )                 " fixed field too short
+                      ( `0109506000134353` )                " wrong check digit
+                      ( `01095060001343AB` )                " letters in a numeric field
+                      ( `17251301` )                        " month 13
+                      ( `17250230` )                        " 30 February
+                      ( `10ABCDEFGHIJKLMNOPQRSTU` )         " batch longer than 20
+                      ( `(10)` )                            " no value
+                      ( `(99999)ABC` ) ).                   " unknown AI, readable form
+
+    LOOP AT lt_bad INTO DATA(lv_bad).
+      TRY.
+          zabaputil_cl_util_context=>barcode_gs1_parse( val      = lv_bad
+                                                        ref_date = `20250601` ).
+          cl_abap_unit_assert=>fail( |no exception for { lv_bad }| ).
+        CATCH zabaputil_cx_util_error ##NO_HANDLER.
+      ENDTRY.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD build_roundtrip.
+
+    DATA(lv_code) = |0109506000134352{ `10ABC` }{ gs( ) }3103001250{ `21XYZ` }|.
+
+    DATA(lt_gs1) = zabaputil_cl_util_context=>barcode_gs1_parse( lv_code ).
+
+    cl_abap_unit_assert=>assert_equals( exp = lv_code
+                                        act = zabaputil_cl_util_context=>barcode_gs1_build( lt_gs1 ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = `0109506000134352` && `10ABC|3103001250` && `21XYZ`
+        act = zabaputil_cl_util_context=>barcode_gs1_build( t_gs1     = lt_gs1
+                                                            separator = `|` ) ).
+
+  ENDMETHOD.
+
+  METHOD build_human_readable.
+
+    DATA(lt_gs1) = VALUE zabaputil_cl_util_context=>ty_t_gs1( ( ai = `01` value = `09506000134352` )
+                                                              ( ai = `10` value = `ABC` ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = `(01)09506000134352(10)ABC`
+        act = zabaputil_cl_util_context=>barcode_gs1_build( t_gs1          = lt_gs1
+                                                            human_readable = abap_true ) ).
+
+  ENDMETHOD.
+
+  METHOD get_value_prefix.
+
+    DATA(lt_gs1) = zabaputil_cl_util_context=>barcode_gs1_parse( `01095060001343523103001250` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `09506000134352`
+                                        act = zabaputil_cl_util_context=>barcode_gs1_get_value( t_gs1 = lt_gs1
+                                                                                                ai    = `01` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `001250`
+                                        act = zabaputil_cl_util_context=>barcode_gs1_get_value( t_gs1 = lt_gs1
+                                                                                                ai    = `310` ) ).
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>barcode_gs1_get_value( t_gs1 = lt_gs1
+                                                                                           ai    = `10` ) ).
+
+  ENDMETHOD.
+
+  METHOD check_digit.
+
+    cl_abap_unit_assert=>assert_equals( exp = `2`
+                                        act = zabaputil_cl_util_context=>barcode_gs1_calc_check_digit( `0950600013435` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `7`
+                                        act = zabaputil_cl_util_context=>barcode_gs1_calc_check_digit( `10614141123456789` ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_is_gs1_check_digit( `09506000134352` ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_is_gs1_check_digit( `9506000000008` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_is_gs1_check_digit( `09506000134353` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_is_gs1_check_digit( `ABC` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_is_gs1_check_digit( `7` ) ).
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+CLASS ltcl_system_task DEFINITION FINAL FOR TESTING.
+
+  PUBLIC SECTION.
+    DATA input  TYPE i.
+    DATA output TYPE i.
+    METHODS run.
+
+ENDCLASS.
+
+
+CLASS ltcl_system_task IMPLEMENTATION.
+
+  METHOD run.
+
+    IF input < 0.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = `negative input`.
+    ENDIF.
+    output = input * 2.
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+CLASS ltcl_system_api DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+    METHODS bintab_roundtrip          FOR TESTING.
+    METHODS longtext_lines_split      FOR TESTING.
+    METHODS longtext_lines_join       FOR TESTING.
+    METHODS longtext_lines_roundtrip  FOR TESTING.
+    METHODS parallel_sequential       FOR TESTING.
+
+ENDCLASS.
+
+
+CLASS ltcl_system_api IMPLEMENTATION.
+
+  METHOD bintab_roundtrip.
+
+    TYPES ty_x4 TYPE x LENGTH 4.
+    DATA lt_bin TYPE STANDARD TABLE OF ty_x4 WITH EMPTY KEY.
+
+    DATA(lv_x) = CONV xstring( `00112233445566778899` ).
+    zabaputil_cl_util_context=>conv_get_bintab_by_xstring( EXPORTING val    = lv_x
+                                                           IMPORTING result = lt_bin ).
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lines( lt_bin ) ).
+
+    " the last line is padded - the length cuts the padding off again
+    cl_abap_unit_assert=>assert_equals( exp = lv_x
+                                        act = zabaputil_cl_util_context=>conv_get_xstring_by_bintab( val    = lt_bin
+                                                                                                     length = 10 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV xstring( `001122334455667788990000` )
+                                        act = zabaputil_cl_util_context=>conv_get_xstring_by_bintab( lt_bin ) ).
+
+  ENDMETHOD.
+
+  METHOD longtext_lines_split.
+
+    DATA(lv_long) = repeat( val = `abcdefghij`
+                            occ = 30 ).
+
+    DATA(lt_line) = zabaputil_cl_util_context=>longtext_to_lines(
+        |first{ zabaputil_cl_util_context=>cv_char_util_cr_lf }{ zabaputil_cl_util_context=>cv_char_util_newline }{ lv_long }| ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 5
+                                        act = lines( lt_line ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `*`
+                                        act = lt_line[ 1 ]-format ).
+    cl_abap_unit_assert=>assert_equals( exp = `first`
+                                        act = lt_line[ 1 ]-line ).
+    " the empty line stays an empty paragraph
+    cl_abap_unit_assert=>assert_equals( exp = `*`
+                                        act = lt_line[ 2 ]-format ).
+    cl_abap_unit_assert=>assert_initial( lt_line[ 2 ]-line ).
+    " 300 characters: 132 + 132 + 36, the continuation lines with `=`
+    cl_abap_unit_assert=>assert_equals( exp = `*`
+                                        act = lt_line[ 3 ]-format ).
+    cl_abap_unit_assert=>assert_equals( exp = 132
+                                        act = strlen( lt_line[ 3 ]-line ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `=`
+                                        act = lt_line[ 4 ]-format ).
+    cl_abap_unit_assert=>assert_equals( exp = `=`
+                                        act = lt_line[ 5 ]-format ).
+    cl_abap_unit_assert=>assert_equals( exp = 36
+                                        act = strlen( lt_line[ 5 ]-line ) ).
+
+  ENDMETHOD.
+
+  METHOD longtext_lines_join.
+
+    DATA(lt_line) = VALUE zabaputil_cl_util_context=>ty_t_longtext_line( ( format = `*` line = `Dear` )
+                                                                         ( format = ``  line = `customer,` )
+                                                                         ( format = `/`  line = `thank` )
+                                                                         ( format = `=`  line = `s.` ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = |Dear customer,{ zabaputil_cl_util_context=>cv_char_util_newline }thanks.|
+        act = zabaputil_cl_util_context=>longtext_from_lines( lt_line ) ).
+
+  ENDMETHOD.
+
+  METHOD longtext_lines_roundtrip.
+
+    DATA(lv_text) = |line one{ zabaputil_cl_util_context=>cv_char_util_newline }{ zabaputil_cl_util_context=>cv_char_util_newline }|
+                 && repeat( val = `0123456789`
+                            occ = 20 ).
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = lv_text
+        act = zabaputil_cl_util_context=>longtext_from_lines( zabaputil_cl_util_context=>longtext_to_lines( lv_text ) ) ).
+
+  ENDMETHOD.
+
+  METHOD parallel_sequential.
+
+    DATA(lo_ok) = NEW ltcl_system_task( ).
+    lo_ok->input = 21.
+    DATA(lo_fail) = NEW ltcl_system_task( ).
+    lo_fail->input = -1.
+
+    DATA(lt_result) = zabaputil_cl_util_context=>parallel_run( t_task     = VALUE #( ( lo_ok ) ( lo_fail ) )
+                                                               sequential = abap_true
+                                                               method     = `RUN` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = lines( lt_result ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 42
+                                        act = lo_ok->output ).
+    cl_abap_unit_assert=>assert_initial( lt_result[ 1 ]-message ).
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = lt_result[ 2 ]-index ).
+    cl_abap_unit_assert=>assert_char_cp( exp = `*negative input*`
+                                         act = lt_result[ 2 ]-message ).
+
+  ENDMETHOD.
+
+ENDCLASS.
