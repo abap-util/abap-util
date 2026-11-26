@@ -1222,6 +1222,282 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE abap_bool.
 
+    " ========== Binary tables ==========
+
+    "! The bytes of a binary table (SOLIX, BAPICONTEN, W3MIME, TLINE holding
+    "! raw bytes, ...) as one xstring - the inverse of conv_get_bintab_by_xstring.
+    "! @parameter length | number of bytes to keep, default all lines in full
+    CLASS-METHODS conv_get_xstring_by_bintab
+      IMPORTING
+        val           TYPE STANDARD TABLE
+        length        TYPE i OPTIONAL
+      RETURNING
+        VALUE(result) TYPE xstring.
+
+    " ========== Parallel Processing ==========
+
+    TYPES ty_t_object TYPE STANDARD TABLE OF REF TO object WITH EMPTY KEY.
+    TYPES:
+      BEGIN OF ty_s_parallel,
+        "! position of the task in t_task
+        index   TYPE i,
+        "! the task after it ran - in parallel mode the copy that came back
+        "! from the parallel session, holding the results it set
+        task    TYPE REF TO object,
+        "! error text if the task failed, initial otherwise
+        message TYPE string,
+      END OF ty_s_parallel.
+    TYPES ty_t_parallel TYPE STANDARD TABLE OF ty_s_parallel WITH EMPTY KEY.
+
+    "! Runs tasks in parallel sessions. Every task is an object implementing
+    "! IF_ABAP_PARALLEL (method DO, attributes carry input and result); it is
+    "! serialized into a parallel session and comes back with its results.
+    "! Uses CL_ABAP_PARALLEL (ABAP Cloud and newer Standard ABAP releases).
+    "! Where that class is missing, or with sequential = abap_true (debugging),
+    "! the tasks run one after the other in this session by calling `method`.
+    "! @parameter tasks      | maximum number of parallel tasks, default by the system
+    "! @parameter timeout    | timeout in seconds, default by the system
+    "! @parameter sequential | abap_true: run in this session, one after the other
+    "! @parameter method     | the method called in sequential mode
+    CLASS-METHODS parallel_run
+      IMPORTING
+        t_task        TYPE ty_t_object
+        tasks         TYPE i         DEFAULT 0
+        timeout       TYPE i         DEFAULT 0
+        sequential    TYPE abap_bool DEFAULT abap_false
+        method        TYPE clike     DEFAULT `IF_ABAP_PARALLEL~DO`
+      RETURNING
+        VALUE(result) TYPE ty_t_parallel.
+
+    " ========== Long Texts (SAPscript) ==========
+
+    TYPES:
+      BEGIN OF ty_s_longtext_line,
+        "! paragraph format: `*` new paragraph, `/` new line, `=` continuous,
+        "! initial = continuation separated by a blank
+        format TYPE string,
+        line   TYPE string,
+      END OF ty_s_longtext_line.
+    TYPES ty_t_longtext_line TYPE STANDARD TABLE OF ty_s_longtext_line WITH EMPTY KEY.
+
+    "! A long text (READ_TEXT) as one string, lines separated by newline.
+    "! Raises zabaputil_cx_util_error if the text does not exist. Standard ABAP only.
+    "! @parameter object | text object, e.g. `VBBK`, `MATERIAL`
+    "! @parameter id     | text id, e.g. `0001`, `GRUN`
+    "! @parameter name   | text name, usually the object key
+    "! @parameter langu  | SAP or ISO language
+    CLASS-METHODS longtext_read
+      IMPORTING
+        object        TYPE clike
+        id            TYPE clike
+        name          TYPE clike
+        langu         TYPE clike DEFAULT sy-langu
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! Saves a long text (SAVE_TEXT), creating or replacing it. Newlines start
+    "! a new paragraph, longer lines are split at 132 characters. The text is
+    "! written with the next COMMIT WORK. Standard ABAP only.
+    CLASS-METHODS longtext_save
+      IMPORTING
+        object TYPE clike
+        id     TYPE clike
+        name   TYPE clike
+        val    TYPE clike
+        langu  TYPE clike DEFAULT sy-langu.
+
+    "! Deletes a long text (DELETE_TEXT); a missing text is no error. Standard ABAP only.
+    CLASS-METHODS longtext_delete
+      IMPORTING
+        object TYPE clike
+        id     TYPE clike
+        name   TYPE clike
+        langu  TYPE clike DEFAULT sy-langu.
+
+    "! A string as SAPscript lines: every newline starts a paragraph (`*`),
+    "! lines longer than 132 characters continue with format `=`
+    CLASS-METHODS longtext_to_lines
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE ty_t_longtext_line.
+
+    "! SAPscript lines as a string - the inverse of longtext_to_lines
+    CLASS-METHODS longtext_from_lines
+      IMPORTING
+        val           TYPE ty_t_longtext_line
+      RETURNING
+        VALUE(result) TYPE string.
+
+    " ========== RFC ==========
+
+    "! Calls a function module by name, locally or via RFC, with its parameters
+    "! as JSON: `{"IV_MATNR":"4711","IT_ITEMS":[{...}]}` - names are the
+    "! parameter names, optional importing parameters that are not given keep
+    "! their default. Returns the exporting, changing and tables parameters as
+    "! JSON. A classic exception raises zabaputil_cx_util_error with its name.
+    "! The parameter types must exist in this system. Standard ABAP only.
+    "! @parameter params      | importing, changing and tables parameters as JSON object
+    "! @parameter destination | RFC destination, initial: call in this session
+    CLASS-METHODS rfc_call_dynamic
+      IMPORTING
+        function      TYPE clike
+        params        TYPE clike OPTIONAL
+        destination   TYPE clike OPTIONAL
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! Pings an RFC destination (RFC_PING) and raises zabaputil_cx_util_error
+    "! with the communication or system failure text if it cannot be reached.
+    "! On ABAP Cloud `destination` is the name of a BTP destination.
+    CLASS-METHODS rfc_ping
+      IMPORTING
+        destination TYPE clike.
+
+    "! abap_true if the RFC destination can be reached - see rfc_ping
+    CLASS-METHODS rfc_check_destination
+      IMPORTING
+        destination   TYPE clike
+      RETURNING
+        VALUE(result) TYPE abap_bool.
+
+    " ========== MIME Repository ==========
+
+    "! Reads a file of the MIME repository, e.g. `/SAP/PUBLIC/ZMY/logo.png`.
+    "! Standard ABAP only.
+    CLASS-METHODS mime_read
+      IMPORTING
+        url           TYPE clike
+      RETURNING
+        VALUE(result) TYPE xstring.
+
+    "! Creates or replaces a file in the MIME repository. Standard ABAP only.
+    "! @parameter package   | package of a new file, default `$TMP`
+    "! @parameter transport | transport request, needed outside local packages
+    CLASS-METHODS mime_save
+      IMPORTING
+        url       TYPE clike
+        content   TYPE xstring
+        package   TYPE clike DEFAULT `$TMP`
+        transport TYPE clike OPTIONAL.
+
+    " ========== Spool & Forms ==========
+
+    "! A spool request as PDF: SAPscript/Smart Forms (OTF), ABAP lists and
+    "! Adobe forms (ADS). Standard ABAP only.
+    CLASS-METHODS spool_get_pdf
+      IMPORTING
+        spool_id      TYPE i
+      RETURNING
+        VALUE(result) TYPE xstring.
+
+    "! Renders an Adobe form (PDF-based print form, SFP) to PDF. The components
+    "! of `data` are passed to the form interface parameters of the same name.
+    "! Standard ABAP only.
+    "! @parameter form_name | name of the form
+    "! @parameter data      | structure with one component per interface parameter
+    "! @parameter langu     | form language
+    CLASS-METHODS form_get_pdf
+      IMPORTING
+        form_name     TYPE clike
+        data          TYPE any OPTIONAL
+        langu         TYPE clike DEFAULT sy-langu
+      RETURNING
+        VALUE(result) TYPE xstring.
+
+    " ========== Report Variants ==========
+
+    TYPES:
+      BEGIN OF ty_s_variant,
+        variant TYPE string,
+        text    TYPE string,
+      END OF ty_s_variant.
+    TYPES ty_t_variant TYPE STANDARD TABLE OF ty_s_variant WITH EMPTY KEY.
+    TYPES:
+      BEGIN OF ty_s_variant_value,
+        "! name of the parameter or select-option
+        selname TYPE string,
+        "! `P` parameter, `S` select-option
+        kind    TYPE string,
+        sign    TYPE string,
+        option  TYPE string,
+        low     TYPE string,
+        high    TYPE string,
+      END OF ty_s_variant_value.
+    TYPES ty_t_variant_value TYPE STANDARD TABLE OF ty_s_variant_value WITH EMPTY KEY.
+
+    "! The variants of a report with their texts in langu. Standard ABAP only.
+    CLASS-METHODS variant_list
+      IMPORTING
+        report        TYPE clike
+        langu         TYPE clike DEFAULT sy-langu
+      RETURNING
+        VALUE(result) TYPE ty_t_variant.
+
+    "! The values of a report variant (RS_VARIANT_CONTENTS). Standard ABAP only.
+    CLASS-METHODS variant_read
+      IMPORTING
+        report        TYPE clike
+        variant       TYPE clike
+      RETURNING
+        VALUE(result) TYPE ty_t_variant_value.
+
+    " ========== ABAP Messaging Channels ==========
+
+    "! Sends a text message to an ABAP Messaging Channel - subscribers (e.g.
+    "! a WebSocket via ABAP Push Channel) get it at once. Standard ABAP only.
+    "! @parameter application_id       | AMC application, e.g. `ZMY_AMC`
+    "! @parameter channel_id           | channel, e.g. `/updates`
+    "! @parameter channel_extension_id | optional extension, e.g. a document number
+    CLASS-METHODS amc_send
+      IMPORTING
+        application_id       TYPE clike
+        channel_id           TYPE clike
+        message              TYPE clike
+        channel_extension_id TYPE clike OPTIONAL.
+
+    " ========== Attachments (Generic Object Services) ==========
+
+    TYPES:
+      BEGIN OF ty_s_gos,
+        doc_id      TYPE string,
+        file_name   TYPE string,
+        description TYPE string,
+        file_ext    TYPE string,
+        size        TYPE i,
+        created_by  TYPE string,
+        created_on  TYPE d,
+      END OF ty_s_gos.
+    TYPES ty_t_gos TYPE STANDARD TABLE OF ty_s_gos WITH EMPTY KEY.
+
+    "! Attaches a file to a business object (GOS attachment list), e.g.
+    "! object_type `BUS2012` with a purchase order number. Commits the
+    "! relationship (BINARY_RELATION_CREATE_COMMIT). Standard ABAP only.
+    CLASS-METHODS gos_attach
+      IMPORTING
+        object_type   TYPE clike
+        object_key    TYPE clike
+        file_name     TYPE clike
+        content       TYPE xstring
+        description   TYPE clike OPTIONAL
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! The GOS attachments of a business object. Standard ABAP only.
+    CLASS-METHODS gos_list
+      IMPORTING
+        object_type   TYPE clike
+        object_key    TYPE clike
+      RETURNING
+        VALUE(result) TYPE ty_t_gos.
+
+    "! The content of a GOS attachment (doc_id from gos_list). Standard ABAP only.
+    CLASS-METHODS gos_read
+      IMPORTING
+        doc_id        TYPE clike
+      RETURNING
+        VALUE(result) TYPE xstring.
+
     " ========== Deep Comparison ==========
 
     CLASS-METHODS data_equals
@@ -3095,6 +3371,71 @@ CLASS zabaputil_cl_util_context DEFINITION
     TYPES ty_t_gs1_rule TYPE STANDARD TABLE OF ty_s_gs1_rule WITH EMPTY KEY.
 
     CLASS-DATA gt_gs1_rule TYPE ty_t_gs1_rule.
+
+    " a function module parameter as RFC_GET_FUNCTION_INTERFACE describes it
+    TYPES:
+      BEGIN OF ty_s_fm_param,
+        " I importing, E exporting, C changing, T tables, X exception
+        paramclass TYPE string,
+        parameter  TYPE string,
+        typename   TYPE string,
+        optional   TYPE abap_bool,
+      END OF ty_s_fm_param.
+    TYPES ty_t_fm_param TYPE STANDARD TABLE OF ty_s_fm_param WITH EMPTY KEY.
+
+    " raises "<method>: not available on ABAP Cloud" there
+    CLASS-METHODS x_raise_on_cloud
+      IMPORTING
+        method TYPE clike.
+
+    CLASS-METHODS sys_fm_get_interface
+      IMPORTING
+        function      TYPE clike
+        destination   TYPE clike OPTIONAL
+      RETURNING
+        VALUE(result) TYPE ty_t_fm_param.
+
+    " a data object of the type of one function module parameter
+    CLASS-METHODS sys_fm_create_param
+      IMPORTING
+        param         TYPE ty_s_fm_param
+      RETURNING
+        VALUE(result) TYPE REF TO data.
+
+    " CALL FUNCTION with parameter and exception table, via RFC when
+    " destination is given - returns sy-subrc
+    CLASS-METHODS sys_fm_call
+      IMPORTING
+        function      TYPE clike
+        destination   TYPE clike OPTIONAL
+        t_param       TYPE abap_func_parmbind_tab
+        t_exception   TYPE abap_func_excpbind_tab
+      RETURNING
+        VALUE(result) TYPE i.
+
+    CLASS-METHODS sys_langu
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    " the name of a method's returning parameter - it differs by release
+    CLASS-METHODS sys_method_returning
+      IMPORTING
+        type_name     TYPE clike
+        method        TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    " a data object of the type of a method parameter, optionally filled
+    CLASS-METHODS sys_method_param
+      IMPORTING
+        type_name     TYPE clike
+        method        TYPE clike
+        parameter     TYPE clike
+        value         TYPE any OPTIONAL
+      RETURNING
+        VALUE(result) TYPE REF TO data.
 
     CLASS-METHODS barcode_gs1_get_rules
       RETURNING
@@ -15083,6 +15424,1440 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       ( prefix = `97`   ai_len = 2 len = 90 var = abap_true title = `INTERNAL` )
       ( prefix = `98`   ai_len = 2 len = 90 var = abap_true title = `INTERNAL` )
       ( prefix = `99`   ai_len = 2 len = 90 var = abap_true title = `INTERNAL` ) ).
+
+  ENDMETHOD.
+
+  METHOD conv_get_xstring_by_bintab.
+
+    DATA lv_hex TYPE string.
+    FIELD-SYMBOLS <line> TYPE any.
+    FIELD-SYMBOLS <x>    TYPE x.
+
+    " the bytes of every line in hex, then one conversion: an xstring has no
+    " append operator, and CONCATENATE ... IN BYTE MODE is not used here
+    LOOP AT val ASSIGNING <line>.
+      ASSIGN <line> TO <x> CASTING.
+      lv_hex = lv_hex && CONV string( <x> ).
+    ENDLOOP.
+
+    IF length > 0 AND strlen( lv_hex ) > length * 2.
+      lv_hex = substring( val = lv_hex
+                          len = length * 2 ).
+    ENDIF.
+    result = lv_hex.
+
+  ENDMETHOD.
+
+  METHOD x_raise_on_cloud.
+
+    IF check_abap_cloud( ).
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |{ method }: not available on ABAP Cloud|.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD sys_langu.
+
+    " a two-letter ISO code (EN, DE) becomes the one-letter SAP key
+    DATA(lv_val) = c_trim( CONV string( val ) ).
+    IF strlen( lv_val ) = 2.
+      result = lang_iso_to_sap( lv_val ).
+    ELSE.
+      result = lv_val.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD sys_fm_call.
+
+    DATA lv_function    TYPE c LENGTH 30.
+    DATA lv_destination TYPE c LENGTH 32.
+
+    lv_function    = c_trim_upper( function ).
+    lv_destination = destination.
+
+    IF lv_destination IS INITIAL.
+      CALL FUNCTION lv_function
+        PARAMETER-TABLE t_param
+        EXCEPTION-TABLE t_exception.
+    ELSE.
+      CALL FUNCTION lv_function
+        DESTINATION lv_destination
+        PARAMETER-TABLE t_param
+        EXCEPTION-TABLE t_exception.
+    ENDIF.
+    result = sy-subrc.
+
+  ENDMETHOD.
+
+  METHOD sys_fm_get_interface.
+
+    DATA lr_params TYPE REF TO data.
+    DATA lv_funcname TYPE c LENGTH 30.
+    FIELD-SYMBOLS <params> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <param>  TYPE any.
+    FIELD-SYMBOLS <field>  TYPE any.
+
+    lv_funcname = c_trim_upper( function ).
+    CREATE DATA lr_params TYPE STANDARD TABLE OF (`RFC_FUNINT`).
+    ASSIGN lr_params->* TO <params>.
+
+    DATA(lt_param) = VALUE abap_func_parmbind_tab(
+        ( name = `FUNCNAME` kind = abap_func_exporting value = REF #( lv_funcname ) )
+        ( name = `PARAMS`   kind = abap_func_tables    value = lr_params ) ).
+    DATA(lt_exception) = VALUE abap_func_excpbind_tab( ( name = `FU_NOT_FOUND` value = 1 )
+                                                        ( name = `OTHERS`       value = 2 ) ).
+    IF sys_fm_call( function    = `RFC_GET_FUNCTION_INTERFACE`
+                    destination = destination
+                    t_param     = lt_param
+                    t_exception = lt_exception ) <> 0.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |function module { lv_funcname } not found|.
+    ENDIF.
+
+    LOOP AT <params> ASSIGNING <param>.
+      DATA(ls_param) = VALUE ty_s_fm_param( ).
+      ASSIGN COMPONENT `PARAMCLASS` OF STRUCTURE <param> TO <field>.
+      ls_param-paramclass = <field>.
+      ASSIGN COMPONENT `PARAMETER` OF STRUCTURE <param> TO <field>.
+      ls_param-parameter = c_trim( CONV string( <field> ) ).
+      ASSIGN COMPONENT `OPTIONAL` OF STRUCTURE <param> TO <field>.
+      ls_param-optional = xsdbool( <field> IS NOT INITIAL ).
+
+      ASSIGN COMPONENT `TABNAME` OF STRUCTURE <param> TO <field>.
+      DATA(lv_tabname) = c_trim( CONV string( <field> ) ).
+      ASSIGN COMPONENT `FIELDNAME` OF STRUCTURE <param> TO <field>.
+      DATA(lv_fieldname) = c_trim( CONV string( <field> ) ).
+      IF lv_tabname IS NOT INITIAL AND lv_fieldname IS NOT INITIAL.
+        ls_param-typename = |{ lv_tabname }-{ lv_fieldname }|.
+      ELSEIF lv_tabname IS NOT INITIAL.
+        ls_param-typename = lv_tabname.
+      ELSE.
+        " a built-in type: EXID is the ABAP type id
+        ASSIGN COMPONENT `EXID` OF STRUCTURE <param> TO <field>.
+        CASE CONV string( <field> ).
+          WHEN `y`.
+            ls_param-typename = `XSTRING`.
+          WHEN `I`.
+            ls_param-typename = `INT4`.
+          WHEN OTHERS.
+            ls_param-typename = `STRING`.
+        ENDCASE.
+      ENDIF.
+
+      INSERT ls_param INTO TABLE result.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD sys_fm_create_param.
+
+    IF param-paramclass = `T`.
+      CREATE DATA result TYPE STANDARD TABLE OF (param-typename).
+    ELSE.
+      CREATE DATA result TYPE (param-typename).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD parallel_run.
+
+    DATA lo_parallel TYPE REF TO object.
+    DATA lr_in       TYPE REF TO data.
+    DATA lr_out      TYPE REF TO data.
+    FIELD-SYMBOLS <in>    TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <out>   TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <row>   TYPE any.
+    FIELD-SYMBOLS <field> TYPE any.
+
+    DATA(lv_sequential) = sequential.
+    IF lv_sequential = abap_false.
+      TRY.
+          cl_abap_typedescr=>describe_by_name( `CL_ABAP_PARALLEL` ).
+        CATCH cx_root.
+          lv_sequential = abap_true.
+      ENDTRY.
+    ENDIF.
+
+    IF lv_sequential = abap_true.
+      DATA(lv_method) = c_trim_upper( method ).
+      LOOP AT t_task INTO DATA(lo_task).
+        DATA(ls_result) = VALUE ty_s_parallel( index = sy-tabix
+                                               task  = lo_task ).
+        TRY.
+            CALL METHOD lo_task->(lv_method).
+          CATCH cx_root INTO DATA(lx_task).
+            ls_result-message = lx_task->get_text( ).
+        ENDTRY.
+        INSERT ls_result INTO TABLE result.
+      ENDLOOP.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        DATA(lt_param) = VALUE abap_parmbind_tab( ).
+        IF tasks > 0.
+          INSERT VALUE #( name  = `P_NUM_TASKS`
+                          kind  = cl_abap_objectdescr=>exporting
+                          value = REF #( tasks ) ) INTO TABLE lt_param.
+        ENDIF.
+        IF timeout > 0.
+          INSERT VALUE #( name  = `P_TIMEOUT`
+                          kind  = cl_abap_objectdescr=>exporting
+                          value = REF #( timeout ) ) INTO TABLE lt_param.
+        ENDIF.
+        DATA(lv_class) = `CL_ABAP_PARALLEL`.
+        CREATE OBJECT lo_parallel TYPE (lv_class)
+          PARAMETER-TABLE lt_param.
+
+        CREATE DATA lr_in TYPE (`CL_ABAP_PARALLEL=>T_IN_INST_TAB`).
+        ASSIGN lr_in->* TO <in>.
+        CREATE DATA lr_out TYPE (`CL_ABAP_PARALLEL=>T_OUT_INST_TAB`).
+        ASSIGN lr_out->* TO <out>.
+
+        LOOP AT t_task INTO lo_task.
+          INSERT INITIAL LINE INTO TABLE <in> ASSIGNING <row>.
+          <row> ?= lo_task.
+        ENDLOOP.
+
+        CALL METHOD lo_parallel->(`RUN_INST`)
+          EXPORTING
+            p_in_tab  = <in>
+          IMPORTING
+            p_out_tab = <out>.
+
+        LOOP AT <out> ASSIGNING <row>.
+          ls_result = VALUE #( index = sy-tabix ).
+          ASSIGN COMPONENT `INDEX` OF STRUCTURE <row> TO <field>.
+          IF sy-subrc = 0.
+            ls_result-index = <field>.
+          ENDIF.
+          ASSIGN COMPONENT `INST` OF STRUCTURE <row> TO <field>.
+          IF sy-subrc = 0.
+            ls_result-task = <field>.
+          ENDIF.
+          ASSIGN COMPONENT `MESSAGE` OF STRUCTURE <row> TO <field>.
+          IF sy-subrc = 0.
+            ls_result-message = <field>.
+          ENDIF.
+          INSERT ls_result INTO TABLE result.
+        ENDLOOP.
+
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD longtext_to_lines.
+
+    DATA(lv_val) = replace( val  = CONV string( val )
+                            sub  = cv_char_util_cr_lf
+                            with = cv_char_util_newline
+                            occ  = 0 ).
+    SPLIT lv_val AT cv_char_util_newline INTO TABLE DATA(lt_paragraph).
+
+    LOOP AT lt_paragraph INTO DATA(lv_paragraph).
+      IF lv_paragraph IS INITIAL.
+        INSERT VALUE #( format = `*` ) INTO TABLE result.
+        CONTINUE.
+      ENDIF.
+      DATA(lv_format) = `*`.
+      WHILE lv_paragraph IS NOT INITIAL.
+        DATA(lv_len) = nmin( val1 = 132
+                             val2 = strlen( lv_paragraph ) ).
+        INSERT VALUE #( format = lv_format
+                        line   = substring( val = lv_paragraph
+                                            len = lv_len ) ) INTO TABLE result.
+        lv_paragraph = substring( val = lv_paragraph
+                                  off = lv_len ).
+        lv_format = `=`.
+      ENDWHILE.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD longtext_from_lines.
+
+    LOOP AT val INTO DATA(ls_line).
+      IF sy-tabix = 1.
+        result = ls_line-line.
+        CONTINUE.
+      ENDIF.
+      CASE ls_line-format.
+        WHEN `=`.
+          result = result && ls_line-line.
+        WHEN ``.
+          " a continuation line, joined with a blank
+          result = |{ result } { ls_line-line }|.
+        WHEN OTHERS.
+          result = result && cv_char_util_newline && ls_line-line.
+      ENDCASE.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD longtext_read.
+
+    DATA lr_lines   TYPE REF TO data.
+    DATA lv_object  TYPE c LENGTH 10.
+    DATA lv_id      TYPE c LENGTH 4.
+    DATA lv_name    TYPE c LENGTH 70.
+    DATA lv_langu   TYPE c LENGTH 1.
+    DATA lt_line    TYPE ty_t_longtext_line.
+    FIELD-SYMBOLS <lines> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <line>  TYPE any.
+    FIELD-SYMBOLS <field> TYPE any.
+
+    x_raise_on_cloud( `longtext_read` ).
+
+    lv_object = object.
+    lv_id     = id.
+    lv_name   = name.
+    lv_langu  = sys_langu( langu ).
+
+    TRY.
+        CREATE DATA lr_lines TYPE STANDARD TABLE OF (`TLINE`).
+        ASSIGN lr_lines->* TO <lines>.
+
+        DATA(lv_fm) = `READ_TEXT`.
+        CALL FUNCTION lv_fm
+          EXPORTING
+            id        = lv_id
+            language  = lv_langu
+            name      = lv_name
+            object    = lv_object
+          TABLES
+            lines     = <lines>
+          EXCEPTIONS
+            not_found = 1
+            OTHERS    = 2.
+        IF sy-subrc = 1.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |longtext_read: text { lv_object } { lv_id } { lv_name } ({ lv_langu }) not found|.
+        ELSEIF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |longtext_read: READ_TEXT failed for { lv_object } { lv_id } { lv_name }|.
+        ENDIF.
+
+        LOOP AT <lines> ASSIGNING <line>.
+          DATA(ls_line) = VALUE ty_s_longtext_line( ).
+          ASSIGN COMPONENT `TDFORMAT` OF STRUCTURE <line> TO <field>.
+          ls_line-format = c_trim( CONV string( <field> ) ).
+          ASSIGN COMPONENT `TDLINE` OF STRUCTURE <line> TO <field>.
+          ls_line-line = <field>.
+          INSERT ls_line INTO TABLE lt_line.
+        ENDLOOP.
+        result = longtext_from_lines( lt_line ).
+
+      CATCH zabaputil_cx_util_error INTO DATA(lx).
+        RAISE EXCEPTION lx.
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD longtext_save.
+
+    DATA lr_header TYPE REF TO data.
+    DATA lr_lines  TYPE REF TO data.
+    FIELD-SYMBOLS <header> TYPE any.
+    FIELD-SYMBOLS <lines>  TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <line>   TYPE any.
+    FIELD-SYMBOLS <field>  TYPE any.
+
+    x_raise_on_cloud( `longtext_save` ).
+
+    TRY.
+        CREATE DATA lr_header TYPE (`THEAD`).
+        ASSIGN lr_header->* TO <header>.
+        ASSIGN COMPONENT `TDOBJECT` OF STRUCTURE <header> TO <field>.
+        <field> = object.
+        ASSIGN COMPONENT `TDID` OF STRUCTURE <header> TO <field>.
+        <field> = id.
+        ASSIGN COMPONENT `TDNAME` OF STRUCTURE <header> TO <field>.
+        <field> = name.
+        ASSIGN COMPONENT `TDSPRAS` OF STRUCTURE <header> TO <field>.
+        <field> = sys_langu( langu ).
+
+        CREATE DATA lr_lines TYPE STANDARD TABLE OF (`TLINE`).
+        ASSIGN lr_lines->* TO <lines>.
+        LOOP AT longtext_to_lines( val ) INTO DATA(ls_line).
+          INSERT INITIAL LINE INTO TABLE <lines> ASSIGNING <line>.
+          ASSIGN COMPONENT `TDFORMAT` OF STRUCTURE <line> TO <field>.
+          <field> = ls_line-format.
+          ASSIGN COMPONENT `TDLINE` OF STRUCTURE <line> TO <field>.
+          <field> = ls_line-line.
+        ENDLOOP.
+
+        " insert = space: SAVE_TEXT finds out itself whether the text exists
+        DATA(lv_fm) = `SAVE_TEXT`.
+        CALL FUNCTION lv_fm
+          EXPORTING
+            header          = <header>
+            savemode_direct = abap_true
+          TABLES
+            lines           = <lines>
+          EXCEPTIONS
+            OTHERS          = 1.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |longtext_save: SAVE_TEXT failed for { object } { id } { name }|.
+        ENDIF.
+
+      CATCH zabaputil_cx_util_error INTO DATA(lx).
+        RAISE EXCEPTION lx.
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD longtext_delete.
+
+    DATA lv_object TYPE c LENGTH 10.
+    DATA lv_id     TYPE c LENGTH 4.
+    DATA lv_name   TYPE c LENGTH 70.
+    DATA lv_langu  TYPE c LENGTH 1.
+
+    x_raise_on_cloud( `longtext_delete` ).
+
+    lv_object = object.
+    lv_id     = id.
+    lv_name   = name.
+    lv_langu  = sys_langu( langu ).
+
+    TRY.
+        DATA(lv_fm) = `DELETE_TEXT`.
+        CALL FUNCTION lv_fm
+          EXPORTING
+            id              = lv_id
+            language        = lv_langu
+            name            = lv_name
+            object          = lv_object
+            savemode_direct = abap_true
+          EXCEPTIONS
+            not_found       = 1
+            OTHERS          = 2.
+        IF sy-subrc = 2.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |longtext_delete: DELETE_TEXT failed for { lv_object } { lv_id } { lv_name }|.
+        ENDIF.
+
+      CATCH zabaputil_cx_util_error INTO DATA(lx).
+        RAISE EXCEPTION lx.
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD rfc_call_dynamic.
+
+    DATA lt_comp      TYPE cl_abap_structdescr=>component_table.
+    DATA lr_all       TYPE REF TO data.
+    DATA lt_param     TYPE abap_func_parmbind_tab.
+    DATA lt_exception TYPE abap_func_excpbind_tab.
+    DATA lv_json      TYPE string.
+    FIELD-SYMBOLS <all>  TYPE any.
+    FIELD-SYMBOLS <comp> TYPE any.
+
+    x_raise_on_cloud( `rfc_call_dynamic` ).
+
+    DATA(lv_function) = c_trim_upper( function ).
+    DATA(lv_params) = c_trim( CONV string( params ) ).
+
+    TRY.
+        DATA(lt_interface) = sys_fm_get_interface( function    = lv_function
+                                                   destination = destination ).
+
+        " one structure with a component per parameter: the JSON is mapped
+        " into it in one go, and the parameter table points into it
+        LOOP AT lt_interface INTO DATA(ls_interface) WHERE paramclass <> `X`.
+          DATA(lr_type) = sys_fm_create_param( ls_interface ).
+          INSERT VALUE #( name = ls_interface-parameter
+                          type = CAST cl_abap_datadescr( cl_abap_typedescr=>describe_by_data_ref( lr_type ) ) )
+                 INTO TABLE lt_comp.
+        ENDLOOP.
+
+        IF lt_comp IS NOT INITIAL.
+          DATA(lo_struct) = cl_abap_structdescr=>create( lt_comp ).
+          CREATE DATA lr_all TYPE HANDLE lo_struct.
+          ASSIGN lr_all->* TO <all>.
+        ENDIF.
+
+        DATA li_json TYPE REF TO zabaputil_if_ajson.
+        IF lv_params IS NOT INITIAL AND <all> IS ASSIGNED.
+          li_json = zabaputil_cl_ajson=>parse( lv_params ).
+          li_json->to_abap( EXPORTING iv_corresponding = abap_true
+                            IMPORTING ev_container     = <all> ).
+        ENDIF.
+
+        DATA(lv_count) = 0.
+        LOOP AT lt_interface INTO ls_interface.
+          IF ls_interface-paramclass = `X`.
+            lv_count = lv_count + 1.
+            INSERT VALUE #( name = ls_interface-parameter value = lv_count ) INTO TABLE lt_exception.
+            CONTINUE.
+          ENDIF.
+
+          " an optional importing parameter the caller did not give keeps its default
+          IF ls_interface-paramclass = `I` AND ls_interface-optional = abap_true.
+            IF li_json IS NOT BOUND.
+              CONTINUE.
+            ENDIF.
+            IF li_json->exists( |/{ ls_interface-parameter }| ) = abap_false
+                AND li_json->exists( |/{ to_lower( ls_interface-parameter ) }| ) = abap_false.
+              CONTINUE.
+            ENDIF.
+          ENDIF.
+
+          ASSIGN COMPONENT ls_interface-parameter OF STRUCTURE <all> TO <comp>.
+          INSERT VALUE #( name  = ls_interface-parameter
+                          kind  = SWITCH #( ls_interface-paramclass
+                                            WHEN `I` THEN abap_func_exporting
+                                            WHEN `E` THEN abap_func_importing
+                                            WHEN `C` THEN abap_func_changing
+                                            ELSE abap_func_tables )
+                          value = REF #( <comp> ) ) INTO TABLE lt_param.
+        ENDLOOP.
+
+        IF destination IS NOT INITIAL.
+          INSERT VALUE #( name = `SYSTEM_FAILURE`        value = lv_count + 1 ) INTO TABLE lt_exception.
+          INSERT VALUE #( name = `COMMUNICATION_FAILURE` value = lv_count + 2 ) INTO TABLE lt_exception.
+        ENDIF.
+        INSERT VALUE #( name = `OTHERS` value = lv_count + 3 ) INTO TABLE lt_exception.
+
+        DATA(lv_subrc) = sys_fm_call( function    = lv_function
+                                      destination = destination
+                                      t_param     = lt_param
+                                      t_exception = lt_exception ).
+        IF lv_subrc <> 0.
+          DATA(lv_exception) = `OTHERS`.
+          LOOP AT lt_exception INTO DATA(ls_exception) WHERE value = lv_subrc.
+            lv_exception = ls_exception-name.
+          ENDLOOP.
+          DATA(lv_msg) = ``.
+          IF sy-msgid IS NOT INITIAL.
+            lv_msg = |: { text_get( msgid = sy-msgid
+                                    msgno = sy-msgno
+                                    v1    = sy-msgv1
+                                    v2    = sy-msgv2
+                                    v3    = sy-msgv3
+                                    v4    = sy-msgv4 ) }|.
+          ENDIF.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |{ lv_function } raised { lv_exception }{ lv_msg }|.
+        ENDIF.
+
+        LOOP AT lt_interface INTO ls_interface WHERE paramclass = `E` OR paramclass = `C` OR paramclass = `T`.
+          ASSIGN COMPONENT ls_interface-parameter OF STRUCTURE <all> TO <comp>.
+          IF lv_json IS NOT INITIAL.
+            lv_json = lv_json && `,`.
+          ENDIF.
+          lv_json = |{ lv_json }"{ ls_interface-parameter }":{ json_stringify( <comp> ) }|.
+        ENDLOOP.
+        result = |\{{ lv_json }\}|.
+
+      CATCH zabaputil_cx_util_error INTO DATA(lx).
+        RAISE EXCEPTION lx.
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD rfc_ping.
+
+    DATA lv_destination TYPE c LENGTH 32.
+    DATA lv_msg         TYPE c LENGTH 255.
+    DATA lo_provider    TYPE REF TO object.
+
+    lv_destination = c_trim( CONV string( destination ) ).
+
+    TRY.
+        IF check_abap_cloud( ).
+          " a BTP destination: the provider hands out the RFC destination name
+          DATA(lv_class) = `CL_RFC_DESTINATION_PROVIDER`.
+          DATA(lv_create) = `CREATE_BY_CLOUD_DESTINATION`.
+          CALL METHOD (lv_class)=>(lv_create)
+            PARAMETER-TABLE VALUE abap_parmbind_tab(
+              ( name  = `I_NAME`
+                kind  = cl_abap_objectdescr=>exporting
+                value = sys_method_param( type_name = lv_class
+                                          method    = lv_create
+                                          parameter = `I_NAME`
+                                          value     = lv_destination ) )
+              ( name  = sys_method_returning( type_name = lv_class
+                                              method    = lv_create )
+                kind  = cl_abap_objectdescr=>receiving
+                value = REF #( lo_provider ) ) ).
+          DATA(lv_returning) = sys_method_returning( type_name = `IF_RFC_DEST`
+                                                     method    = `GET_DESTINATION_NAME` ).
+          DATA(lr_name) = sys_method_param( type_name = `IF_RFC_DEST`
+                                            method    = `GET_DESTINATION_NAME`
+                                            parameter = lv_returning ).
+          CALL METHOD lo_provider->(`IF_RFC_DEST~GET_DESTINATION_NAME`)
+            PARAMETER-TABLE VALUE abap_parmbind_tab( ( name  = lv_returning
+                                                       kind  = cl_abap_objectdescr=>receiving
+                                                       value = lr_name ) ).
+          ASSIGN lr_name->* TO FIELD-SYMBOL(<name>).
+          lv_destination = <name>.
+        ENDIF.
+
+        DATA(lv_fm) = `RFC_PING`.
+        CALL FUNCTION lv_fm
+          DESTINATION lv_destination
+          EXCEPTIONS
+            system_failure        = 1 MESSAGE lv_msg
+            communication_failure = 2 MESSAGE lv_msg
+            OTHERS                = 3.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |rfc_ping { destination }: { COND string( WHEN lv_msg IS INITIAL THEN |sy-subrc { sy-subrc }| ELSE lv_msg ) }|.
+        ENDIF.
+
+      CATCH zabaputil_cx_util_error INTO DATA(lx).
+        RAISE EXCEPTION lx.
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD rfc_check_destination.
+
+    TRY.
+        rfc_ping( destination ).
+        result = abap_true.
+      CATCH cx_root.
+        result = abap_false.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD mime_read.
+
+    DATA lo_api TYPE REF TO object.
+
+    x_raise_on_cloud( `mime_read` ).
+
+    TRY.
+        DATA(lv_class) = `CL_MIME_REPOSITORY_API`.
+        CALL METHOD (lv_class)=>(`GET_API`)
+          PARAMETER-TABLE VALUE abap_parmbind_tab( ( name  = sys_method_returning( type_name = lv_class
+                                                                                   method    = `GET_API` )
+                                                     kind  = cl_abap_objectdescr=>receiving
+                                                     value = REF #( lo_api ) ) ).
+
+        CALL METHOD lo_api->(`IF_MR_API~GET`)
+          EXPORTING
+            i_url              = CONV string( url )
+          IMPORTING
+            e_content          = result
+          EXCEPTIONS
+            parameter_missing  = 1
+            error_occured      = 2
+            not_found          = 3
+            permission_failure = 4
+            OTHERS             = 5.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |mime_read: { url } { COND string( WHEN sy-subrc = 3 THEN `not found`
+                                                       WHEN sy-subrc = 4 THEN `not authorized`
+                                                       ELSE `could not be read` ) }|.
+        ENDIF.
+
+      CATCH zabaputil_cx_util_error INTO DATA(lx).
+        RAISE EXCEPTION lx.
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD mime_save.
+
+    DATA lo_api       TYPE REF TO object.
+    DATA lt_exception TYPE abap_excpbind_tab.
+
+    x_raise_on_cloud( `mime_save` ).
+
+    TRY.
+        DATA(lv_class) = `CL_MIME_REPOSITORY_API`.
+        CALL METHOD (lv_class)=>(`GET_API`)
+          PARAMETER-TABLE VALUE abap_parmbind_tab( ( name  = sys_method_returning( type_name = lv_class
+                                                                                   method    = `GET_API` )
+                                                     kind  = cl_abap_objectdescr=>receiving
+                                                     value = REF #( lo_api ) ) ).
+
+        DATA(lv_url) = CONV string( url ).
+        DATA(lv_package) = CONV string( package ).
+        DATA(lv_transport) = CONV string( transport ).
+        DATA(lv_true) = abap_true.
+        DATA(lv_content) = content.
+        DATA(lt_param) = VALUE abap_parmbind_tab(
+            ( name = `I_URL`                     kind = cl_abap_objectdescr=>exporting value = REF #( lv_url ) )
+            ( name = `I_CONTENT`                 kind = cl_abap_objectdescr=>exporting value = REF #( lv_content ) )
+            ( name = `I_DEV_PACKAGE`             kind = cl_abap_objectdescr=>exporting value = REF #( lv_package ) )
+            ( name = `I_SUPPRESS_DIALOGS`        kind = cl_abap_objectdescr=>exporting value = REF #( lv_true ) )
+            ( name = `I_SUPPRESS_PACKAGE_DIALOG` kind = cl_abap_objectdescr=>exporting value = REF #( lv_true ) ) ).
+        IF lv_transport IS NOT INITIAL.
+          INSERT VALUE #( name  = `I_CORR_NUMBER`
+                          kind  = cl_abap_objectdescr=>exporting
+                          value = REF #( lv_transport ) ) INTO TABLE lt_param.
+        ENDIF.
+        lt_exception = VALUE #( ( name = `OTHERS` value = 1 ) ).
+
+        CALL METHOD lo_api->(`IF_MR_API~PUT`)
+          PARAMETER-TABLE lt_param
+          EXCEPTION-TABLE lt_exception.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |mime_save: { url } could not be saved|.
+        ENDIF.
+
+      CATCH zabaputil_cx_util_error INTO DATA(lx).
+        RAISE EXCEPTION lx.
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD spool_get_pdf.
+
+    DATA lv_doctype TYPE c LENGTH 4.
+    DATA lv_spool   TYPE i.
+    DATA lv_bytes   TYPE i.
+    DATA lr_pdf     TYPE REF TO data.
+    FIELD-SYMBOLS <pdf> TYPE STANDARD TABLE.
+
+    x_raise_on_cloud( `spool_get_pdf` ).
+
+    lv_spool = spool_id.
+
+    TRY.
+        DATA(lv_table) = `TSP01`.
+        SELECT SINGLE rqdoctype FROM (lv_table) WHERE rqident = @lv_spool INTO @lv_doctype.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |spool_get_pdf: spool request { lv_spool } not found|.
+        ENDIF.
+
+        IF lv_doctype = `ADSP`.
+          " an Adobe form in the spool already is a PDF
+          DATA(lt_interface) = sys_fm_get_interface( `FPCOMP_CREATE_PDF_FROM_SPOOL` ).
+          DATA(lr_spool) = sys_fm_create_param( VALUE #( lt_interface[ parameter = `I_SPOOLID` ] OPTIONAL ) ).
+          DATA(lr_part) = sys_fm_create_param( VALUE #( lt_interface[ parameter = `I_PARTNUM` ] OPTIONAL ) ).
+          ASSIGN lr_spool->* TO FIELD-SYMBOL(<spool>).
+          <spool> = lv_spool.
+          ASSIGN lr_part->* TO FIELD-SYMBOL(<part>).
+          <part> = 1.
+          DATA(lt_param) = VALUE abap_func_parmbind_tab(
+              ( name = `I_SPOOLID` kind = abap_func_exporting value = lr_spool )
+              ( name = `I_PARTNUM` kind = abap_func_exporting value = lr_part )
+              ( name = `E_PDF`     kind = abap_func_importing value = REF #( result ) ) ).
+          IF sys_fm_call( function    = `FPCOMP_CREATE_PDF_FROM_SPOOL`
+                          t_param     = lt_param
+                          t_exception = VALUE #( ( name = `OTHERS` value = 1 ) ) ) <> 0.
+            RAISE EXCEPTION TYPE zabaputil_cx_util_error
+              EXPORTING
+                val = |spool_get_pdf: spool request { lv_spool } could not be read|.
+          ENDIF.
+          RETURN.
+        ENDIF.
+
+        " OTF (SAPscript, Smart Forms) or an ABAP list: the PDF bytes come
+        " packed into the memory of a TLINE table
+        CREATE DATA lr_pdf TYPE STANDARD TABLE OF (`TLINE`).
+        ASSIGN lr_pdf->* TO <pdf>.
+        DATA(lv_fm) = COND string( WHEN lv_doctype = `OTF` THEN `CONVERT_OTFSPOOLJOB_2_PDF`
+                                   ELSE `CONVERT_ABAPSPOOLJOB_2_PDF` ).
+        CALL FUNCTION lv_fm
+          EXPORTING
+            src_spoolid   = lv_spool
+            no_dialog     = abap_true
+          IMPORTING
+            pdf_bytecount = lv_bytes
+          TABLES
+            pdf           = <pdf>
+          EXCEPTIONS
+            OTHERS        = 1.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |spool_get_pdf: spool request { lv_spool } could not be converted|.
+        ENDIF.
+        result = conv_get_xstring_by_bintab( val    = <pdf>
+                                             length = lv_bytes ).
+
+      CATCH zabaputil_cx_util_error INTO DATA(lx).
+        RAISE EXCEPTION lx.
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD form_get_pdf.
+
+    DATA lv_form       TYPE c LENGTH 30.
+    DATA lv_function   TYPE c LENGTH 30.
+    DATA lr_output     TYPE REF TO data.
+    DATA lr_docparams  TYPE REF TO data.
+    DATA lr_formoutput TYPE REF TO data.
+    DATA lv_job_open   TYPE abap_bool.
+    FIELD-SYMBOLS <output>     TYPE any.
+    FIELD-SYMBOLS <docparams>  TYPE any.
+    FIELD-SYMBOLS <formoutput> TYPE any.
+    FIELD-SYMBOLS <field>      TYPE any.
+
+    x_raise_on_cloud( `form_get_pdf` ).
+
+    lv_form = c_trim_upper( form_name ).
+
+    TRY.
+        DATA(lv_fm) = `FP_FUNCTION_MODULE_NAME`.
+        CALL FUNCTION lv_fm
+          EXPORTING
+            i_name     = lv_form
+          IMPORTING
+            e_funcname = lv_function.
+
+        " no dialog, no printer: the PDF comes back in the form output
+        CREATE DATA lr_output TYPE (`SFPOUTPUTPARAMS`).
+        ASSIGN lr_output->* TO <output>.
+        ASSIGN COMPONENT `GETPDF` OF STRUCTURE <output> TO <field>.
+        <field> = abap_true.
+        ASSIGN COMPONENT `NODIALOG` OF STRUCTURE <output> TO <field>.
+        <field> = abap_true.
+
+        lv_fm = `FP_JOB_OPEN`.
+        CALL FUNCTION lv_fm
+          CHANGING
+            ie_outputparams = <output>
+          EXCEPTIONS
+            OTHERS          = 1.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = `form_get_pdf: FP_JOB_OPEN failed`.
+        ENDIF.
+        lv_job_open = abap_true.
+
+        CREATE DATA lr_docparams TYPE (`SFPDOCPARAMS`).
+        ASSIGN lr_docparams->* TO <docparams>.
+        ASSIGN COMPONENT `LANGU` OF STRUCTURE <docparams> TO <field>.
+        <field> = sys_langu( langu ).
+        CREATE DATA lr_formoutput TYPE (`FPFORMOUTPUT`).
+        ASSIGN lr_formoutput->* TO <formoutput>.
+
+        DATA(lt_param) = VALUE abap_func_parmbind_tab(
+            ( name = `/1BCDWB/DOCPARAMS`  kind = abap_func_exporting value = lr_docparams )
+            ( name = `/1BCDWB/FORMOUTPUT` kind = abap_func_importing value = lr_formoutput ) ).
+        IF data IS SUPPLIED.
+          DATA(lo_struct) = CAST cl_abap_structdescr( cl_abap_typedescr=>describe_by_data( data ) ).
+          LOOP AT lo_struct->components INTO DATA(ls_comp).
+            ASSIGN COMPONENT ls_comp-name OF STRUCTURE data TO <field>.
+            INSERT VALUE #( name  = ls_comp-name
+                            kind  = abap_func_exporting
+                            value = REF #( <field> ) ) INTO TABLE lt_param.
+          ENDLOOP.
+        ENDIF.
+
+        IF sys_fm_call( function    = lv_function
+                        t_param     = lt_param
+                        t_exception = VALUE #( ( name = `OTHERS` value = 1 ) ) ) <> 0.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |form_get_pdf: form { lv_form } could not be rendered|.
+        ENDIF.
+
+        ASSIGN COMPONENT `PDF` OF STRUCTURE <formoutput> TO <field>.
+        result = <field>.
+
+        lv_fm = `FP_JOB_CLOSE`.
+        CALL FUNCTION lv_fm
+          EXCEPTIONS
+            OTHERS = 1.
+        lv_job_open = abap_false.
+
+      CATCH cx_root INTO DATA(x).
+        IF lv_job_open = abap_true.
+          lv_fm = `FP_JOB_CLOSE`.
+          CALL FUNCTION lv_fm
+            EXCEPTIONS
+              OTHERS = 1.
+        ENDIF.
+        IF x IS INSTANCE OF zabaputil_cx_util_error.
+          DATA(lx_util) = CAST zabaputil_cx_util_error( x ).
+          RAISE EXCEPTION lx_util.
+        ENDIF.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD variant_list.
+
+    TYPES:
+      BEGIN OF ty_s_text,
+        variant TYPE c LENGTH 14,
+        vtext   TYPE c LENGTH 30,
+      END OF ty_s_text.
+    DATA lt_variant TYPE STANDARD TABLE OF ty_s_text WITH EMPTY KEY.
+    DATA lt_text    TYPE STANDARD TABLE OF ty_s_text WITH EMPTY KEY.
+    DATA lv_report  TYPE c LENGTH 40.
+    DATA lv_langu   TYPE c LENGTH 1.
+
+    x_raise_on_cloud( `variant_list` ).
+
+    lv_report = c_trim_upper( report ).
+    lv_langu  = sys_langu( langu ).
+
+    TRY.
+        DATA(lv_table) = `VARID`.
+        SELECT variant FROM (lv_table) WHERE report = @lv_report
+          INTO CORRESPONDING FIELDS OF TABLE @lt_variant.
+        lv_table = `VARIT`.
+        SELECT variant, vtext FROM (lv_table) WHERE report = @lv_report AND langu = @lv_langu
+          INTO CORRESPONDING FIELDS OF TABLE @lt_text.
+
+        LOOP AT lt_variant INTO DATA(ls_variant).
+          INSERT VALUE #( variant = c_trim( CONV string( ls_variant-variant ) )
+                          text    = c_trim( CONV string( VALUE #( lt_text[ variant = ls_variant-variant ]-vtext OPTIONAL ) ) ) )
+                 INTO TABLE result.
+        ENDLOOP.
+        SORT result BY variant.
+
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD variant_read.
+
+    DATA lv_report  TYPE c LENGTH 40.
+    DATA lv_variant TYPE c LENGTH 14.
+    DATA lr_values  TYPE REF TO data.
+    FIELD-SYMBOLS <values> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <value>  TYPE any.
+    FIELD-SYMBOLS <field>  TYPE any.
+
+    x_raise_on_cloud( `variant_read` ).
+
+    lv_report  = c_trim_upper( report ).
+    lv_variant = c_trim_upper( variant ).
+
+    TRY.
+        CREATE DATA lr_values TYPE STANDARD TABLE OF (`RSPARAMS`).
+        ASSIGN lr_values->* TO <values>.
+
+        DATA(lv_fm) = `RS_VARIANT_CONTENTS`.
+        CALL FUNCTION lv_fm
+          EXPORTING
+            report               = lv_report
+            variant              = lv_variant
+          TABLES
+            valutab              = <values>
+          EXCEPTIONS
+            variant_non_existent = 1
+            variant_obsolete     = 2
+            OTHERS               = 3.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |variant_read: variant { lv_variant } of { lv_report } { COND string( WHEN sy-subrc = 1 THEN `does not exist`
+                                                                                          WHEN sy-subrc = 2 THEN `is obsolete`
+                                                                                          ELSE `could not be read` ) }|.
+        ENDIF.
+
+        LOOP AT <values> ASSIGNING <value>.
+          DATA(ls_result) = VALUE ty_s_variant_value( ).
+          ASSIGN COMPONENT `SELNAME` OF STRUCTURE <value> TO <field>.
+          ls_result-selname = c_trim( CONV string( <field> ) ).
+          ASSIGN COMPONENT `KIND` OF STRUCTURE <value> TO <field>.
+          ls_result-kind = <field>.
+          ASSIGN COMPONENT `SIGN` OF STRUCTURE <value> TO <field>.
+          ls_result-sign = <field>.
+          ASSIGN COMPONENT `OPTION` OF STRUCTURE <value> TO <field>.
+          ls_result-option = c_trim( CONV string( <field> ) ).
+          ASSIGN COMPONENT `LOW` OF STRUCTURE <value> TO <field>.
+          ls_result-low = c_trim( CONV string( <field> ) ).
+          ASSIGN COMPONENT `HIGH` OF STRUCTURE <value> TO <field>.
+          ls_result-high = c_trim( CONV string( <field> ) ).
+          INSERT ls_result INTO TABLE result.
+        ENDLOOP.
+
+      CATCH zabaputil_cx_util_error INTO DATA(lx).
+        RAISE EXCEPTION lx.
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD amc_send.
+
+    DATA lo_producer TYPE REF TO object.
+    DATA lr_value    TYPE REF TO data.
+    FIELD-SYMBOLS <value> TYPE any.
+
+    x_raise_on_cloud( `amc_send` ).
+
+    TRY.
+        " the parameter types are read from the class: they differ by release
+        DATA(lv_class) = `CL_AMC_CHANNEL_MANAGER`.
+        DATA(lo_class) = CAST cl_abap_classdescr( cl_abap_typedescr=>describe_by_name( lv_class ) ).
+        DATA(lt_param) = VALUE abap_parmbind_tab( ).
+        DATA(lt_value) = VALUE ty_t_name_value( ( n = `I_APPLICATION_ID` v = application_id )
+                                                ( n = `I_CHANNEL_ID`     v = channel_id ) ).
+        IF channel_extension_id IS NOT INITIAL.
+          INSERT VALUE #( n = `I_CHANNEL_EXTENSION_ID` v = channel_extension_id ) INTO TABLE lt_value.
+        ENDIF.
+        LOOP AT lt_value INTO DATA(ls_value).
+          DATA(lo_type) = lo_class->get_method_parameter_type( p_method_name    = `CREATE_MESSAGE_PRODUCER`
+                                                               p_parameter_name = ls_value-n ).
+          CREATE DATA lr_value TYPE HANDLE lo_type.
+          ASSIGN lr_value->* TO <value>.
+          <value> = ls_value-v.
+          INSERT VALUE #( name  = ls_value-n
+                          kind  = cl_abap_objectdescr=>exporting
+                          value = lr_value ) INTO TABLE lt_param.
+        ENDLOOP.
+        INSERT VALUE #( name  = sys_method_returning( type_name = lv_class
+                                                      method    = `CREATE_MESSAGE_PRODUCER` )
+                        kind  = cl_abap_objectdescr=>receiving
+                        value = REF #( lo_producer ) ) INTO TABLE lt_param.
+
+        CALL METHOD (lv_class)=>(`CREATE_MESSAGE_PRODUCER`)
+          PARAMETER-TABLE lt_param.
+
+        CALL METHOD lo_producer->(`IF_AMC_MESSAGE_PRODUCER_TEXT~SEND`)
+          EXPORTING
+            i_message = CONV string( message ).
+
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD sys_method_returning.
+
+    DATA(lo_descr) = CAST cl_abap_objectdescr( cl_abap_typedescr=>describe_by_name( type_name ) ).
+    DATA(lv_method) = to_upper( method ).
+    LOOP AT lo_descr->methods INTO DATA(ls_method) WHERE name = lv_method.
+      LOOP AT ls_method-parameters INTO DATA(ls_parameter) WHERE parm_kind = cl_abap_objectdescr=>returning.
+        result = ls_parameter-name.
+        RETURN.
+      ENDLOOP.
+    ENDLOOP.
+    RAISE EXCEPTION TYPE zabaputil_cx_util_error
+      EXPORTING
+        val = |{ type_name }=>{ method } has no returning parameter|.
+
+  ENDMETHOD.
+
+  METHOD gos_attach.
+
+    DATA lr_folder   TYPE REF TO data.
+    DATA lr_docdata  TYPE REF TO data.
+    DATA lr_docinfo  TYPE REF TO data.
+    DATA lr_header   TYPE REF TO data.
+    DATA lr_hex      TYPE REF TO data.
+    DATA lr_object_a TYPE REF TO data.
+    DATA lr_object_b TYPE REF TO data.
+    DATA lv_doctype  TYPE c LENGTH 3.
+    DATA lv_reltype  TYPE c LENGTH 4 VALUE `ATTA`.
+    FIELD-SYMBOLS <folder>   TYPE any.
+    FIELD-SYMBOLS <docdata>  TYPE any.
+    FIELD-SYMBOLS <docinfo>  TYPE any.
+    FIELD-SYMBOLS <header>   TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <hex>      TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <object_a> TYPE any.
+    FIELD-SYMBOLS <object_b> TYPE any.
+    FIELD-SYMBOLS <line>     TYPE any.
+    FIELD-SYMBOLS <field>    TYPE any.
+
+    x_raise_on_cloud( `gos_attach` ).
+
+    DATA(lv_file) = c_trim( CONV string( file_name ) ).
+    DATA(lv_ext) = ``.
+    DATA(lv_dot) = find( val = lv_file
+                         sub = `.`
+                         occ = -1 ).
+    IF lv_dot >= 0.
+      lv_ext = to_upper( substring( val = lv_file
+                                    off = lv_dot + 1 ) ).
+    ENDIF.
+    lv_doctype = lv_ext.
+    DATA(lv_descr) = COND string( WHEN description IS NOT INITIAL THEN description
+                                  WHEN lv_dot > 0 THEN substring( val = lv_file
+                                                                  len = lv_dot )
+                                  ELSE lv_file ).
+
+    TRY.
+        " the attachment is an office document in the user's root folder
+        DATA(lt_interface) = sys_fm_get_interface( `SO_DOCUMENT_INSERT_API1` ).
+        lr_folder = sys_fm_create_param( VALUE #( lt_interface[ parameter = `FOLDER_ID` ] OPTIONAL ) ).
+        ASSIGN lr_folder->* TO <folder>.
+        CREATE DATA lr_object_a TYPE (`SOODK`).
+        ASSIGN lr_object_a->* TO <object_a>.
+        DATA(lv_fm) = `SO_FOLDER_ROOT_ID_GET`.
+        CALL FUNCTION lv_fm
+          EXPORTING
+            region    = `B`
+          IMPORTING
+            folder_id = <object_a>
+          EXCEPTIONS
+            OTHERS    = 1.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = `gos_attach: no office root folder`.
+        ENDIF.
+        <folder> = <object_a>.
+
+        CREATE DATA lr_docdata TYPE (`SODOCCHGI1`).
+        ASSIGN lr_docdata->* TO <docdata>.
+        ASSIGN COMPONENT `OBJ_DESCR` OF STRUCTURE <docdata> TO <field>.
+        <field> = lv_descr.
+        ASSIGN COMPONENT `OBJ_NAME` OF STRUCTURE <docdata> TO <field>.
+        <field> = `MESSAGE`.
+        ASSIGN COMPONENT `DOC_SIZE` OF STRUCTURE <docdata> TO <field>.
+        <field> = xstrlen( content ).
+
+        CREATE DATA lr_header TYPE STANDARD TABLE OF (`SOLISTI1`).
+        ASSIGN lr_header->* TO <header>.
+        INSERT INITIAL LINE INTO TABLE <header> ASSIGNING <line>.
+        ASSIGN COMPONENT 1 OF STRUCTURE <line> TO <field>.
+        <field> = |&SO_FILENAME={ lv_file }|.
+        INSERT INITIAL LINE INTO TABLE <header> ASSIGNING <line>.
+        ASSIGN COMPONENT 1 OF STRUCTURE <line> TO <field>.
+        <field> = `&SO_FORMAT=BIN`.
+
+        CREATE DATA lr_hex TYPE STANDARD TABLE OF (`SOLIX`).
+        ASSIGN lr_hex->* TO <hex>.
+        conv_get_bintab_by_xstring( EXPORTING val    = content
+                                    IMPORTING result = <hex> ).
+
+        CREATE DATA lr_docinfo TYPE (`SOFOLENTI1`).
+        ASSIGN lr_docinfo->* TO <docinfo>.
+        lv_fm = `SO_DOCUMENT_INSERT_API1`.
+        CALL FUNCTION lv_fm
+          EXPORTING
+            folder_id     = <folder>
+            document_data = <docdata>
+            document_type = lv_doctype
+          IMPORTING
+            document_info = <docinfo>
+          TABLES
+            object_header = <header>
+            contents_hex  = <hex>
+          EXCEPTIONS
+            OTHERS        = 1.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |gos_attach: { lv_file } could not be stored|.
+        ENDIF.
+        ASSIGN COMPONENT `DOC_ID` OF STRUCTURE <docinfo> TO <field>.
+        result = c_trim( CONV string( <field> ) ).
+
+        " link it to the business object as an attachment
+        CREATE DATA lr_object_a TYPE (`BORIDENT`).
+        ASSIGN lr_object_a->* TO <object_a>.
+        ASSIGN COMPONENT `OBJKEY` OF STRUCTURE <object_a> TO <field>.
+        <field> = object_key.
+        ASSIGN COMPONENT `OBJTYPE` OF STRUCTURE <object_a> TO <field>.
+        <field> = object_type.
+        CREATE DATA lr_object_b TYPE (`BORIDENT`).
+        ASSIGN lr_object_b->* TO <object_b>.
+        ASSIGN COMPONENT `OBJKEY` OF STRUCTURE <object_b> TO <field>.
+        <field> = result.
+        ASSIGN COMPONENT `OBJTYPE` OF STRUCTURE <object_b> TO <field>.
+        <field> = `MESSAGE`.
+
+        lv_fm = `BINARY_RELATION_CREATE_COMMIT`.
+        CALL FUNCTION lv_fm
+          EXPORTING
+            obj_rolea    = <object_a>
+            obj_roleb    = <object_b>
+            relationtype = lv_reltype
+          EXCEPTIONS
+            OTHERS       = 1.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |gos_attach: { lv_file } could not be linked to { object_type } { object_key }|.
+        ENDIF.
+
+      CATCH zabaputil_cx_util_error INTO DATA(lx).
+        RAISE EXCEPTION lx.
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD gos_list.
+
+    DATA lr_object  TYPE REF TO data.
+    DATA lr_options TYPE REF TO data.
+    DATA lr_links   TYPE REF TO data.
+    DATA lr_docdata TYPE REF TO data.
+    DATA lr_header  TYPE REF TO data.
+    DATA lv_doc_id  TYPE c LENGTH 46.
+    FIELD-SYMBOLS <object>  TYPE any.
+    FIELD-SYMBOLS <options> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <links>   TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <link>    TYPE any.
+    FIELD-SYMBOLS <docdata> TYPE any.
+    FIELD-SYMBOLS <header>  TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <line>    TYPE any.
+    FIELD-SYMBOLS <field>   TYPE any.
+
+    x_raise_on_cloud( `gos_list` ).
+
+    TRY.
+        " the parameter types are read from the class
+        DATA(lv_class) = `CL_BINARY_RELATION`.
+        DATA(lv_method) = `READ_LINKS_OF_BINRELS`.
+        DATA(lo_class) = CAST cl_abap_classdescr( cl_abap_typedescr=>describe_by_name( lv_class ) ).
+        DATA(lo_type) = lo_class->get_method_parameter_type( p_method_name    = lv_method
+                                                             p_parameter_name = `IS_OBJECT` ).
+        CREATE DATA lr_object TYPE HANDLE lo_type.
+        ASSIGN lr_object->* TO <object>.
+        ASSIGN COMPONENT `INSTID` OF STRUCTURE <object> TO <field>.
+        <field> = object_key.
+        ASSIGN COMPONENT `TYPEID` OF STRUCTURE <object> TO <field>.
+        <field> = object_type.
+        ASSIGN COMPONENT `CATID` OF STRUCTURE <object> TO <field>.
+        <field> = `BO`.
+
+        lo_type = lo_class->get_method_parameter_type( p_method_name    = lv_method
+                                                       p_parameter_name = `IT_RELATION_OPTIONS` ).
+        CREATE DATA lr_options TYPE HANDLE lo_type.
+        ASSIGN lr_options->* TO <options>.
+        INSERT INITIAL LINE INTO TABLE <options> ASSIGNING <line>.
+        ASSIGN COMPONENT `SIGN` OF STRUCTURE <line> TO <field>.
+        <field> = `I`.
+        ASSIGN COMPONENT `OPTION` OF STRUCTURE <line> TO <field>.
+        <field> = `EQ`.
+        ASSIGN COMPONENT `LOW` OF STRUCTURE <line> TO <field>.
+        <field> = `ATTA`.
+
+        lo_type = lo_class->get_method_parameter_type( p_method_name    = lv_method
+                                                       p_parameter_name = `ET_LINKS` ).
+        CREATE DATA lr_links TYPE HANDLE lo_type.
+        ASSIGN lr_links->* TO <links>.
+
+        DATA(lt_param) = VALUE abap_parmbind_tab(
+            ( name = `IS_OBJECT`           kind = cl_abap_objectdescr=>exporting value = lr_object )
+            ( name = `IT_RELATION_OPTIONS` kind = cl_abap_objectdescr=>exporting value = lr_options )
+            ( name = `ET_LINKS`            kind = cl_abap_objectdescr=>importing value = lr_links ) ).
+        TRY.
+            CALL METHOD (lv_class)=>(lv_method)
+              PARAMETER-TABLE lt_param.
+          CATCH cx_root.
+            " no links at all is reported as an exception
+            RETURN.
+        ENDTRY.
+
+        CREATE DATA lr_docdata TYPE (`SOFOLENTI1`).
+        ASSIGN lr_docdata->* TO <docdata>.
+        CREATE DATA lr_header TYPE STANDARD TABLE OF (`SOLISTI1`).
+        ASSIGN lr_header->* TO <header>.
+
+        LOOP AT <links> ASSIGNING <link>.
+          DATA(ls_result) = VALUE ty_s_gos( ).
+          ASSIGN COMPONENT `INSTID_B` OF STRUCTURE <link> TO <field>.
+          ls_result-doc_id = c_trim( CONV string( <field> ) ).
+
+          CLEAR <docdata>.
+          CLEAR <header>.
+          DATA(lv_fm) = `SO_DOCUMENT_READ_API1`.
+          lv_doc_id = ls_result-doc_id.
+          CALL FUNCTION lv_fm
+            EXPORTING
+              document_id   = lv_doc_id
+            IMPORTING
+              document_data = <docdata>
+            TABLES
+              object_header = <header>
+            EXCEPTIONS
+              OTHERS        = 1.
+          IF sy-subrc = 0.
+            ASSIGN COMPONENT `OBJ_DESCR` OF STRUCTURE <docdata> TO <field>.
+            IF sy-subrc = 0.
+              ls_result-description = c_trim( CONV string( <field> ) ).
+            ENDIF.
+            ASSIGN COMPONENT `DOC_SIZE` OF STRUCTURE <docdata> TO <field>.
+            IF sy-subrc = 0.
+              ls_result-size = <field>.
+            ENDIF.
+            ASSIGN COMPONENT `CREAT_NAME` OF STRUCTURE <docdata> TO <field>.
+            IF sy-subrc = 0.
+              ls_result-created_by = c_trim( CONV string( <field> ) ).
+            ENDIF.
+            ASSIGN COMPONENT `CREAT_DATE` OF STRUCTURE <docdata> TO <field>.
+            IF sy-subrc = 0.
+              ls_result-created_on = <field>.
+            ENDIF.
+            LOOP AT <header> ASSIGNING <line>.
+              ASSIGN COMPONENT 1 OF STRUCTURE <line> TO <field>.
+              DATA(lv_header) = c_trim( CONV string( <field> ) ).
+              IF c_starts_with( val    = lv_header
+                                prefix = `&SO_FILENAME=` ).
+                ls_result-file_name = substring( val = lv_header
+                                                 off = 13 ).
+              ENDIF.
+            ENDLOOP.
+          ENDIF.
+
+          DATA(lv_dot) = find( val = ls_result-file_name
+                               sub = `.`
+                               occ = -1 ).
+          IF lv_dot >= 0.
+            ls_result-file_ext = to_upper( substring( val = ls_result-file_name
+                                                      off = lv_dot + 1 ) ).
+          ENDIF.
+          INSERT ls_result INTO TABLE result.
+        ENDLOOP.
+
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD gos_read.
+
+    DATA lr_docdata TYPE REF TO data.
+    DATA lr_hex     TYPE REF TO data.
+    DATA lr_content TYPE REF TO data.
+    DATA lv_size    TYPE i.
+    DATA lv_text    TYPE string.
+    DATA lv_doc_id  TYPE c LENGTH 46.
+    FIELD-SYMBOLS <docdata> TYPE any.
+    FIELD-SYMBOLS <hex>     TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <content> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <line>    TYPE any.
+    FIELD-SYMBOLS <field>   TYPE any.
+
+    x_raise_on_cloud( `gos_read` ).
+
+    TRY.
+        CREATE DATA lr_docdata TYPE (`SOFOLENTI1`).
+        ASSIGN lr_docdata->* TO <docdata>.
+        CREATE DATA lr_hex TYPE STANDARD TABLE OF (`SOLIX`).
+        ASSIGN lr_hex->* TO <hex>.
+        CREATE DATA lr_content TYPE STANDARD TABLE OF (`SOLISTI1`).
+        ASSIGN lr_content->* TO <content>.
+
+        DATA(lv_fm) = `SO_DOCUMENT_READ_API1`.
+        lv_doc_id = doc_id.
+        CALL FUNCTION lv_fm
+          EXPORTING
+            document_id    = lv_doc_id
+          IMPORTING
+            document_data  = <docdata>
+          TABLES
+            object_content = <content>
+            contents_hex   = <hex>
+          EXCEPTIONS
+            OTHERS         = 1.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |gos_read: document { doc_id } not found|.
+        ENDIF.
+
+        ASSIGN COMPONENT `DOC_SIZE` OF STRUCTURE <docdata> TO <field>.
+        IF sy-subrc = 0.
+          lv_size = <field>.
+        ENDIF.
+
+        IF <hex> IS NOT INITIAL.
+          result = conv_get_xstring_by_bintab( val    = <hex>
+                                               length = lv_size ).
+          RETURN.
+        ENDIF.
+
+        " a text document (notes): the content comes as text lines
+        LOOP AT <content> ASSIGNING <line>.
+          ASSIGN COMPONENT 1 OF STRUCTURE <line> TO <field>.
+          lv_text = COND #( WHEN sy-tabix = 1 THEN <field>
+                            ELSE lv_text && cv_char_util_newline && <field> ).
+        ENDLOOP.
+        result = conv_get_xstring_by_string( lv_text ).
+
+      CATCH zabaputil_cx_util_error INTO DATA(lx).
+        RAISE EXCEPTION lx.
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD sys_method_param.
+
+    DATA(lo_descr) = CAST cl_abap_objectdescr( cl_abap_typedescr=>describe_by_name( type_name ) ).
+    DATA(lo_type) = lo_descr->get_method_parameter_type( p_method_name    = to_upper( method )
+                                                         p_parameter_name = to_upper( parameter ) ).
+    CREATE DATA result TYPE HANDLE lo_type.
+    IF value IS SUPPLIED.
+      ASSIGN result->* TO FIELD-SYMBOL(<value>).
+      <value> = value.
+    ENDIF.
 
   ENDMETHOD.
 

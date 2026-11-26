@@ -5809,3 +5809,147 @@ CLASS ltcl_barcode_gs1 IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+
+CLASS ltcl_system_task DEFINITION FINAL FOR TESTING.
+
+  PUBLIC SECTION.
+    DATA input  TYPE i.
+    DATA output TYPE i.
+    METHODS run.
+
+ENDCLASS.
+
+
+CLASS ltcl_system_task IMPLEMENTATION.
+
+  METHOD run.
+
+    IF input < 0.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = `negative input`.
+    ENDIF.
+    output = input * 2.
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+CLASS ltcl_system_api DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+    METHODS bintab_roundtrip          FOR TESTING.
+    METHODS longtext_lines_split      FOR TESTING.
+    METHODS longtext_lines_join       FOR TESTING.
+    METHODS longtext_lines_roundtrip  FOR TESTING.
+    METHODS parallel_sequential       FOR TESTING.
+
+ENDCLASS.
+
+
+CLASS ltcl_system_api IMPLEMENTATION.
+
+  METHOD bintab_roundtrip.
+
+    TYPES ty_x4 TYPE x LENGTH 4.
+    DATA lt_bin TYPE STANDARD TABLE OF ty_x4 WITH EMPTY KEY.
+
+    DATA(lv_x) = CONV xstring( `00112233445566778899` ).
+    zabaputil_cl_util_context=>conv_get_bintab_by_xstring( EXPORTING val    = lv_x
+                                                           IMPORTING result = lt_bin ).
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lines( lt_bin ) ).
+
+    " the last line is padded - the length cuts the padding off again
+    cl_abap_unit_assert=>assert_equals( exp = lv_x
+                                        act = zabaputil_cl_util_context=>conv_get_xstring_by_bintab( val    = lt_bin
+                                                                                                     length = 10 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV xstring( `001122334455667788990000` )
+                                        act = zabaputil_cl_util_context=>conv_get_xstring_by_bintab( lt_bin ) ).
+
+  ENDMETHOD.
+
+  METHOD longtext_lines_split.
+
+    DATA(lv_long) = repeat( val = `abcdefghij`
+                            occ = 30 ).
+
+    DATA(lt_line) = zabaputil_cl_util_context=>longtext_to_lines(
+        |first{ zabaputil_cl_util_context=>cv_char_util_cr_lf }{ zabaputil_cl_util_context=>cv_char_util_newline }{ lv_long }| ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 5
+                                        act = lines( lt_line ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `*`
+                                        act = lt_line[ 1 ]-format ).
+    cl_abap_unit_assert=>assert_equals( exp = `first`
+                                        act = lt_line[ 1 ]-line ).
+    " the empty line stays an empty paragraph
+    cl_abap_unit_assert=>assert_equals( exp = `*`
+                                        act = lt_line[ 2 ]-format ).
+    cl_abap_unit_assert=>assert_initial( lt_line[ 2 ]-line ).
+    " 300 characters: 132 + 132 + 36, the continuation lines with `=`
+    cl_abap_unit_assert=>assert_equals( exp = `*`
+                                        act = lt_line[ 3 ]-format ).
+    cl_abap_unit_assert=>assert_equals( exp = 132
+                                        act = strlen( lt_line[ 3 ]-line ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `=`
+                                        act = lt_line[ 4 ]-format ).
+    cl_abap_unit_assert=>assert_equals( exp = `=`
+                                        act = lt_line[ 5 ]-format ).
+    cl_abap_unit_assert=>assert_equals( exp = 36
+                                        act = strlen( lt_line[ 5 ]-line ) ).
+
+  ENDMETHOD.
+
+  METHOD longtext_lines_join.
+
+    DATA(lt_line) = VALUE zabaputil_cl_util_context=>ty_t_longtext_line( ( format = `*` line = `Dear` )
+                                                                         ( format = ``  line = `customer,` )
+                                                                         ( format = `/`  line = `thank` )
+                                                                         ( format = `=`  line = `s.` ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = |Dear customer,{ zabaputil_cl_util_context=>cv_char_util_newline }thanks.|
+        act = zabaputil_cl_util_context=>longtext_from_lines( lt_line ) ).
+
+  ENDMETHOD.
+
+  METHOD longtext_lines_roundtrip.
+
+    DATA(lv_text) = |line one{ zabaputil_cl_util_context=>cv_char_util_newline }{ zabaputil_cl_util_context=>cv_char_util_newline }|
+                 && repeat( val = `0123456789`
+                            occ = 20 ).
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = lv_text
+        act = zabaputil_cl_util_context=>longtext_from_lines( zabaputil_cl_util_context=>longtext_to_lines( lv_text ) ) ).
+
+  ENDMETHOD.
+
+  METHOD parallel_sequential.
+
+    DATA(lo_ok) = NEW ltcl_system_task( ).
+    lo_ok->input = 21.
+    DATA(lo_fail) = NEW ltcl_system_task( ).
+    lo_fail->input = -1.
+
+    DATA(lt_result) = zabaputil_cl_util_context=>parallel_run( t_task     = VALUE #( ( lo_ok ) ( lo_fail ) )
+                                                               sequential = abap_true
+                                                               method     = `RUN` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = lines( lt_result ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 42
+                                        act = lo_ok->output ).
+    cl_abap_unit_assert=>assert_initial( lt_result[ 1 ]-message ).
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = lt_result[ 2 ]-index ).
+    cl_abap_unit_assert=>assert_char_cp( exp = `*negative input*`
+                                         act = lt_result[ 2 ]-message ).
+
+  ENDMETHOD.
+
+ENDCLASS.

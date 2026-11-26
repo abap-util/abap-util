@@ -568,6 +568,79 @@ DATA(lv_mime) = zabaputil_cl_util_context=>file_get_mimetype( `report.xlsx` ).
 DATA(lv_val)  = zabaputil_cl_util_context=>num_round( val = CONV decfloat34( '2.345' )  decimals = 2 ). " => 2.35
 ```
 
+###### Parallel Processing
+```abap
+" every task implements IF_ABAP_PARALLEL (method DO) and carries its input and result in attributes
+DATA(lt_result) = zabaputil_cl_util_context=>parallel_run( t_task = lt_tasks  tasks = 4 ).
+LOOP AT lt_result INTO DATA(ls_result).
+  DATA(lo_task) = CAST zcl_my_task( ls_result-task ).  " the copy that ran, with its results
+ENDLOOP.
+
+" debugging, or a release without CL_ABAP_PARALLEL: one after the other in this session
+lt_result = zabaputil_cl_util_context=>parallel_run( t_task = lt_tasks  sequential = abap_true  method = `RUN` ).
+```
+
+###### Long Texts (SAPscript)
+```abap
+DATA(lv_text) = zabaputil_cl_util_context=>longtext_read( object = `VBBK`  id = `0001`  name = lv_vbeln ).
+zabaputil_cl_util_context=>longtext_save(   object = `VBBK`  id = `0001`  name = lv_vbeln  val = lv_text ).
+zabaputil_cl_util_context=>longtext_delete( object = `VBBK`  id = `0001`  name = lv_vbeln ).
+
+" the line format conversion on its own (132 characters, `*` paragraph, `=` continuation)
+DATA(lt_lines) = zabaputil_cl_util_context=>longtext_to_lines( lv_text ).
+lv_text        = zabaputil_cl_util_context=>longtext_from_lines( lt_lines ).
+```
+
+###### RFC
+```abap
+" call any function module by name, parameters and result as JSON - locally or remote
+DATA(lv_json) = zabaputil_cl_util_context=>rfc_call_dynamic(
+    function    = `BAPI_USER_GET_DETAIL`
+    params      = `{"USERNAME":"DEVELOPER"}`
+    destination = `NONE` ).
+
+" is the destination reachable?
+IF zabaputil_cl_util_context=>rfc_check_destination( `ZMY_DEST` ) = abap_false.
+  zabaputil_cl_util_context=>rfc_ping( `ZMY_DEST` ).  " raises with the communication error text
+ENDIF.
+```
+
+###### MIME Repository, Spool & Forms
+```abap
+DATA(lv_logo) = zabaputil_cl_util_context=>mime_read( `/SAP/PUBLIC/ZMY_APP/logo.png` ).
+zabaputil_cl_util_context=>mime_save( url = `/SAP/PUBLIC/ZMY_APP/logo.png`  content = lv_logo ).
+
+" spool request (SAPscript, Smart Forms, ABAP list, Adobe form) as PDF
+DATA(lv_pdf) = zabaputil_cl_util_context=>spool_get_pdf( lv_spool_id ).
+
+" Adobe form as PDF - the components of data are the form interface parameters
+lv_pdf = zabaputil_cl_util_context=>form_get_pdf( form_name = `ZMY_FORM`  data = ls_form_data ).
+
+" binary tables to xstring (the inverse of conv_get_bintab_by_xstring)
+DATA(lv_x) = zabaputil_cl_util_context=>conv_get_xstring_by_bintab( val = lt_solix  length = lv_size ).
+```
+
+###### Report Variants
+```abap
+DATA(lt_variants) = zabaputil_cl_util_context=>variant_list( `ZMY_REPORT` ).
+DATA(lt_values)   = zabaputil_cl_util_context=>variant_read( report = `ZMY_REPORT`  variant = `DEFAULT` ).
+```
+
+###### ABAP Messaging Channels
+```abap
+zabaputil_cl_util_context=>amc_send( application_id = `ZMY_AMC`  channel_id = `/updates`  message = `refresh` ).
+```
+
+###### Attachments (GOS)
+```abap
+DATA(lv_doc_id) = zabaputil_cl_util_context=>gos_attach( object_type = `BUS2012`  object_key = lv_ebeln
+                                                         file_name   = `offer.pdf`  content = lv_pdf ).
+DATA(lt_files)  = zabaputil_cl_util_context=>gos_list( object_type = `BUS2012`  object_key = lv_ebeln ).
+DATA(lv_file)   = zabaputil_cl_util_context=>gos_read( lt_files[ 1 ]-doc_id ).
+```
+
+The long text, RFC, MIME, spool, form, variant, AMC and GOS methods need Standard ABAP; on ABAP Cloud they raise `zabaputil_cx_util_error` (`rfc_ping` and `rfc_check_destination` take a BTP destination there).
+
 ###### XML Builder
 Fluent builder for nested XML / UI5 view fragments.
 `__` opens an element (must be closed with `n( )`), `_` writes a self-closing leaf,
