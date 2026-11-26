@@ -40,7 +40,7 @@ abap-util is meant to be consumed **as a renamed copy, not as an installed depen
 |---|---|---|
 | [abap2UI5](https://github.com/abap2UI5/abap2UI5) | `z2ui5_cl_ui5_util_context`, `z2ui5_cl_ui5_util_http`, `z2ui5_cx_ui5_util_error` (`src/00/03/`) | context class trimmed to the methods of the core framework, the other two as-is |
 | [popups](https://github.com/abap2UI5-addons/popups) | `z2ui5_cl_popup_context`, `z2ui5_cx_popup_error` (`src/00/`) | context class trimmed to the methods of the popup apps, the exception as-is |
-| [business-api](https://github.com/abap-util/business-api) | `zabaputil_cl_bus_util_context`, `zabaputil_cl_bus_util_msg`, `zabaputil_cx_bus_util_error` (`src/00/`) | context class trimmed to what the message class and the exception need, the other two as-is |
+| [business-api](https://github.com/abap-util/business-api) | `zabaputil_cl_bus_util_context`, `zabaputil_cx_bus_util_error` (`src/00/`) | context class trimmed to the `bapi_*` methods and `conv_alpha_in` with their helpers, the exception as-is |
 
 Every consumer installs with zero dependencies and keeps its own namespace — several projects, even on different versions, coexist in one system. abap-util stays the place where all methods converge, are unit-tested and are kept compatible with every release:
 
@@ -605,6 +605,36 @@ DATA(lv_json) = zabaputil_cl_util_context=>rfc_call_dynamic(
 IF zabaputil_cl_util_context=>rfc_check_destination( `ZMY_DEST` ) = abap_false.
   zabaputil_cl_util_context=>rfc_ping( `ZMY_DEST` ).  " raises with the communication error text
 ENDIF.
+```
+
+###### BAPI Calls
+```abap
+" one message table and one LUW contract for every BAPI and function module.
+" The message table is any table with the components of BAPIRET2 (TYPE, ID,
+" NUMBER, MESSAGE, MESSAGE_V1..4) - BAPIRET2, BAPIRET1, BAPIRETURN1, ...
+DATA lt_return   TYPE bapirettab.
+DATA lv_is_error TYPE abap_bool.
+
+zabaputil_cl_util_context=>bapi_set_material( EXPORTING iv_matnr = `MAT-1`     " MATERIAL_LONG on S/4HANA
+                                              CHANGING  cs_data  = ls_item ).
+TRY.
+    CALL FUNCTION 'BAPI_GOODSMVT_CREATE' ... TABLES return = lt_bapi_return.
+    zabaputil_cl_util_context=>bapi_msg_add_table( EXPORTING it_table   = lt_bapi_return  " PROTT, MESG, BAPIRET1/2, ...
+                                                   CHANGING  ct_bapiret = lt_return ).
+  CATCH cx_root INTO DATA(lx).
+    zabaputil_cl_util_context=>bapi_msg_add_exception( EXPORTING ix_error   = lx
+                                                       CHANGING  ct_bapiret = lt_return ).
+ENDTRY.
+
+" error flag from E/A/X, BAPI_TRANSACTION_COMMIT on success, ROLLBACK on error
+zabaputil_cl_util_context=>bapi_finish( EXPORTING iv_commit   = abap_true
+                                        CHANGING  ct_bapiret  = lt_return
+                                                  cv_is_error = lv_is_error ).
+
+" further: bapi_msg_add_sy (after EXCEPTIONS error_message), bapi_msg_add_text,
+" bapi_msg_add_bapiret2, bapi_check_is_error, bapi_refresh_buffers (delivery,
+" HU, serial number buffers), bapi_call_function (module by name, e.g. EWM)
+DATA(lv_vbeln) = zabaputil_cl_util_context=>conv_alpha_in( `80001234` ).   " 0080001234
 ```
 
 ###### MIME Repository, Spool & Forms
