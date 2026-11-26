@@ -185,7 +185,7 @@ CLASS zabaputil_cx_error IMPLEMENTATION.
 
     " The messages first, one per line: consumers split this dump on the
     " section headers to show the messages and hide the rest behind a details
-    " toggle (abap2UI5's app/webapp/core/ErrorView.js reads the `--- error ---`
+    " toggle (abap2UI5's bundle/webapp/core/ErrorView.js reads the `--- error ---`
     " header and stops at the next `--- ` header) - the header spelling is
     " part of the contract, do not reword it.
     " get_text( ) on an exception of this class already renders the whole
