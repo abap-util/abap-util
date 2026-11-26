@@ -23,18 +23,15 @@
     "web-encoding": "^1.1.5"
   },
   "scripts": {
-    "clone": "git clone https://github.com/abap2UI5/abap2UI5.git input/abap2UI5",
-    "rename": "abaplint ./.github/abaplint/rename.jsonc --rename && bash .github/scripts/mirror_copy.sh",
-    "cleanup": "rm -rf input && rm -rf .github/abaplint/output",
-    "mirror": "npm run clone && npm run rename",
+    "cleanup": "rm -rf .github/abaplint/output",
     "syfixes": "find . -type f -name '*.abap' -exec sed -i -e 's/ RAISE EXCEPTION TYPE cx_sy_itab_line_not_found/ ASSERT 1 = 0/g' {} + ",
     "downport": "abaplint --fix .github/abaplint/abap_702.jsonc && npm run syfixes",
     "auto_transpile": "rm -rf node/output && cp -r src node/downport && abap_transpile ./node/setup/abap_transpile.json",
     "unit": "echo RUNNING && node node/output/index.mjs",
-    "rename_test": "abaplint .github/abaplint/rename_test.jsonc --rename",
+    "rename": "abaplint .github/abaplint/rename.jsonc --rename",
     "lint": "abaplint ./abaplint.jsonc",
     "lint:cloud": "abaplint .github/abaplint/abap_cloud.jsonc",
-    "check": "npm run lint && npm run lint:cloud && npm run rename_test",
+    "check": "npm run lint && npm run lint:cloud && npm run rename",
     "test": "npm run check"
   },
   "devDependencies": {
