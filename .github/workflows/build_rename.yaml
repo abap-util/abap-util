@@ -1,0 +1,98 @@
+name: build_rename
+
+# Renames every class to a chosen name and pushes the result to the branch
+# rename_<name> - ready to pull with abapGit next to another installation in
+# the same system. A customer name (ZMYUTIL: zabaputil_cl_util_context becomes
+# zmyutil_cl_util_context, branch rename_zmyutil) or a registered namespace
+# (/MYNS/: /myns/cl_util_context, branch rename_myns). The rename is the plain
+# abaplint rename with .github/abaplint/rename.jsonc; this workflow only sets
+# the chosen prefix in place of the placeholder "znamespace_". Running it again
+# with the same name updates the branch to the current main.
+
+on:
+  workflow_dispatch:
+    inputs:
+      namespace:
+        description: "New name: ZMYUTIL (max. 10 characters) or a registered namespace /MYNS/ (max. 10 with both slashes)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build_rename-${{ inputs.namespace }}
+  cancel-in-progress: false
+
+jobs:
+  build_rename:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      NAMESPACE: ${{ inputs.namespace }}
+    steps:
+    - name: Derive prefix and branch name
+      run: |
+        ns=$(printf '%s' "$NAMESPACE" | tr '[:upper:]' '[:lower:]')
+        if printf '%s' "$ns" | grep -Eq '^[a-z][a-z0-9]{0,9}$'; then
+          if [ "$ns" = "zabaputil" ]; then
+            echo "::error::'$NAMESPACE' is the original name - nothing to rename"
+            exit 1
+          fi
+          prefix="${ns}_"
+          name="$ns"
+        elif printf '%s' "$ns" | grep -Eq '^/[a-z0-9][a-z0-9_]{0,7}/$'; then
+          prefix="$ns"
+          name=$(printf '%s' "$ns" | tr -d '/')
+        else
+          echo "::error::Invalid name '$NAMESPACE': a customer name (letter, then letters or digits, max. 10 characters, e.g. ZMYUTIL) or a namespace with both slashes (max. 10 characters, e.g. /MYNS/)"
+          exit 1
+        fi
+        echo "PREFIX=$prefix" >> "$GITHUB_ENV"
+        echo "BRANCH=rename_$name" >> "$GITHUB_ENV"
+
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+    - run: npm ci
+
+    - name: Rename to ${{ inputs.namespace }}
+      run: |
+        sed "s|znamespace_|$PREFIX|g; s|ZNAMESPACE_|$(printf '%s' "$PREFIX" | tr '[:lower:]' '[:upper:]')|g" .github/abaplint/rename.jsonc > .github/abaplint/rename_run.jsonc
+        npx abaplint .github/abaplint/rename_run.jsonc --rename
+
+    - name: Assemble branch content
+      run: |
+        src=$(find .github/abaplint/output -type d -name src | head -n 1)
+        if [ -z "$src" ]; then
+          echo "::error::no renamed src folder under .github/abaplint/output"
+          exit 1
+        fi
+        out=".github/out/$BRANCH"
+        rm -rf "$out"
+        mkdir -p "$out"
+        cp -r "$src" "$out/src"
+        cp LICENSE README.md .abapgit.xml "$out/"
+
+    # the main commit is the second parent, so GitHub shows the branch ahead of main
+    - name: Push the renamed branch
+      run: |
+        b="$BRANCH"
+        git config user.name 'github-actions[bot]'
+        git config user.email 'github-actions[bot]@users.noreply.github.com'
+        git fetch origin "$b" --depth 1 2>/dev/null || true
+        parent=$(git rev-parse -q --verify "refs/remotes/origin/$b" || true)
+        index="$RUNNER_TEMP/index-$b"
+        rm -f "$index"
+        (cd ".github/out/$b" && GIT_DIR="$GITHUB_WORKSPACE/.git" GIT_WORK_TREE=. GIT_INDEX_FILE="$index" git add -A)
+        tree=$(GIT_INDEX_FILE="$index" git write-tree)
+        if [ -n "$parent" ] && [ "$(git rev-parse "$parent^{tree}")" = "$tree" ]; then
+          echo "$b: no changes"
+          exit 0
+        fi
+        commit=$(git commit-tree "$tree" ${parent:+-p "$parent"} -p "$GITHUB_SHA" -m "build: $b from $GITHUB_SHA")
+        git push origin "$commit:refs/heads/$b"
+        echo "$b: pushed $commit"

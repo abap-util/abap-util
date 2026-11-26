@@ -1,53 +1,54 @@
-[![ABAP_702](https://github.com/abap-util/abap-util/actions/workflows/ABAP_702.yaml/badge.svg)](https://github.com/abap-util/abap-util/actions/workflows/ABAP_702.yaml)
 [![ABAP_STANDARD](https://github.com/abap-util/abap-util/actions/workflows/ABAP_STANDARD.yaml/badge.svg)](https://github.com/abap-util/abap-util/actions/workflows/ABAP_STANDARD.yaml)
 [![ABAP_CLOUD](https://github.com/abap-util/abap-util/actions/workflows/ABAP_CLOUD.yaml/badge.svg)](https://github.com/abap-util/abap-util/actions/workflows/ABAP_CLOUD.yaml)
-<br>
-[![auto_downport](https://github.com/abap-util/abap-util/actions/workflows/auto_downport.yaml/badge.svg)](https://github.com/abap-util/abap-util/actions/workflows/auto_downport.yaml)
+[![ABAP_702](https://github.com/abap-util/abap-util/actions/workflows/ABAP_702.yaml/badge.svg)](https://github.com/abap-util/abap-util/actions/workflows/ABAP_702.yaml)
 <br>
 [![test_unit](https://github.com/abap-util/abap-util/actions/workflows/test_unit.yaml/badge.svg)](https://github.com/abap-util/abap-util/actions/workflows/test_unit.yaml)
 [![test_rename](https://github.com/abap-util/abap-util/actions/workflows/test_rename.yaml/badge.svg)](https://github.com/abap-util/abap-util/actions/workflows/test_rename.yaml)
+[![auto_downport](https://github.com/abap-util/abap-util/actions/workflows/auto_downport.yaml/badge.svg)](https://github.com/abap-util/abap-util/actions/workflows/auto_downport.yaml)
 
 # abap-util
-Utility Functions for ABAP Cloud & Standard ABAP
+Utility functions for ABAP Cloud and Standard ABAP
 
 📖 **[Documentation](https://abap-util.github.io/docs/)** — guides and full API reference
 
 #### Key Features
 * Simplified SAP APIs as class-based methods — one façade class, no function modules to remember
-* Hides language version differences between ABAP Cloud and Standard ABAP
-* Function scope: strings, JSON/XML/CSV/XLSX, RTTI, messages, logging, locks, calendar, transports, persistence and more
+* One source for ABAP Cloud, Standard ABAP and NetWeaver 7.02 — release differences are hidden behind the methods
+* Strings, JSON/XML/CSV/XLSX, RTTI, messages, logging, locks, calendar, transports, persistence, GS1 barcodes, parallel processing, RFC, attachments and more
+* Unit-tested without an SAP system — the tests run transpiled to JavaScript on every pull request
 
 #### Compatibility
-* S/4 Public Cloud and BTP ABAP Environment (ABAP Cloud)
-* S/4 Private Cloud and On-Premise (ABAP Cloud, Standard ABAP)
-* R/3 NetWeaver AS ABAP 7.02 or higher (Standard ABAP)
+* S/4HANA Public Cloud and BTP ABAP Environment (ABAP Cloud)
+* S/4HANA Private Cloud and on-premise (ABAP Cloud, Standard ABAP)
+* NetWeaver AS ABAP 7.02 or higher (Standard ABAP)
 
-#### Credits
-* [ajson](https://github.com/sbcgua/ajson)
-* [S-RTTI](https://github.com/sandraros/S-RTTI)
-* [steampunkification](https://github.com/heliconialabs/steampunkification)
+Methods that need Standard ABAP (long texts, MIME repository, spool, forms, GOS, …) raise `zabaputil_cx_util_error` on ABAP Cloud.
 
 #### Installation
-Install via [abapGit](https://abapgit.org) - clone this repository into your SAP system.
+Install via [abapGit](https://abapgit.org) - pick the branch that fits the system:
+
+| Branch | For |
+|---|---|
+| `main` | NetWeaver 7.50 and higher, S/4HANA, ABAP Cloud |
+| `702` | NetWeaver 7.02 to 7.4x - downported from `main` on every push |
+| `rename_<name>` | an installation under another name, built on request (see [Renaming](#renaming)) |
 
 #### Consumption Model — Copy, Don't Depend
+abap-util is meant to be consumed **as a renamed copy, not as an installed dependency**. abapGit has no dependency management, so a hard dependency would force every user to install packages in the right order and keep versions in sync. Instead, this repository is the **master catalog with all utility classes and all methods**, and every project embeds a renamed copy of exactly the classes it needs. Only the context class is additionally **trimmed to the methods the project uses**, with the helpers they call:
 
-abap-util is designed to be consumed **as a vendored copy, not as an installed dependency**. abapGit has no dependency management, so a hard dependency between repositories would force users to install packages in the correct order and keep versions in sync. Instead, this repository is the **master catalog containing all utility classes with all methods**, and each downstream project decides which classes it needs and embeds a **renamed copy** of exactly those (e.g. `zabaputil_cl_util_context`, and where needed `zabaputil_cl_util_http` or `zabaputil_cx_error`). Only the context class is additionally **trimmed at method level** to the methods the project actually uses; other classes are copied as-is:
-
-| Project | Vendored Copies | Scope |
+| Project | Copies | Scope |
 |---|---|---|
-| [abap2UI5](https://github.com/abap2UI5/abap2UI5) | `z2ui5_cl_ui5_util_context`, `z2ui5_cl_ui5_util_http`, `z2ui5_cx_ui5_util_error` (`src/00/03/`) | context class trimmed to the methods used by the core framework, the other two copied as-is |
-| [popups](https://github.com/abap2UI5-addons/popups) | `z2ui5_cl_popup_context`, `z2ui5_cx_popup_error` (`src/00/`) | context class trimmed to the methods used by the popup apps, the exception copied as-is |
-| [business-api](https://github.com/abap-util/business-api) | `zabaputil_cl_bus_util_context`, `zabaputil_cl_bus_util_msg`, `zabaputil_cx_bus_util_error` (`src/00/`) | context class trimmed to what the message class and the exception need, the other two copied as-is |
+| [abap2UI5](https://github.com/abap2UI5/abap2UI5) | `z2ui5_cl_ui5_util_context`, `z2ui5_cl_ui5_util_http`, `z2ui5_cx_ui5_util_error` (`src/00/03/`) | context class trimmed to the methods of the core framework, the other two as-is |
+| [popups](https://github.com/abap2UI5-addons/popups) | `z2ui5_cl_popup_context`, `z2ui5_cx_popup_error` (`src/00/`) | context class trimmed to the methods of the popup apps, the exception as-is |
+| [business-api](https://github.com/abap-util/business-api) | `zabaputil_cl_bus_util_context`, `zabaputil_cl_bus_util_msg`, `zabaputil_cx_bus_util_error` (`src/00/`) | context class trimmed to what the message class and the exception need, the other two as-is |
 
-Not every class next to a vendored copy has a master here: `z2ui5_cl_ui5_util_json_fl` in the same abap2UI5 package is framework-owned and has no counterpart in this repository. And abap2UI5's `src/99/01/` (`z2ui5_cl_util`, `z2ui5_cl_util_http`, `z2ui5_cx_util_error`, …) holds *frozen* copies from before the vendoring model — they are kept for compatibility, receive no fixes, and are never a source for the sync described below.
+Every consumer installs with zero dependencies and keeps its own namespace — several projects, even on different versions, coexist in one system. abap-util stays the place where all methods converge, are unit-tested and are kept compatible with every release:
 
-This gives every consumer a zero-dependency installation ("clone and go") and full namespace isolation (several projects — even on different versions — can coexist in one system with their own copy), while this repository remains the place where all methods converge, are unit-tested, and are kept compatible with all ABAP releases.
+* **Copy per class** — a project takes the classes it needs and renames them into its own namespace (business-api inserts `bus_`: `zabaputil_cl_util_context` becomes `zabaputil_cl_bus_util_context`).
+* **Develop locally** — a method a project needs is written into its own copy first, no upstream detour.
+* **Sync back** — what was added or fixed in a copy is merged back here regularly, so this catalog stays the superset and every other consumer can pick it up. Fix it here, then update the copies.
 
-**How the cycle works:**
-* **Copy per class:** each project vendors a renamed copy of the classes it needs. Only the context class is additionally reduced at **method level** — unused methods are removed (the private helpers a kept method needs stay in the copy).
-* **Develop locally:** when a project needs a new utility method during development, it is simply written directly into the project's local context class — no upstream detour required.
-* **AI sync-back:** every few weeks an AI compares abap-util with all consumers — **every vendored class, not only the context class** — detects what was added or fixed downstream, and merges it into this repository. So abap-util always returns to being the superset of all methods, and every other consumer can adopt them from here. Fix it here, then update the copies.
+Not every class next to a copy has a master here: `z2ui5_cl_ui5_util_json_fl` is owned by abap2UI5, and abap2UI5's `src/99/01/` holds frozen copies from before this model that receive no fixes. Neither is a source for the sync.
 
 #### Usage
 
@@ -681,8 +682,28 @@ zabaputil_cl_util_db=>load_by_handle(
 zabaputil_cl_util_db=>delete_by_handle( uname = sy-uname  handle = `FILTER` ).
 ```
 
+#### Renaming
+To install abap-util under another name, run the workflow [build_rename](https://github.com/abap-util/abap-util/actions/workflows/build_rename.yaml) with a customer name such as `ZMYUTIL` or a registered namespace such as `/MYNS/`. It renames every object (`zabaputil_cl_util_context` becomes `zmyutil_cl_util_context`) and pushes the result to the branch `rename_<name>`, ready for abapGit. Every object name stays at 29 characters or less, so even a 10-character name fits into the 30-character limit - `test_rename` checks that on every pull request.
+
+#### Development
+```bash
+npm ci
+npm run lint            # abaplint, Standard ABAP (v750)
+npm run lint:cloud      # abaplint, ABAP Cloud
+npm run downport        # rewrite src/ to 7.02 syntax - what auto_downport pushes to 702
+npm run auto_transpile  # transpile to JavaScript
+npm run unit            # run the unit tests in Node.js
+npm run rename          # rename every object to the longest prefix allowed
+```
+The rules every change keeps - compatibility with all three targets, the master-catalog contract, the sync-back - are in [AGENTS.md](AGENTS.md).
+
 #### Documentation
 The full API reference with all methods, parameters and further examples lives at **[abap-util.github.io/docs](https://abap-util.github.io/docs/)**.
 
+#### Credits
+* [ajson](https://github.com/sbcgua/ajson)
+* [S-RTTI](https://github.com/sandraros/S-RTTI)
+* [steampunkification](https://github.com/heliconialabs/steampunkification)
+
 #### Contribution & Support
-Pull requests are welcome! Whether you're fixing bugs, adding new functionality, or improving documentation, your contributions are highly appreciated. If you encounter any problems, feel free to open an issue.
+Pull requests are welcome - bug fixes, new methods and better documentation alike. If you run into a problem, open an issue.
