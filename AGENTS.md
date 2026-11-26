@@ -92,9 +92,10 @@ npm install
 npx abaplint                  # Lint (v750 syntax, downport rule for 7.02 compatibility)
 npm run auto_transpile        # Transpile ABAP → JS
 npm run unit                  # Run unit tests in Node.js
+npm run rename                # Rename check: zabaputil_ -> zoblomov_, must report 0 issues
 ```
 
-CI lints against all three targets (`ABAP_702.yaml`, `ABAP_STANDARD.yaml`, `ABAP_CLOUD.yaml`) and runs the transpiled unit tests (`test_unit.yaml`). All must stay green — they guarantee that any subset of methods can be vendored into any consumer on any release.
+CI lints against all three targets (`ABAP_702.yaml`, `ABAP_STANDARD.yaml`, `ABAP_CLOUD.yaml`) runs the transpiled unit tests (`test_unit.yaml`) and the rename check (`test_rename.yaml`, `npm run rename`) - consumers vendor renamed copies, so every class must still lint under another prefix. There is no mirror from abap2UI5 any more: the sync runs consumer-side (see above). All must stay green — they guarantee that any subset of methods can be vendored into any consumer on any release.
 
 ## Rules for AI Assistants
 
