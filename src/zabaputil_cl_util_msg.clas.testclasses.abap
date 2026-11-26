@@ -17,6 +17,7 @@ CLASS ltcl_unit_test_msg_mapper DEFINITION FINAL
     METHODS test_fallback       FOR TESTING RAISING cx_static_check.
     METHODS test_fallback_skip  FOR TESTING RAISING cx_static_check.
     METHODS test_rap_element    FOR TESTING RAISING cx_static_check.
+    METHODS test_mesg_fields    FOR TESTING RAISING cx_static_check.
 
 ENDCLASS.
 
@@ -395,6 +396,33 @@ CLASS ltcl_unit_test_msg_mapper IMPLEMENTATION.
                                          act = lt_meta[ n = `tky`       ]-v ).
     cl_abap_unit_assert=>assert_char_cp( exp = `*BANKINTERNALID=50070010*`
                                          act = lt_meta[ n = `tky`       ]-v ).
+
+  ENDMETHOD.
+
+  METHOD test_mesg_fields.
+
+    " MESG (WS_REVERSE_GOODS_ISSUE and others) names the message class ARBGB
+    " and the number TXTNR
+    TYPES:
+      BEGIN OF ty_s_mesg,
+        msgty TYPE c LENGTH 1,
+        arbgb TYPE c LENGTH 20,
+        txtnr TYPE c LENGTH 3,
+        text  TYPE c LENGTH 73,
+      END OF ty_s_mesg.
+
+    DATA(ls_mesg) = VALUE ty_s_mesg( msgty = `E` arbgb = `VL` txtnr = `123` text = `not possible` ).
+
+    DATA(lt_result) = zabaputil_cl_util_msg=>msg_get( ls_mesg ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `VL`
+                                        act = lt_result[ 1 ]-id ).
+    cl_abap_unit_assert=>assert_equals( exp = `123`
+                                        act = lt_result[ 1 ]-no ).
+    cl_abap_unit_assert=>assert_equals( exp = `E`
+                                        act = lt_result[ 1 ]-type ).
+    cl_abap_unit_assert=>assert_equals( exp = `not possible`
+                                        act = lt_result[ 1 ]-text ).
 
   ENDMETHOD.
 

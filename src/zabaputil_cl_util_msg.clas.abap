@@ -254,9 +254,9 @@ CLASS zabaputil_cl_util_msg IMPLEMENTATION.
 
     result = is_msg.
     CASE name.
-      WHEN `ID` OR `MSGID`.
+      WHEN `ID` OR `MSGID` OR `ARBGB`.
         result-id = val.
-      WHEN `NO` OR `NUMBER` OR `MSGNO`.
+      WHEN `NO` OR `NUMBER` OR `MSGNO` OR `TXTNR`.
         result-no = val.
       WHEN `MESSAGE` OR `TEXT`.
         result-text = val.

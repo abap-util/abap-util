@@ -38,6 +38,7 @@ abap-util is designed to be consumed **as a vendored copy, not as an installed d
 |---|---|---|
 | [abap2UI5](https://github.com/abap2UI5/abap2UI5) | `z2ui5_cl_ui5_util_context`, `z2ui5_cl_ui5_util_http`, `z2ui5_cx_ui5_util_error` (`src/00/03/`) | context class trimmed to the methods used by the core framework, the other two copied as-is |
 | [popups](https://github.com/abap2UI5-addons/popups) | `z2ui5_cl_popup_context`, `z2ui5_cx_popup_error` (`src/00/`) | context class trimmed to the methods used by the popup apps, the exception copied as-is |
+| [business-api](https://github.com/abap-util/business-api) | `zabaputil_cl_bus_context`, `zabaputil_cl_bus_msg`, `zabaputil_cx_bus_error` (`src/core/`) | context class trimmed to what the message class and the exception need, the other two copied as-is |
 
 Not every class next to a vendored copy has a master here: `z2ui5_cl_ui5_util_json_fl` in the same abap2UI5 package is framework-owned and has no counterpart in this repository. And abap2UI5's `src/99/01/` (`z2ui5_cl_util`, `z2ui5_cl_util_http`, `z2ui5_cx_util_error`, …) holds *frozen* copies from before the vendoring model — they are kept for compatibility, receive no fixes, and are never a source for the sync described below.
 
