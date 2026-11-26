@@ -1148,8 +1148,8 @@ CLASS zabaputil_cl_util_context DEFINITION
 
     " ========== Barcodes (GS1) ==========
 
-    "! one element string of a GS1 barcode (GS1-128, GS1 DataMatrix, GS1 QR)
     TYPES:
+      "! one element string of a GS1 barcode (GS1-128, GS1 DataMatrix, GS1 QR)
       BEGIN OF ty_s_gs1,
         "! application identifier, e.g. `01`, `10`, `3103`
         ai       TYPE string,
