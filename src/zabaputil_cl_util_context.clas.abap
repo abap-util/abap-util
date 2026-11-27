@@ -4078,6 +4078,55 @@ CLASS zabaputil_cl_util_context DEFINITION
     " raises (zabaputil_cx_util_error reads a uuid for its full report).
     CLASS-DATA gv_uuid_failed TYPE abap_bool.
 
+    " A member of an object reached dynamically, as XCO needs it: the
+    " method or attribute name, found on the class itself or on one of the
+    " interfaces it implements (IF_...~NAME) - a dynamic call by the bare
+    " name of an interface method only works where the class declares an
+    " alias. result: a reference to the RETURNING value of the method, or
+    " to the attribute. arg: the value of the method's one mandatory
+    " importing parameter, converted to its type (a table of object
+    " references is cast line by line). A member the object does not have
+    " raises zabaputil_cx_util_error.
+    CLASS-METHODS xco_call
+      IMPORTING
+        obj           TYPE REF TO object
+        name          TYPE clike
+        arg           TYPE any OPTIONAL
+      RETURNING
+        VALUE(result) TYPE REF TO data.
+
+    " xco_call for a member that is an object: the object
+    CLASS-METHODS xco_call_obj
+      IMPORTING
+        obj           TYPE REF TO object
+        name          TYPE clike
+        arg           TYPE any OPTIONAL
+      RETURNING
+        VALUE(result) TYPE REF TO object.
+
+    " the object in a static attribute, `XCO_CP_CTS=>TRANSPORT` - an XCO
+    " factory is an attribute, not a method
+    CLASS-METHODS xco_static
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE REF TO object.
+
+    " XCO_CP_CTS=>TRANSPORT->FOR( trkorr )
+    CLASS-METHODS xco_transport
+      IMPORTING
+        trkorr        TYPE clike
+      RETURNING
+        VALUE(result) TYPE REF TO object.
+
+    " the text of an XCO value: an object gives its VALUE (or NAME)
+    " attribute, anything else its own value
+    CLASS-METHODS xco_text
+      IMPORTING
+        val           TYPE REF TO data
+      RETURNING
+        VALUE(result) TYPE string.
+
     CLASS-METHODS bal_cloud_add_items
       IMPORTING
         log   TYPE REF TO object
@@ -11959,52 +12008,47 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD tr_get_objects.
 
     IF check_abap_cloud( ).
-      " Cloud: use XCO_CP_CTS
+      " Cloud: XCO_CP_CTS=>TRANSPORT->FOR( )->OBJECTS->ALL->GET( ). The
+      " factories are attributes and the methods interface methods - a
+      " failure raises instead of reading like a request without objects
+      FIELD-SYMBOLS <lt_objects> TYPE ANY TABLE.
+      FIELD-SYMBOLS <lo_object>  TYPE any.
+      DATA lo_entry TYPE REF TO object.
       TRY.
-          DATA lo_transport TYPE REF TO object.
-          DATA lt_objects_c TYPE STANDARD TABLE OF REF TO object.
-          DATA(lv_xco) = `XCO_CP_CTS`.
-          DATA(lv_trkorr_c) = CONV string( trkorr ).
+          DATA(lr_objects_c) = xco_call( obj  = xco_call_obj( obj  = xco_call_obj( obj  = xco_transport( trkorr )
+                                                                                  name = `OBJECTS` )
+                                                             name = `ALL` )
+                                         name = `GET` ).
+          ASSIGN lr_objects_c->* TO <lt_objects>.
 
-          CALL METHOD (lv_xco)=>(`TRANSPORT`)
-            EXPORTING
-              iv_transport = lv_trkorr_c
-            RECEIVING
-              ro_transport = lo_transport.
-
-          DATA lo_objects_api TYPE REF TO object.
-          CALL METHOD lo_transport->(`OBJECTS`)
-            RECEIVING
-              ro_objects = lo_objects_api.
-
-          DATA lo_all TYPE REF TO object.
-          CALL METHOD lo_objects_api->(`ALL`)
-            RECEIVING
-              ro_all = lo_all.
-
-          CALL METHOD lo_all->(`GET`)
-            RECEIVING
-              rt_objects = lt_objects_c.
-
-          LOOP AT lt_objects_c INTO DATA(lo_obj).
-            DATA ls_obj_c TYPE ty_s_tr_object.
-            CLEAR ls_obj_c.
-            TRY.
-                CALL METHOD lo_obj->(`GET_PGMID`)
-                  RECEIVING
-                    rv_pgmid = ls_obj_c-pgmid.
-                CALL METHOD lo_obj->(`GET_TYPE`)
-                  RECEIVING
-                    rv_type = ls_obj_c-object.
-                CALL METHOD lo_obj->(`GET_NAME`)
-                  RECEIVING
-                    rv_name = ls_obj_c-obj_name.
-              CATCH cx_root ##NO_HANDLER.
-            ENDTRY.
+          LOOP AT <lt_objects> ASSIGNING <lo_object>.
+            lo_entry ?= <lo_object>.
+            DATA(ls_obj_c) = VALUE ty_s_tr_object( ).
+            " the key of the entry: PGMID, OBJECT, OBJ_NAME as in E071
+            DATA(lr_key) = xco_call( obj  = lo_entry
+                                     name = `GET_KEY` ).
+            FIELD-SYMBOLS <key>  TYPE any.
+            FIELD-SYMBOLS <kcmp> TYPE any.
+            ASSIGN lr_key->* TO <key>.
+            ASSIGN COMPONENT `PGMID` OF STRUCTURE <key> TO <kcmp>.
+            IF sy-subrc = 0.
+              ls_obj_c-pgmid = xco_text( REF #( <kcmp> ) ).
+            ENDIF.
+            ASSIGN COMPONENT `OBJECT` OF STRUCTURE <key> TO <kcmp>.
+            IF sy-subrc = 0.
+              ls_obj_c-object = xco_text( REF #( <kcmp> ) ).
+            ENDIF.
+            ASSIGN COMPONENT `OBJ_NAME` OF STRUCTURE <key> TO <kcmp>.
+            IF sy-subrc = 0.
+              ls_obj_c-obj_name = xco_text( REF #( <kcmp> ) ).
+            ENDIF.
             INSERT ls_obj_c INTO TABLE result.
           ENDLOOP.
 
-        CATCH cx_root ##NO_HANDLER.
+        CATCH cx_root INTO DATA(lx_objects_c).
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = lx_objects_c.
       ENDTRY.
       RETURN.
     ENDIF.
@@ -12059,76 +12103,70 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD tr_get_user_requests.
 
     IF check_abap_cloud( ).
-      " Cloud: use XCO_CP_CTS transport filter
+      " Cloud: XCO_CP_CTS=>TRANSPORTS->WHERE( owner, status modifiable )
+      " ->RESOLVE( request ), as the template in bus_tr_read
+      DATA lt_filter TYPE STANDARD TABLE OF REF TO object WITH EMPTY KEY.
+      DATA lo_tr     TYPE REF TO object.
+      FIELD-SYMBOLS <lt_transports> TYPE ANY TABLE.
+      FIELD-SYMBOLS <lo_tr>         TYPE any.
+      FIELD-SYMBOLS <prop>          TYPE any.
+      FIELD-SYMBOLS <pcomp>         TYPE any.
       TRY.
-          DATA(lv_xco) = `XCO_CP_CTS`.
-          DATA lo_filter_tr  TYPE REF TO object.
-          DATA lo_status_f   TYPE REF TO object.
-          DATA lo_owner_f    TYPE REF TO object.
-          DATA lt_transports TYPE STANDARD TABLE OF REF TO object.
+          DATA lv_user_c TYPE c LENGTH 12.
+          lv_user_c = COND #( WHEN user IS NOT INITIAL THEN user ELSE sy-uname ).
 
-          DATA(lv_user_c) = CONV string( COND #( WHEN user IS NOT INITIAL THEN user ELSE sy-uname ) ).
+          DATA(lo_tr_filter) = xco_static( `XCO_CP_TRANSPORT=>FILTER` ).
+          DATA(lo_constraint) = xco_call_obj( obj  = xco_static( `XCO_CP_ABAP_SQL=>CONSTRAINT` )
+                                              name = `EQUAL`
+                                              arg  = lv_user_c ).
+          INSERT xco_call_obj( obj  = lo_tr_filter
+                               name = `OWNER`
+                               arg  = lo_constraint ) INTO TABLE lt_filter.
+          INSERT xco_call_obj( obj  = lo_tr_filter
+                               name = `STATUS`
+                               arg  = xco_call_obj( obj  = xco_static( `XCO_CP_TRANSPORT=>STATUS` )
+                                                    name = `MODIFIABLE` ) ) INTO TABLE lt_filter.
 
-          " Get modifiable transports for user
-          CALL METHOD (lv_xco)=>(`TRANSPORTS`)
-            RECEIVING
-              ro_transports = lo_filter_tr.
+          DATA(lo_query) = xco_call_obj( obj  = xco_static( `XCO_CP_CTS=>TRANSPORTS` )
+                                         name = `WHERE`
+                                         arg  = lt_filter ).
+          DATA(lr_transports) = xco_call( obj  = lo_query
+                                          name = `RESOLVE`
+                                          arg  = xco_call_obj( obj  = xco_static( `XCO_CP_TRANSPORT=>RESOLUTION` )
+                                                               name = `REQUEST` ) ).
+          ASSIGN lr_transports->* TO <lt_transports>.
 
-          DATA lo_where TYPE REF TO object.
-          CALL METHOD lo_filter_tr->(`ALL`)
-            RECEIVING
-              ro_all = lo_where.
-
-          CALL METHOD lo_where->(`GET`)
-            RECEIVING
-              rt_transports = lt_transports.
-
-          LOOP AT lt_transports INTO DATA(lo_tr).
-            DATA ls_req_c TYPE ty_s_tr_request.
-            CLEAR ls_req_c.
-            TRY.
-                DATA lo_props TYPE REF TO object.
-                CALL METHOD lo_tr->(`PROPERTIES`)
-                  RECEIVING
-                    ro_properties = lo_props.
-                DATA ls_prop TYPE REF TO data.
-                CALL METHOD lo_props->(`GET`)
-                  RECEIVING
-                    rs_properties = ls_prop.
-                FIELD-SYMBOLS <prop> TYPE any.
-                FIELD-SYMBOLS <pcomp> TYPE any.
-                ASSIGN ls_prop->* TO <prop>.
-                ASSIGN COMPONENT `OWNER` OF STRUCTURE <prop> TO <pcomp>.
-                IF sy-subrc = 0. ls_req_c-owner = <pcomp>. ENDIF.
-                IF ls_req_c-owner <> lv_user_c.
-                  CONTINUE.
-                ENDIF.
-                ASSIGN COMPONENT `SHORT_DESCRIPTION` OF STRUCTURE <prop> TO <pcomp>.
-                IF sy-subrc = 0. ls_req_c-description = <pcomp>. ENDIF.
-                ASSIGN COMPONENT `STATUS` OF STRUCTURE <prop> TO <pcomp>.
-                IF sy-subrc = 0. ls_req_c-status = <pcomp>. ENDIF.
-                ASSIGN COMPONENT `TYPE` OF STRUCTURE <prop> TO <pcomp>.
-                IF sy-subrc = 0. ls_req_c-type = <pcomp>. ENDIF.
-
-                DATA lv_tr_value TYPE string.
-                CALL METHOD lo_tr->(`GET_VALUE`)
-                  RECEIVING
-                    rv_value = lv_tr_value.
-                ls_req_c-trkorr = lv_tr_value.
-
-              CATCH cx_root ##NO_HANDLER.
-            ENDTRY.
-            IF ls_req_c-trkorr IS NOT INITIAL.
-              INSERT ls_req_c INTO TABLE result.
+          LOOP AT <lt_transports> ASSIGNING <lo_tr>.
+            lo_tr ?= <lo_tr>.
+            DATA(ls_req_c) = VALUE ty_s_tr_request( owner  = lv_user_c
+                                                    status = `D` ).
+            ls_req_c-trkorr = xco_text( xco_call( obj  = lo_tr
+                                                  name = `VALUE` ) ).
+            DATA(lr_prop) = xco_call( obj  = xco_call_obj( obj  = lo_tr
+                                                           name = `PROPERTIES` )
+                                      name = `GET` ).
+            ASSIGN lr_prop->* TO <prop>.
+            ASSIGN COMPONENT `SHORT_DESCRIPTION` OF STRUCTURE <prop> TO <pcomp>.
+            IF sy-subrc = 0.
+              ls_req_c-description = <pcomp>.
             ENDIF.
+            ls_req_c-type = xco_text( xco_call( obj  = lo_tr
+                                                name = `GET_TYPE` ) ).
+            IF request_type IS NOT INITIAL AND ls_req_c-type <> request_type.
+              CONTINUE.
+            ENDIF.
+            INSERT ls_req_c INTO TABLE result.
           ENDLOOP.
 
-        CATCH cx_root ##NO_HANDLER.
+        CATCH cx_root INTO DATA(lx_requests_c).
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = lx_requests_c.
       ENDTRY.
       RETURN.
     ENDIF.
 
-    " Standard ABAP: use dynamic SELECT from E070/E07T
+    " Standard ABAP: dynamic SELECT from E070, the texts from E07T
     DATA lv_user  TYPE c LENGTH 12.
     DATA lv_type  TYPE c LENGTH 1.
     DATA lr_data  TYPE REF TO data.
@@ -12171,9 +12209,43 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             CONTINUE.
           ENDIF.
 
-          " Get description from E07T
-          ls_req-description = tr_get_description( ls_req-trkorr ).
           INSERT ls_req INTO TABLE result.
+        ENDLOOP.
+
+        " the texts in one SELECT per 50 requests instead of one per request
+        TYPES:
+          BEGIN OF ty_s_text,
+            trkorr  TYPE c LENGTH 20,
+            as4text TYPE c LENGTH 60,
+          END OF ty_s_text.
+        DATA lt_text TYPE STANDARD TABLE OF ty_s_text WITH EMPTY KEY.
+        DATA lt_part TYPE STANDARD TABLE OF ty_s_text WITH EMPTY KEY.
+        DATA(lv_keys) = ``.
+        DATA(lv_count) = 0.
+        DATA(lv_index) = 0.
+        LOOP AT result INTO ls_req.
+          lv_index = lv_index + 1.
+          lv_keys = COND #( WHEN lv_keys IS INITIAL THEN |TRKORR = { filter_sql_quote( ls_req-trkorr ) }|
+                            ELSE |{ lv_keys } OR TRKORR = { filter_sql_quote( ls_req-trkorr ) }| ).
+          lv_count = lv_count + 1.
+          IF lv_count = 50 OR lv_index = lines( result ).
+            lv_where = |LANGU = { filter_sql_quote( sy-langu ) } AND ( { lv_keys } )|.
+            CLEAR lt_part.
+            SELECT trkorr, as4text
+              FROM (lv_tab2)
+              WHERE (lv_where)
+              INTO CORRESPONDING FIELDS OF TABLE @lt_part.
+            INSERT LINES OF lt_part INTO TABLE lt_text.
+            CLEAR lv_keys.
+            lv_count = 0.
+          ENDIF.
+        ENDLOOP.
+
+        LOOP AT result REFERENCE INTO DATA(lr_req).
+          LOOP AT lt_text INTO DATA(ls_text) WHERE trkorr = lr_req->trkorr.
+            lr_req->description = ls_text-as4text.
+            EXIT.
+          ENDLOOP.
         ENDLOOP.
 
       CATCH cx_root ##NO_HANDLER.
@@ -12184,23 +12256,22 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD tr_get_description.
 
     IF check_abap_cloud( ).
-      " Cloud: use XCO_CP_CTS
+      " Cloud: XCO_CP_CTS=>TRANSPORT->FOR( )->PROPERTIES( )->GET( )
+      FIELD-SYMBOLS <prop_d>  TYPE any.
+      FIELD-SYMBOLS <pcomp_d> TYPE any.
       TRY.
-          DATA lo_tr_d TYPE REF TO object.
-          DATA(lv_xco_d) = `XCO_CP_CTS`.
-          CALL METHOD (lv_xco_d)=>(`TRANSPORT`)
+          DATA(lr_prop_d) = xco_call( obj  = xco_call_obj( obj  = xco_transport( trkorr )
+                                                           name = `PROPERTIES` )
+                                      name = `GET` ).
+          ASSIGN lr_prop_d->* TO <prop_d>.
+          ASSIGN COMPONENT `SHORT_DESCRIPTION` OF STRUCTURE <prop_d> TO <pcomp_d>.
+          IF sy-subrc = 0.
+            result = <pcomp_d>.
+          ENDIF.
+        CATCH cx_root INTO DATA(lx_descr_c).
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
             EXPORTING
-              iv_transport = CONV string( trkorr )
-            RECEIVING
-              ro_transport = lo_tr_d.
-          DATA lo_props_d TYPE REF TO object.
-          CALL METHOD lo_tr_d->(`PROPERTIES`)
-            RECEIVING
-              ro_properties = lo_props_d.
-          CALL METHOD lo_props_d->(`GET_SHORT_DESCRIPTION`)
-            RECEIVING
-              rv_short_description = result.
-        CATCH cx_root ##NO_HANDLER.
+              val = lx_descr_c.
       ENDTRY.
       RETURN.
     ENDIF.
@@ -12225,26 +12296,26 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD tr_is_released.
 
     IF check_abap_cloud( ).
-      " Cloud: use XCO_CP_CTS
+      " Cloud: XCO_CP_CTS=>TRANSPORT->FOR( )->GET_STATUS( ), compared with
+      " XCO_CP_TRANSPORT=>STATUS->RELEASED. A failure raises - it read as
+      " "not released"
       TRY.
-          DATA lo_tr_r TYPE REF TO object.
-          DATA(lv_xco_r) = `XCO_CP_CTS`.
-          CALL METHOD (lv_xco_r)=>(`TRANSPORT`)
+          DATA(lo_status_r) = xco_call_obj( obj  = xco_transport( trkorr )
+                                            name = `GET_STATUS` ).
+          DATA(lo_released) = xco_call_obj( obj  = xco_static( `XCO_CP_TRANSPORT=>STATUS` )
+                                            name = `RELEASED` ).
+          result = xsdbool( lo_status_r = lo_released ).
+          IF result = abap_false.
+            " not the same instance - the same value then
+            TRY.
+                result = xsdbool( xco_text( REF #( lo_status_r ) ) = xco_text( REF #( lo_released ) ) ).
+              CATCH zabaputil_cx_util_error ##NO_HANDLER.
+            ENDTRY.
+          ENDIF.
+        CATCH cx_root INTO DATA(lx_status_c).
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
             EXPORTING
-              iv_transport = CONV string( trkorr )
-            RECEIVING
-              ro_transport = lo_tr_r.
-          DATA lo_props_r TYPE REF TO object.
-          CALL METHOD lo_tr_r->(`PROPERTIES`)
-            RECEIVING
-              ro_properties = lo_props_r.
-          DATA lv_status_c TYPE string.
-          CALL METHOD lo_props_r->(`GET_STATUS`)
-            RECEIVING
-              rv_status = lv_status_c.
-          result = xsdbool( lv_status_c = `RELEASED` OR lv_status_c = `R` ).
-        CATCH cx_root.
-          result = abap_false.
+              val = lx_status_c.
       ENDTRY.
       RETURN.
     ENDIF.
@@ -12595,6 +12666,192 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         RAISE EXCEPTION TYPE zabaputil_cx_util_error
           EXPORTING
             previous = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD xco_call.
+
+    DATA lo_class  TYPE REF TO cl_abap_objectdescr.
+    DATA lo_owner  TYPE REF TO cl_abap_objectdescr.
+    DATA lo_type   TYPE REF TO cl_abap_datadescr.
+    DATA lo_table  TYPE REF TO cl_abap_tabledescr.
+    DATA lv_member TYPE string.
+    DATA lt_param  TYPE abap_parmbind_tab.
+    DATA lr_arg    TYPE REF TO data.
+    DATA lr_line   TYPE REF TO data.
+    FIELD-SYMBOLS <ls_method> TYPE abap_methdescr.
+    FIELD-SYMBOLS <ls_param>  TYPE abap_parmdescr.
+    FIELD-SYMBOLS <attr>      TYPE any.
+    FIELD-SYMBOLS <arg>       TYPE any.
+    FIELD-SYMBOLS <lt_arg>    TYPE ANY TABLE.
+    FIELD-SYMBOLS <lt_in>     TYPE ANY TABLE.
+    FIELD-SYMBOLS <line>      TYPE any.
+
+    DATA(lv_name) = to_upper( name ).
+    lo_class ?= cl_abap_typedescr=>describe_by_object_ref( obj ).
+    lo_owner = lo_class.
+
+    ASSIGN lo_class->methods[ name = lv_name ] TO <ls_method>.
+    IF sy-subrc = 0.
+      lv_member = lv_name.
+    ELSE.
+      LOOP AT lo_class->interfaces INTO DATA(ls_intf).
+        lo_owner ?= cl_abap_typedescr=>describe_by_name( ls_intf-name ).
+        ASSIGN lo_owner->methods[ name = lv_name ] TO <ls_method>.
+        IF sy-subrc = 0.
+          lv_member = |{ ls_intf-name }~{ lv_name }|.
+          EXIT.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+
+    IF lv_member IS INITIAL.
+      " no method - an attribute (XCO: `transport->objects->all`)
+      ASSIGN obj->(lv_name) TO <attr>.
+      IF sy-subrc <> 0.
+        LOOP AT lo_class->interfaces INTO ls_intf.
+          DATA(lv_attr) = |{ ls_intf-name }~{ lv_name }|.
+          ASSIGN obj->(lv_attr) TO <attr>.
+          IF sy-subrc = 0.
+            EXIT.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+      IF <attr> IS NOT ASSIGNED.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |{ lo_class->get_relative_name( ) } has no member { lv_name }|.
+      ENDIF.
+      result = REF #( <attr> ).
+      RETURN.
+    ENDIF.
+
+    LOOP AT <ls_method>-parameters ASSIGNING <ls_param>.
+
+      IF <ls_param>-parm_kind = cl_abap_objectdescr=>returning.
+        lo_type = lo_owner->get_method_parameter_type( p_method_name    = <ls_method>-name
+                                                       p_parameter_name = <ls_param>-name ).
+        CREATE DATA result TYPE HANDLE lo_type.
+        INSERT VALUE #( name  = <ls_param>-name
+                        kind  = cl_abap_objectdescr=>receiving
+                        value = result ) INTO TABLE lt_param.
+
+      ELSEIF <ls_param>-parm_kind = cl_abap_objectdescr=>importing
+          AND <ls_param>-is_optional = abap_false
+          AND arg IS SUPPLIED
+          AND lr_arg IS NOT BOUND.
+        lo_type = lo_owner->get_method_parameter_type( p_method_name    = <ls_method>-name
+                                                       p_parameter_name = <ls_param>-name ).
+        TRY.
+            CREATE DATA lr_arg TYPE HANDLE lo_type.
+            ASSIGN lr_arg->* TO <arg>.
+            CASE lo_type->kind.
+              WHEN cl_abap_typedescr=>kind_ref.
+                <arg> ?= arg.
+              WHEN cl_abap_typedescr=>kind_table.
+                " a table of filters and the like: one cast per line
+                lo_table ?= lo_type.
+                DATA(lo_line_type) = lo_table->get_table_line_type( ).
+                ASSIGN <arg> TO <lt_arg>.
+                ASSIGN arg TO <lt_in>.
+                LOOP AT <lt_in> ASSIGNING FIELD-SYMBOL(<ls_in>).
+                  CREATE DATA lr_line TYPE HANDLE lo_line_type.
+                  ASSIGN lr_line->* TO <line>.
+                  <line> ?= <ls_in>.
+                  INSERT <line> INTO TABLE <lt_arg>.
+                ENDLOOP.
+              WHEN OTHERS.
+                <arg> = arg.
+            ENDCASE.
+          CATCH cx_sy_create_data_error.
+            " a generic parameter (CLIKE, ANY): the value as it is
+            lr_arg = REF #( arg ).
+        ENDTRY.
+        INSERT VALUE #( name  = <ls_param>-name
+                        kind  = cl_abap_objectdescr=>exporting
+                        value = lr_arg ) INTO TABLE lt_param.
+      ENDIF.
+
+    ENDLOOP.
+
+    CALL METHOD obj->(lv_member)
+      PARAMETER-TABLE lt_param.
+
+  ENDMETHOD.
+
+  METHOD xco_call_obj.
+
+    FIELD-SYMBOLS <obj> TYPE any.
+
+    IF arg IS SUPPLIED.
+      DATA(lr_value) = xco_call( obj  = obj
+                                 name = name
+                                 arg  = arg ).
+    ELSE.
+      lr_value = xco_call( obj  = obj
+                           name = name ).
+    ENDIF.
+    IF lr_value IS NOT BOUND.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |{ name } returns nothing|.
+    ENDIF.
+    ASSIGN lr_value->* TO <obj>.
+    result ?= <obj>.
+
+  ENDMETHOD.
+
+  METHOD xco_static.
+
+    FIELD-SYMBOLS <obj> TYPE any.
+
+    ASSIGN (val) TO <obj>.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |{ val } is not available|.
+    ENDIF.
+    result ?= <obj>.
+
+  ENDMETHOD.
+
+  METHOD xco_transport.
+
+    DATA lv_trkorr TYPE c LENGTH 20.
+
+    lv_trkorr = trkorr.
+    result = xco_call_obj( obj  = xco_static( `XCO_CP_CTS=>TRANSPORT` )
+                           name = `FOR`
+                           arg  = lv_trkorr ).
+
+  ENDMETHOD.
+
+  METHOD xco_text.
+
+    DATA lo_obj TYPE REF TO object.
+    FIELD-SYMBOLS <value> TYPE any.
+
+    IF val IS NOT BOUND.
+      RETURN.
+    ENDIF.
+    ASSIGN val->* TO <value>.
+
+    IF cl_abap_typedescr=>describe_by_data( <value> )->kind <> cl_abap_typedescr=>kind_ref.
+      result = <value>.
+      RETURN.
+    ENDIF.
+
+    lo_obj ?= <value>.
+    IF lo_obj IS NOT BOUND.
+      RETURN.
+    ENDIF.
+    TRY.
+        result = xco_text( xco_call( obj  = lo_obj
+                                     name = `VALUE` ) ).
+      CATCH zabaputil_cx_util_error.
+        result = xco_text( xco_call( obj  = lo_obj
+                                     name = `NAME` ) ).
     ENDTRY.
 
   ENDMETHOD.

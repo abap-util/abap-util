@@ -2744,6 +2744,45 @@ CLASS ltcl_bal_ops IMPLEMENTATION.
 ENDCLASS.
 
 
+CLASS ltcl_xco_call DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+    METHODS interface_method FOR TESTING.
+    METHODS missing_member   FOR TESTING.
+
+ENDCLASS.
+
+CLASS zabaputil_cl_util_context DEFINITION LOCAL FRIENDS ltcl_xco_call.
+
+CLASS ltcl_xco_call IMPLEMENTATION.
+
+  METHOD interface_method.
+    " the cloud branches of tr_* reach XCO this way: GET_NODE_TYPE is a
+    " method of the interface only (no alias in the class), so it is
+    " called as ZABAPUTIL_IF_AJSON~GET_NODE_TYPE, its one importing
+    " parameter filled from arg
+    FIELD-SYMBOLS <value> TYPE any.
+    DATA(lo_json) = zabaputil_cl_ajson=>parse( `{"a":"x"}` ).
+    DATA(lr_value) = zabaputil_cl_util_context=>xco_call( obj  = lo_json
+                                                         name = `get_node_type`
+                                                         arg  = `/a` ).
+    ASSIGN lr_value->* TO <value>.
+    cl_abap_unit_assert=>assert_equals( exp = `str`
+                                        act = <value> ).
+  ENDMETHOD.
+
+  METHOD missing_member.
+    TRY.
+        zabaputil_cl_util_context=>xco_call( obj  = zabaputil_cl_ajson=>create_empty( )
+                                             name = `NO_SUCH_MEMBER` ).
+        cl_abap_unit_assert=>fail( ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+  ENDMETHOD.
+
+ENDCLASS.
+
 "! ================================================================
 "! LOCK / DEQUEUE HELPER
 "! ================================================================
