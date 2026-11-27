@@ -3869,8 +3869,11 @@ CLASS zabaputil_cl_util_context DEFINITION
         VALUE(result) TYPE ty_p_seconds.
 
     " The control characters below U+0020 that c_escape_json has no short
-    " escape for (all but tab, line feed and carriage return), built once.
-    CLASS-DATA gv_json_ctrl TYPE string.
+    " escape for (all but tab, line feed and carriage return), and every
+    " character it escapes at all - built once, on first use: the control
+    " half needs the codepage API, see gv_xml_escape_specials.
+    CLASS-DATA gv_json_ctrl     TYPE string.
+    CLASS-DATA gv_json_specials TYPE string.
 
     " Splits CSV text into rows of cells, RFC 4180: a cell may be wrapped in
     " double quotes and then carry the separator, a line break and a doubled
@@ -4477,7 +4480,24 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA lt_names TYPE string_table.
     FIELD-SYMBOLS <field> TYPE any.
 
-    DATA(lt_rows) = csv_split_rows( val ).
+    " Excel's "CSV UTF-8" starts the file with the byte order mark EF BB BF,
+    " and the UTF-8 decoding keeps it as the character U+FEFF in front of
+    " the first column name. Built at run time from its bytes - a literal
+    " U+FEFF in the source breaks the 7-bit rule and the downport. Where the
+    " decoding drops it, it is empty
+    DATA(lv_csv) = val.
+    TRY.
+        DATA(lv_bom) = conv_get_string_by_xstring( CONV xstring( `EFBBBF` ) ).
+        IF lv_bom IS NOT INITIAL AND find( val = lv_csv
+                                           sub = lv_bom ) = 0.
+          lv_csv = substring( val = lv_csv
+                              off = strlen( lv_bom ) ).
+        ENDIF.
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+        " no codepage API: the text cannot have come through one either
+    ENDTRY.
+
+    DATA(lt_rows) = csv_split_rows( lv_csv ).
     " no row, no header to build a table from
     IF lt_rows IS INITIAL.
       RETURN.
@@ -13056,15 +13076,23 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD c_escape_json.
     CONSTANTS lc_ctrl_hex TYPE string VALUE `01020304050607080B0C0E0F101112131415161718191A1B1C1D1E1F`.
 
-    IF gv_json_ctrl IS INITIAL.
-      gv_json_ctrl = conv_get_string_by_xstring( CONV xstring( lc_ctrl_hex ) ).
+    IF gv_json_specials IS INITIAL.
+      TRY.
+          gv_json_ctrl = conv_get_string_by_xstring( CONV xstring( lc_ctrl_hex ) ).
+        CATCH zabaputil_cx_util_error.
+          " no codepage API here: the control characters pass as they did
+          " before, the five common characters are escaped all the same -
+          " an escape must not fail where it used to work
+          CLEAR gv_json_ctrl.
+      ENDTRY.
+      gv_json_specials = |"\\\t\n\r| && gv_json_ctrl.
     ENDIF.
 
     " the backslash first: escaping it afterwards would double the ones the
     " replacements below have just written. The common value carries none
-    " of these characters - skip the copies then
+    " of these characters - one scan, and the copies are skipped
     result = val.
-    IF result NA |"\\\t\n\r| AND result NA gv_json_ctrl.
+    IF result NA gv_json_specials.
       RETURN.
     ENDIF.
     result = replace( val  = result
@@ -13090,7 +13118,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     " every other control character has to be escaped too - a raw form feed
     " or 0x01 (legacy long texts carry them) makes the JSON unparseable
-    IF result NA gv_json_ctrl.
+    IF gv_json_ctrl IS INITIAL OR result NA gv_json_ctrl.
       RETURN.
     ENDIF.
     DATA(lv_i) = 0.
