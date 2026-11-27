@@ -1074,6 +1074,7 @@ CLASS ltcl_filter_ops DEFINITION FINAL
     METHODS token_cp                       FOR TESTING.
     METHODS token_bt                       FOR TESTING.
     METHODS token_plain_value              FOR TESTING.
+    METHODS token_empty_value              FOR TESTING.
 
     " conv_get_bintab_by_xstring
     METHODS bintab_flat_lines              FOR TESTING.
@@ -1275,6 +1276,20 @@ CLASS ltcl_filter_ops IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( exp = `I` act = ls_range-sign ).
     cl_abap_unit_assert=>assert_equals( exp = `EQ` act = ls_range-option ).
     cl_abap_unit_assert=>assert_equals( exp = `hello` act = ls_range-low ).
+  ENDMETHOD.
+
+  METHOD token_empty_value.
+    " the empty-value token of filter_get_token_range_mapping - it was read
+    " as LT `leer>`
+    DATA(ls_range) = zabaputil_cl_util_context=>filter_get_range_by_token( `<leer>` ).
+    cl_abap_unit_assert=>assert_equals( exp = `I` act = ls_range-sign ).
+    cl_abap_unit_assert=>assert_equals( exp = `EQ` act = ls_range-option ).
+    cl_abap_unit_assert=>assert_initial( ls_range-low ).
+
+    ls_range = zabaputil_cl_util_context=>filter_get_range_by_token( `!(<leer>)` ).
+    cl_abap_unit_assert=>assert_equals( exp = `E` act = ls_range-sign ).
+    cl_abap_unit_assert=>assert_equals( exp = `EQ` act = ls_range-option ).
+    cl_abap_unit_assert=>assert_initial( ls_range-low ).
   ENDMETHOD.
 
   METHOD sql_where_eq.
@@ -1825,6 +1840,7 @@ CLASS ltcl_rtti_ops DEFINITION FINAL
     METHODS check_class_exists_false       FOR TESTING.
     METHODS check_class_exists_cached      FOR TESTING.
     METHODS check_class_exists_case        FOR TESTING.
+    METHODS check_class_exists_no_class    FOR TESTING.
     METHODS expand_components_plain        FOR TESTING.
     METHODS expand_components_empty        FOR TESTING.
     METHODS expand_components_depth_ok     FOR TESTING.
@@ -2061,6 +2077,13 @@ CLASS ltcl_rtti_ops IMPLEMENTATION.
         exp = zabaputil_cl_util_context=>rtti_check_class_exists( `CL_ABAP_TYPEDESCR` ) ).
   ENDMETHOD.
 
+  METHOD check_class_exists_no_class.
+    " a table, a built-in type, an interface: types, but no class
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_class_exists( `T100` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_class_exists( `STRING` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_class_exists( `IF_MESSAGE` ) ).
+  ENDMETHOD.
+
 ENDCLASS.
 
 
@@ -2251,6 +2274,8 @@ CLASS ltcl_time_ops DEFINITION FINAL
     METHODS get_timestamp_short            FOR TESTING.
     METHODS text_by_stampl_fraction        FOR TESTING.
     METHODS text_by_stampl_utc_zone        FOR TESTING.
+    METHODS stampl_tz_roundtrip            FOR TESTING.
+    METHODS stampl_tz_no_sap_key           FOR TESTING.
 
 ENDCLASS.
 
@@ -2283,6 +2308,29 @@ CLASS ltcl_time_ops IMPLEMENTATION.
         exp = zabaputil_cl_util_context=>time_get_text_by_stampl( CONV timestampl( `20261123140509` ) )
         act = zabaputil_cl_util_context=>time_get_text_by_stampl( val       = CONV timestampl( `20261123140509` )
                                                                   time_zone = `UTC` ) ).
+  ENDMETHOD.
+
+  METHOD stampl_tz_roundtrip.
+    zabaputil_cl_util_context=>time_stampl_to_tz( EXPORTING val  = CONV timestampl( `20261123140509` )
+                                                  IMPORTING date = DATA(lv_date)
+                                                            time = DATA(lv_time) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV d( `20261123` ) act = lv_date ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV t( `140509` ) act = lv_time ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = CONV timestampl( `20261123140509` )
+        act = zabaputil_cl_util_context=>time_stampl_from_tz( date = lv_date
+                                                              time = lv_time ) ).
+  ENDMETHOD.
+
+  METHOD stampl_tz_no_sap_key.
+    " an IANA name was cut to `Europe` and gave an empty date and time
+    TRY.
+        zabaputil_cl_util_context=>time_stampl_to_tz( EXPORTING val  = CONV timestampl( `20261123140509` )
+                                                                tz   = `Europe/Berlin`
+                                                      IMPORTING date = DATA(lv_date) ).
+        cl_abap_unit_assert=>fail( |no exception, date { lv_date }| ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
   ENDMETHOD.
 
   METHOD get_timestampl.
@@ -2688,11 +2736,77 @@ ENDCLASS.
 "! ================================================================
 "! Z2UI5_CL_UTIL_EXT - Comprehensive Unit Tests for JS Transpilation
 "! ================================================================
-"! No BAL tests: the BAL function modules and CL_BALI_* do not exist in
+"! Few BAL tests: the BAL function modules and CL_BALI_* do not exist in
 "! the transpiled runtime, and every bal_* method raises when they fail.
 "! (The ASSIGN_TYPE_CONFLICT of bal_search is fixed - the BAL tables are
-"! typed generically.)
+"! typed generically.) What runs here is what happens before any of them
+"! is called.
 "! ================================================================
+CLASS ltcl_bal_ops DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+    METHODS delete_without_keys FOR TESTING.
+
+ENDCLASS.
+
+CLASS ltcl_bal_ops IMPLEMENTATION.
+
+  METHOD delete_without_keys.
+    " no keys are no filter - they would delete every log of the client
+    " (or of every object), so nothing is searched and nothing deleted:
+    " no call that could fail is made
+    TRY.
+        zabaputil_cl_util_context=>bal_delete( object    = ``
+                                               subobject = ``
+                                               id        = `` ).
+        zabaputil_cl_util_context=>bal_delete_before( `` ).
+      CATCH zabaputil_cx_util_error INTO DATA(lx).
+        cl_abap_unit_assert=>fail( lx->get_text( ) ).
+    ENDTRY.
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+CLASS ltcl_dyn_call DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+    METHODS interface_method FOR TESTING.
+    METHODS missing_member   FOR TESTING.
+
+ENDCLASS.
+
+CLASS zabaputil_cl_util_context DEFINITION LOCAL FRIENDS ltcl_dyn_call.
+
+CLASS ltcl_dyn_call IMPLEMENTATION.
+
+  METHOD interface_method.
+    " the cloud branches of tr_* reach XCO this way: GET_NODE_TYPE is a
+    " method of the interface only (no alias in the class), so it is
+    " called as ZABAPUTIL_IF_AJSON~GET_NODE_TYPE, its one importing
+    " parameter filled from arg
+    FIELD-SYMBOLS <value> TYPE any.
+    DATA(lo_json) = zabaputil_cl_ajson=>parse( `{"a":"x"}` ).
+    DATA(lr_value) = zabaputil_cl_util_context=>dyn_call( obj  = lo_json
+                                                         name = `get_node_type`
+                                                         arg  = `/a` ).
+    ASSIGN lr_value->* TO <value>.
+    cl_abap_unit_assert=>assert_equals( exp = `str`
+                                        act = <value> ).
+  ENDMETHOD.
+
+  METHOD missing_member.
+    TRY.
+        zabaputil_cl_util_context=>dyn_call( obj  = zabaputil_cl_ajson=>create_empty( )
+                                             name = `NO_SUCH_MEMBER` ).
+        cl_abap_unit_assert=>fail( ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+  ENDMETHOD.
+
+ENDCLASS.
 
 "! ================================================================
 "! LOCK / DEQUEUE HELPER
@@ -7016,6 +7130,8 @@ CLASS ltcl_fixes DEFINITION FINAL
     METHODS sql_exclude_roundtrip    FOR TESTING.
     METHODS sql_groups_keep_parens   FOR TESTING.
     METHODS sql_tabname_with_keyword FOR TESTING.
+    METHODS sql_roundtrip_kept       FOR TESTING.
+    METHODS sql_not_a_filter         FOR TESTING.
 
 ENDCLASS.
 
@@ -7420,6 +7536,57 @@ CLASS ltcl_fixes IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( exp = `A` act = lt_filter[ 1 ]-name ).
     cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_filter[ 1 ]-t_range ) ).
     cl_abap_unit_assert=>assert_equals( exp = `2` act = lt_filter[ 1 ]-t_range[ 2 ]-low ).
+  ENDMETHOD.
+
+  METHOD sql_roundtrip_kept.
+    " each WHERE comes back from its filters as a WHERE of the same rows
+    DATA(lt_filter) = zabaputil_cl_util_context=>filter_get_multi_by_sql_where( `A IN ('1','2') AND B = '3'` ).
+    cl_abap_unit_assert=>assert_equals( exp = `( A = '1' OR A = '2' ) AND ( B = '3' )`
+                                        act = zabaputil_cl_util_context=>filter_get_sql_where( lt_filter ) ).
+
+    lt_filter = zabaputil_cl_util_context=>filter_get_multi_by_sql_where( `A='1' AND B >= '3'` ).
+    cl_abap_unit_assert=>assert_equals( exp = `( A = '1' ) AND ( B >= '3' )`
+                                        act = zabaputil_cl_util_context=>filter_get_sql_where( lt_filter ) ).
+
+    lt_filter = zabaputil_cl_util_context=>filter_get_multi_by_sql_where( `ZBETWEEN = 'X' AND F = 'Y'` ).
+    cl_abap_unit_assert=>assert_equals( exp = `( ZBETWEEN = 'X' ) AND ( F = 'Y' )`
+                                        act = zabaputil_cl_util_context=>filter_get_sql_where( lt_filter ) ).
+
+    lt_filter = zabaputil_cl_util_context=>filter_get_multi_by_sql_where( `A NOT IN ( '1', '2' )` ).
+    cl_abap_unit_assert=>assert_equals( exp = `( A <> '1' AND A <> '2' )`
+                                        act = zabaputil_cl_util_context=>filter_get_sql_where( lt_filter ) ).
+
+    lt_filter = zabaputil_cl_util_context=>filter_get_multi_by_sql_where( `( A = '1' OR A = '2' ) AND ( A = '3' OR A = '4' )` ).
+    cl_abap_unit_assert=>assert_equals( exp = `( A = '1' OR A = '2' ) AND ( A = '3' OR A = '4' )`
+                                        act = zabaputil_cl_util_context=>filter_get_sql_where( lt_filter ) ).
+
+    lt_filter = zabaputil_cl_util_context=>filter_get_multi_by_sql_where( `( A = '1' AND A <> '2' )` ).
+    cl_abap_unit_assert=>assert_equals( exp = `( A = '1' AND A <> '2' )`
+                                        act = zabaputil_cl_util_context=>filter_get_sql_where( lt_filter ) ).
+
+    DATA(ls_sql) = zabaputil_cl_util_context=>filter_get_sql_by_sql_string( `SELECT * FROM ztab WHERE a = '1' ORDER BY b` ).
+    cl_abap_unit_assert=>assert_equals( exp = `a = '1'` act = ls_sql-where ).
+    cl_abap_unit_assert=>assert_equals( exp = `1` act = ls_sql-t_filter[ 1 ]-t_range[ 1 ]-low ).
+  ENDMETHOD.
+
+  METHOD sql_not_a_filter.
+    " a condition a filter cannot say raises - it was dropped or rewritten
+    DATA(lt_where) = VALUE string_table( ( `A = '1' OR B = '2'` )
+                                         ( `NOT A = '1' AND B = '2'` )
+                                         ( `( A = '1' OR A IS NULL ) AND B = '1'` )
+                                         ( `( A = '1' AND B = '2' ) OR C = '3'` )
+                                         ( `A = '1' OR A = '2' AND A = '3'` )
+                                         ( `A = '1' ORDER BY b` )
+                                         ( `A IN ( SELECT b FROM c )` )
+                                         ( `A NOT IN ('1') OR A = '2'` )
+                                         ( `A = 'open` ) ).
+    LOOP AT lt_where INTO DATA(lv_where).
+      TRY.
+          zabaputil_cl_util_context=>filter_get_multi_by_sql_where( lv_where ).
+          cl_abap_unit_assert=>fail( |no exception for { lv_where }| ).
+        CATCH zabaputil_cx_util_error ##NO_HANDLER.
+      ENDTRY.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD sql_tabname_with_keyword.
