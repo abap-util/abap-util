@@ -3760,12 +3760,30 @@ CLASS zabaputil_cl_util_context DEFINITION
     CLASS-DATA gv_xml_escape_specials TYPE string.
     CLASS-DATA gv_xml_escape_controls TYPE string.
 
+    " PCRE wherever CL_ABAP_REGEX=>CREATE_PCRE exists (7.55 and ABAP
+    " Cloud), POSIX only below - one pattern means the same everywhere
     CLASS-METHODS regex_create_matcher
       IMPORTING
         val           TYPE clike
         regex         TYPE clike
       RETURNING
         VALUE(result) TYPE REF TO object.
+
+    TYPES:
+      BEGIN OF ty_s_regex_match,
+        off TYPE i,
+        len TYPE i,
+      END OF ty_s_regex_match.
+    TYPES ty_t_regex_match TYPE STANDARD TABLE OF ty_s_regex_match WITH EMPTY KEY.
+
+    " every non-empty match of regex in val, as offset and length - the
+    " loop regex_find_all and regex_replace_all share
+    CLASS-METHODS regex_get_matches
+      IMPORTING
+        val           TYPE string
+        regex         TYPE clike
+      RETURNING
+        VALUE(result) TYPE ty_t_regex_match.
 
     CLASS-METHODS http_execute
       IMPORTING
@@ -13894,32 +13912,41 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA lo_regex TYPE REF TO object.
     DATA lv_class TYPE string.
 
-    IF check_abap_cloud( ) = abap_true.
+    " PCRE first, by name: CREATE_PCRE exists from 7.55 on and on ABAP
+    " Cloud. On-premise used to take POSIX even where PCRE was there, so a
+    " pattern (\d, lazy quantifiers, lookaheads) behaved differently on the
+    " two targets. An invalid pattern is raised, not retried as POSIX
+    TRY.
+        lv_class = `CL_ABAP_REGEX`.
+        CALL METHOD (lv_class)=>create_pcre
+          EXPORTING
+            pattern = regex
+          RECEIVING
+            regex   = lo_regex.
 
-      lv_class = `CL_ABAP_REGEX`.
-      CALL METHOD (lv_class)=>create_pcre
-        EXPORTING
-          pattern = regex
-        RECEIVING
-          regex   = lo_regex.
+        CALL METHOD lo_regex->(`CREATE_MATCHER`)
+          EXPORTING
+            text    = val
+          RECEIVING
+            matcher = result.
+        RETURN.
 
-      CALL METHOD lo_regex->(`CREATE_MATCHER`)
-        EXPORTING
-          text    = val
-        RECEIVING
-          matcher = result.
+      CATCH cx_sy_dyn_call_illegal_method cx_sy_dyn_call_illegal_class.
+        IF check_abap_cloud( ) = abap_true.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = `REGEX_PCRE_NOT_AVAILABLE`.
+        ENDIF.
+    ENDTRY.
 
-    ELSE.
-
-      lv_class = `CL_ABAP_MATCHER`.
-      CALL METHOD (lv_class)=>create
-        EXPORTING
-          pattern = regex
-          text    = val
-        RECEIVING
-          matcher = result.
-
-    ENDIF.
+    " below 7.55: POSIX
+    lv_class = `CL_ABAP_MATCHER`.
+    CALL METHOD (lv_class)=>create
+      EXPORTING
+        pattern = regex
+        text    = val
+      RECEIVING
+        matcher = result.
 
   ENDMETHOD.
 
@@ -13936,58 +13963,42 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD regex_find_all.
 
-    DATA lv_success TYPE abap_bool.
-    DATA lv_empty_off TYPE i VALUE -1.
-    DATA lv_off     TYPE i.
-    DATA lv_len     TYPE i.
-
     DATA(lv_val) = CONV string( val ).
-    DATA(lo_matcher) = regex_create_matcher( val   = lv_val
-                                             regex = regex ).
-
-    DO.
-      CALL METHOD lo_matcher->(`FIND_NEXT`)
-        RECEIVING
-          success = lv_success.
-      IF lv_success = abap_false.
-        EXIT.
-      ENDIF.
-
-      CALL METHOD lo_matcher->(`GET_OFFSET`)
-        RECEIVING
-          offset = lv_off.
-      CALL METHOD lo_matcher->(`GET_LENGTH`)
-        RECEIVING
-          length = lv_len.
-
-      " a match of length zero is skipped, not the end: `a*` on `baaa`
-      " matches nothing at offset 0 and `aaa` after it. Two empty matches
-      " at the same offset mean the matcher does not move on - stop then
-      IF lv_len = 0.
-        IF lv_off = lv_empty_off.
-          EXIT.
-        ENDIF.
-        lv_empty_off = lv_off.
-        CONTINUE.
-      ENDIF.
-
+    LOOP AT regex_get_matches( val   = lv_val
+                               regex = regex ) INTO DATA(ls_match).
       INSERT substring( val = lv_val
-                        off = lv_off
-                        len = lv_len ) INTO TABLE result.
-    ENDDO.
+                        off = ls_match-off
+                        len = ls_match-len ) INTO TABLE result.
+    ENDLOOP.
 
   ENDMETHOD.
 
   METHOD regex_replace_all.
 
-    DATA lv_success TYPE abap_bool.
-    DATA lv_empty_off TYPE i VALUE -1.
-    DATA lv_off     TYPE i.
-    DATA lv_len     TYPE i.
-    DATA lv_pos     TYPE i.
+    DATA lv_pos TYPE i.
 
     DATA(lv_val) = CONV string( val ).
-    DATA(lo_matcher) = regex_create_matcher( val   = lv_val
+    LOOP AT regex_get_matches( val   = lv_val
+                               regex = regex ) INTO DATA(ls_match).
+      result = result && substring( val = lv_val
+                                    off = lv_pos
+                                    len = ls_match-off - lv_pos ) && new_val.
+      lv_pos = ls_match-off + ls_match-len.
+    ENDLOOP.
+
+    result = result && substring( val = lv_val
+                                  off = lv_pos ).
+
+  ENDMETHOD.
+
+  METHOD regex_get_matches.
+
+    DATA lv_success   TYPE abap_bool.
+    DATA lv_empty_off TYPE i VALUE -1.
+    DATA lv_off       TYPE i.
+    DATA lv_len       TYPE i.
+
+    DATA(lo_matcher) = regex_create_matcher( val   = val
                                              regex = regex ).
 
     DO.
@@ -14016,14 +14027,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CONTINUE.
       ENDIF.
 
-      result = result && substring( val = lv_val
-                                    off = lv_pos
-                                    len = lv_off - lv_pos ) && new_val.
-      lv_pos = lv_off + lv_len.
+      INSERT VALUE #( off = lv_off
+                      len = lv_len ) INTO TABLE result.
     ENDDO.
-
-    result = result && substring( val = lv_val
-                                  off = lv_pos ).
 
   ENDMETHOD.
 
