@@ -4718,43 +4718,48 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD itab_get_csv_by_itab.
-    FIELD-SYMBOLS <tab> TYPE table.
+    FIELD-SYMBOLS <tab>   TYPE table.
+    FIELD-SYMBOLS <row>   TYPE any.
+    FIELD-SYMBOLS <field> TYPE any.
     DATA lt_lines TYPE string_table.
     DATA lt_cells TYPE string_table.
+    " the component per column, empty for a column without text
+    DATA lt_names TYPE string_table.
 
     ASSIGN val TO <tab>.
     DATA(tab) = CAST cl_abap_tabledescr( cl_abap_typedescr=>describe_by_data( <tab> ) ).
 
     DATA(struc) = CAST cl_abap_structdescr( tab->get_table_line_type( ) ).
 
-    LOOP AT struc->get_components( ) REFERENCE INTO DATA(lr_comp).
+    " the included view, not get_components( ): an include (a DDIC
+    " table's .INCLUDE, an append, INCLUDE TYPE) is ONE nameless component
+    " there, so the header had an empty cell where the rows had one cell
+    " per field of the include, and every column behind it shifted. The
+    " kind is a property of the line type - decided here once per column,
+    " not described again for every cell. A table, a structure or a
+    " reference has no text - in a string template it is a runtime error,
+    " so its cell stays empty
+    LOOP AT struc->get_included_view( ) REFERENCE INTO DATA(lr_comp).
       INSERT csv_escape_cell( lr_comp->name ) INTO TABLE lt_cells.
+      INSERT COND string( WHEN lr_comp->type->kind = cl_abap_typedescr=>kind_elem
+                          THEN lr_comp->name ) INTO TABLE lt_names.
     ENDLOOP.
     INSERT concat_lines_of( table = lt_cells
                             sep   = `;` ) INTO TABLE lt_lines.
 
-    DATA lr_row TYPE REF TO data.
-    LOOP AT <tab> REFERENCE INTO lr_row.
+    LOOP AT <tab> ASSIGNING <row>.
 
       CLEAR lt_cells.
-      DATA(lv_index) = 1.
-      DO.
-        ASSIGN lr_row->* TO FIELD-SYMBOL(<row>).
-        ASSIGN COMPONENT lv_index OF STRUCTURE <row> TO FIELD-SYMBOL(<field>).
-        IF sy-subrc <> 0.
-          EXIT.
-        ENDIF.
-        lv_index = lv_index + 1.
-        " a table, a structure or a reference has no text - in a string
-        " template it is a runtime error, so its cell stays empty
-        IF cl_abap_typedescr=>describe_by_data( <field> )->kind <> cl_abap_typedescr=>kind_elem.
+      LOOP AT lt_names REFERENCE INTO DATA(lr_name).
+        IF lr_name->* IS INITIAL.
           INSERT `` INTO TABLE lt_cells.
           CONTINUE.
         ENDIF.
+        ASSIGN COMPONENT lr_name->* OF STRUCTURE <row> TO <field>.
         " the value as it is - a separator, a quote or a line break inside
         " it is quoted, not replaced
         INSERT csv_escape_cell( |{ <field> }| ) INTO TABLE lt_cells.
-      ENDDO.
+      ENDLOOP.
       INSERT concat_lines_of( table = lt_cells
                               sep   = `;` ) INTO TABLE lt_lines.
     ENDLOOP.

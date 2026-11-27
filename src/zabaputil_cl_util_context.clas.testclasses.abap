@@ -1524,6 +1524,7 @@ CLASS ltcl_itab_ops DEFINITION FINAL
     METHODS csv_roundtrip                  FOR TESTING.
 
     METHODS csv_deep_column                FOR TESTING.
+    METHODS csv_include_columns            FOR TESTING.
 
     METHODS json_roundtrip                 FOR TESTING.
 
@@ -1727,6 +1728,35 @@ CLASS ltcl_itab_ops IMPLEMENTATION.
 
     DATA(lv_csv) = zabaputil_cl_util_context=>itab_get_csv_by_itab( lt_tab ).
     cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>c_contains( val = lv_csv sub = `A;;B` ) ).
+  ENDMETHOD.
+
+  METHOD csv_include_columns.
+    " an include is one nameless component of get_components( ) - the header
+    " lost its fields while the rows wrote them, so every column behind it
+    " shifted, also on the way back in
+    TYPES: BEGIN OF ty_inc, b TYPE string, c TYPE string, END OF ty_inc.
+    TYPES BEGIN OF ty.
+    TYPES a TYPE string.
+    INCLUDE TYPE ty_inc.
+    TYPES d TYPE string.
+    TYPES END OF ty.
+    DATA lt_tab TYPE STANDARD TABLE OF ty WITH EMPTY KEY.
+    FIELD-SYMBOLS <back> TYPE STANDARD TABLE.
+    lt_tab = VALUE #( ( a = `1` b = `2` c = `3` d = `4` ) ).
+
+    DATA(lv_csv) = zabaputil_cl_util_context=>itab_get_csv_by_itab( lt_tab ).
+    cl_abap_unit_assert=>assert_equals( exp = |A;B;C;D\r\n1;2;3;4|
+                                        act = lv_csv ).
+
+    DATA(lr_back) = zabaputil_cl_util_context=>itab_get_itab_by_csv( lv_csv ).
+    ASSIGN lr_back->* TO <back>.
+    ASSIGN <back>[ 1 ] TO FIELD-SYMBOL(<row>).
+    ASSIGN COMPONENT `C` OF STRUCTURE <row> TO FIELD-SYMBOL(<c>).
+    cl_abap_unit_assert=>assert_equals( exp = `3`
+                                        act = <c> ).
+    ASSIGN COMPONENT `D` OF STRUCTURE <row> TO FIELD-SYMBOL(<d>).
+    cl_abap_unit_assert=>assert_equals( exp = `4`
+                                        act = <d> ).
   ENDMETHOD.
 
   METHOD json_roundtrip.
