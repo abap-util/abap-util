@@ -5409,12 +5409,13 @@ CLASS ltcl_filter_where IMPLEMENTATION.
 
   METHOD pattern_escaped.
 
-    " * and + are the wildcards - a typed _ or % only matches itself
+    " * and + are the wildcards - a typed _ or % only matches itself, and
+    " the CP escape #* is a plain star (no wildcard, nothing to escape in LIKE)
     DATA(lv_where) = zabaputil_cl_util_context=>filter_get_sql_where( VALUE #(
         ( name    = `F`
           t_range = VALUE #( ( sign = `I` option = `CP` low = `Z_T%#*+` ) ) ) ) ).
 
-    cl_abap_unit_assert=>assert_equals( exp = `( F LIKE 'Z#_T#%##%_' ESCAPE '#' )`
+    cl_abap_unit_assert=>assert_equals( exp = `( F LIKE 'Z#_T#%*_' ESCAPE '#' )`
                                         act = lv_where ).
 
   ENDMETHOD.
@@ -6619,6 +6620,7 @@ CLASS ltcl_fixes DEFINITION FINAL
     METHODS csv_empty_input          FOR TESTING.
     METHODS csv_byte_order_mark      FOR TESTING.
     METHODS sql_like_escape          FOR TESTING.
+    METHODS sql_like_cp_escape       FOR TESTING.
     METHODS sql_lowercase_keywords   FOR TESTING.
     METHODS sql_keyword_in_literal   FOR TESTING.
     METHODS sql_exclude_roundtrip    FOR TESTING.
@@ -6863,6 +6865,18 @@ CLASS ltcl_fixes IMPLEMENTATION.
     DATA(lt_back) = zabaputil_cl_util_context=>filter_get_multi_by_sql_where( lv_where ).
     cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_back ) ).
     cl_abap_unit_assert=>assert_equals( exp = `F` act = lt_back[ 1 ]-name ).
+    cl_abap_unit_assert=>assert_equals( exp = lt_filter[ 1 ]-t_range act = lt_back[ 1 ]-t_range ).
+  ENDMETHOD.
+
+  METHOD sql_like_cp_escape.
+    " # makes the next CP character plain: #* is a star, ## a hash
+    DATA(lv_cond) = zabaputil_cl_util_context=>filter_get_sql_where( VALUE #(
+      ( name = `F` t_range = VALUE #( ( sign = `I` option = `CP` low = `A#*B##C*` ) ) ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_cond CS `LIKE 'A*B##C%' ESCAPE '#'` ) ).
+    DATA(lt_filter) = VALUE zabaputil_cl_util_context=>ty_t_filter_multi(
+      ( name = `F` t_range = VALUE #( ( sign = `I` option = `CP` low = `A#*B##C+D*` ) ) ) ).
+    DATA(lt_back) = zabaputil_cl_util_context=>filter_get_multi_by_sql_where(
+                      zabaputil_cl_util_context=>filter_get_sql_where( lt_filter ) ).
     cl_abap_unit_assert=>assert_equals( exp = lt_filter[ 1 ]-t_range act = lt_back[ 1 ]-t_range ).
   ENDMETHOD.
 

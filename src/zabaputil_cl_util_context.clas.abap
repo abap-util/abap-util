@@ -4070,11 +4070,27 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE ty_s_filter_multi.
 
-    " A LIKE pattern as a CP pattern: % and _ become * and +, an escaped
-    " character stands for itself.
+    " A LIKE pattern as a CP pattern: % and _ become * and +, a plain *, +
+    " or # gets the CP escape # in front.
     CLASS-METHODS filter_sql_like_to_pattern
       IMPORTING
         val           TYPE string
+      RETURNING
+        VALUE(result) TYPE string.
+
+    " The option that selects the complement: EQ <-> NE, LT <-> GE, LE <-> GT,
+    " CP <-> NP, BT <-> NB. Any other option comes back as it is.
+    CLASS-METHODS filter_option_negate
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    " A value as an Open SQL character literal for a dynamic WHERE: in
+    " single quotes, a quote inside doubled.
+    CLASS-METHODS filter_sql_quote
+      IMPORTING
+        val           TYPE clike
       RETURNING
         VALUE(result) TYPE string.
 
@@ -5655,42 +5671,40 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA(lv_option) = range-option.
 
     IF range-sign = `E`.
-      CASE lv_option.
-        WHEN `EQ`. lv_option = `NE`.
-        WHEN `NE`. lv_option = `EQ`.
-        WHEN `LT`. lv_option = `GE`.
-        WHEN `LE`. lv_option = `GT`.
-        WHEN `GT`. lv_option = `LE`.
-        WHEN `GE`. lv_option = `LT`.
-        WHEN `CP`. lv_option = `NP`.
-        WHEN `NP`. lv_option = `CP`.
-        WHEN `BT`. lv_option = `NB`.
-        WHEN `NB`. lv_option = `BT`.
-      ENDCASE.
+      lv_option = filter_option_negate( lv_option ).
     ENDIF.
 
-    " CP: only * and + are wildcards - a _ or % the user typed is a plain
-    " character, as in an IN range, so it is escaped
-    DATA(lv_like) = replace( val  = lv_low
-                             sub  = `#`
-                             with = `##`
-                             occ  = 0 ).
-    lv_like = replace( val  = lv_like
-                       sub  = `%`
-                       with = `#%`
-                       occ  = 0 ).
-    lv_like = replace( val  = lv_like
-                       sub  = `_`
-                       with = `#_`
-                       occ  = 0 ).
-    lv_like = replace( val  = lv_like
-                       sub  = `*`
-                       with = `%`
-                       occ  = 0 ).
-    lv_like = replace( val  = lv_like
-                       sub  = `+`
-                       with = `_`
-                       occ  = 0 ).
+    " CP: * and + are the wildcards and # makes the next character a plain
+    " one (`#*` is a star), as in an IN range. A _ or % the user typed is a
+    " plain character, so it is escaped for LIKE
+    DATA(lv_like) = ``.
+    DATA(lv_pos) = 0.
+    DATA(lv_len) = strlen( lv_low ).
+    WHILE lv_pos < lv_len.
+      DATA(lv_char) = substring( val = lv_low
+                                 off = lv_pos
+                                 len = 1 ).
+      IF lv_char = `#` AND lv_pos + 1 < lv_len.
+        lv_pos = lv_pos + 1.
+        lv_char = substring( val = lv_low
+                             off = lv_pos
+                             len = 1 ).
+        IF lv_char CA `#%_`.
+          lv_like = lv_like && `#` && lv_char.
+        ELSE.
+          lv_like = lv_like && lv_char.
+        ENDIF.
+      ELSEIF lv_char = `*`.
+        lv_like = lv_like && `%`.
+      ELSEIF lv_char = `+`.
+        lv_like = lv_like && `_`.
+      ELSEIF lv_char CA `#%_`.
+        lv_like = lv_like && `#` && lv_char.
+      ELSE.
+        lv_like = lv_like && lv_char.
+      ENDIF.
+      lv_pos = lv_pos + 1.
+    ENDWHILE.
 
     CASE lv_option.
       WHEN `EQ`.
@@ -5782,18 +5796,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         ENDIF.
         LOOP AT ls_sub-t_range INTO DATA(ls_range).
           ls_range-sign = `E`.
-          CASE ls_range-option.
-            WHEN `EQ`. ls_range-option = `NE`.
-            WHEN `NE`. ls_range-option = `EQ`.
-            WHEN `LT`. ls_range-option = `GE`.
-            WHEN `LE`. ls_range-option = `GT`.
-            WHEN `GT`. ls_range-option = `LE`.
-            WHEN `GE`. ls_range-option = `LT`.
-            WHEN `CP`. ls_range-option = `NP`.
-            WHEN `NP`. ls_range-option = `CP`.
-            WHEN `BT`. ls_range-option = `NB`.
-            WHEN `NB`. ls_range-option = `BT`.
-          ENDCASE.
+          ls_range-option = filter_option_negate( ls_range-option ).
           INSERT ls_range INTO TABLE ls_filter-t_range.
         ENDLOOP.
       ENDLOOP.
@@ -5887,10 +5890,15 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                                      off = lv_pos
                                      len = 1 ).
           IF lv_escape IS NOT INITIAL AND lv_char = lv_escape AND lv_pos + 1 < strlen( lv_like ).
-            lv_plain = lv_plain && filter_sql_like_to_pattern( lv_segment )
-                    && substring( val = lv_like
-                                  off = lv_pos + 1
-                                  len = 1 ).
+            " a plain character of the LIKE pattern - in CP a #, * and +
+            " need the # in front to stay plain
+            DATA(lv_escaped) = substring( val = lv_like
+                                          off = lv_pos + 1
+                                          len = 1 ).
+            IF lv_escaped CA `#*+`.
+              lv_escaped = `#` && lv_escaped.
+            ENDIF.
+            lv_plain = lv_plain && filter_sql_like_to_pattern( lv_segment ) && lv_escaped.
             CLEAR lv_segment.
             lv_pos = lv_pos + 2.
             CONTINUE.
@@ -11420,7 +11428,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
         DATA(lv_tab1) = `E070`.
         DATA(lv_tab2) = `E07T`.
-        DATA(lv_where) = |AS4USER = '{ lv_user }' AND TRSTATUS IN ('D','L')|.
+        DATA(lv_where) = |AS4USER = { filter_sql_quote( lv_user ) } AND TRSTATUS IN ('D','L')|.
 
         " First read transports from E070
         DATA(lt_comp) = rtti_get_t_attri_by_table_name( lv_tab1 ).
@@ -11489,7 +11497,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     TRY.
         DATA(lv_tab) = `E07T`.
-        DATA(lv_where) = |TRKORR = '{ lv_trkorr }' AND LANGU = '{ sy-langu }'|.
+        DATA(lv_where) = |TRKORR = { filter_sql_quote( lv_trkorr ) } AND LANGU = { filter_sql_quote( sy-langu ) }|.
 
         SELECT SINGLE as4text
           FROM (lv_tab)
@@ -11534,7 +11542,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     TRY.
         DATA(lv_tab) = `E070`.
-        DATA(lv_where) = |TRKORR = '{ lv_trkorr }'|.
+        DATA(lv_where) = |TRKORR = { filter_sql_quote( lv_trkorr ) }|.
 
         SELECT SINGLE trstatus
           FROM (lv_tab)
@@ -12790,7 +12798,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       " Cloud: use released CDS view I_ChangeDocument
       TRY.
           DATA(lv_cds) = `I_CHANGEDOCUMENTITEM`.
-          DATA(lv_where_c) = |OBJECTCLASS = '{ objectclass }' AND OBJECTID = '{ objectid }'|.
+          " the values quoted - a quote inside them would end the literal
+          DATA(lv_where_c) = |OBJECTCLASS = { filter_sql_quote( objectclass ) } AND OBJECTID = { filter_sql_quote( objectid ) }|.
           IF date_from IS NOT INITIAL.
             lv_where_c = |{ lv_where_c } AND CREATIONDATE >= '{ date_from }'|.
           ENDIF.
@@ -12816,10 +12825,6 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
           LOOP AT <cds_tab> ASSIGNING <cds_row>.
             DATA(ls_doc_c) = VALUE ty_s_changdoc( ).
-            ASSIGN COMPONENT `CHANGEDOCOBJECTCLASS` OF STRUCTURE <cds_row> TO <cds_fld>.
-            IF sy-subrc <> 0.
-              ASSIGN COMPONENT `OBJECTCLASS` OF STRUCTURE <cds_row> TO <cds_fld>.
-            ENDIF.
             ASSIGN COMPONENT `CHANGEDOCUMENT` OF STRUCTURE <cds_row> TO <cds_fld>.
             IF sy-subrc = 0. ls_doc_c-changenr = <cds_fld>. ENDIF.
             ASSIGN COMPONENT `CREATEDBYUSER` OF STRUCTURE <cds_row> TO <cds_fld>.
@@ -18127,14 +18132,53 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD filter_sql_like_to_pattern.
 
-    result = replace( val  = val
-                      sub  = `%`
-                      with = `*`
-                      occ  = 0 ).
-    result = replace( val  = result
-                      sub  = `_`
-                      with = `+`
-                      occ  = 0 ).
+    " % and _ are the LIKE wildcards; a *, + or # in a LIKE pattern is a
+    " plain character, which CP writes with the escape # in front
+    DATA(lv_pos) = 0.
+    DATA(lv_len) = strlen( val ).
+    WHILE lv_pos < lv_len.
+      DATA(lv_char) = substring( val = val
+                                 off = lv_pos
+                                 len = 1 ).
+      CASE lv_char.
+        WHEN `%`.
+          result = result && `*`.
+        WHEN `_`.
+          result = result && `+`.
+        WHEN `*` OR `+` OR `#`.
+          result = result && `#` && lv_char.
+        WHEN OTHERS.
+          result = result && lv_char.
+      ENDCASE.
+      lv_pos = lv_pos + 1.
+    ENDWHILE.
+
+  ENDMETHOD.
+
+  METHOD filter_option_negate.
+
+    result = val.
+    CASE result.
+      WHEN `EQ`. result = `NE`.
+      WHEN `NE`. result = `EQ`.
+      WHEN `LT`. result = `GE`.
+      WHEN `LE`. result = `GT`.
+      WHEN `GT`. result = `LE`.
+      WHEN `GE`. result = `LT`.
+      WHEN `CP`. result = `NP`.
+      WHEN `NP`. result = `CP`.
+      WHEN `BT`. result = `NB`.
+      WHEN `NB`. result = `BT`.
+    ENDCASE.
+
+  ENDMETHOD.
+
+  METHOD filter_sql_quote.
+
+    result = |'{ replace( val  = CONV string( val )
+                          sub  = `'`
+                          with = `''`
+                          occ  = 0 ) }'|.
 
   ENDMETHOD.
 
