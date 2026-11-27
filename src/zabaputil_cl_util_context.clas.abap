@@ -16522,6 +16522,20 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       WHILE lv_paragraph IS NOT INITIAL.
         DATA(lv_len) = nmin( val1 = 132
                              val2 = strlen( lv_paragraph ) ).
+        " TDLINE is CHAR132: a blank at the end of a chunk is gone when the
+        " line is read back, and `=` joins the chunks without one - `word
+        " next` came back as `wordnext`. The blanks move to the next chunk
+        IF lv_len < strlen( lv_paragraph ).
+          DATA(lv_cut) = lv_len.
+          WHILE lv_cut > 0 AND substring( val = lv_paragraph
+                                          off = lv_cut - 1
+                                          len = 1 ) = ` `.
+            lv_cut = lv_cut - 1.
+          ENDWHILE.
+          IF lv_cut > 0.
+            lv_len = lv_cut.
+          ENDIF.
+        ENDIF.
         INSERT VALUE #( format = lv_format
                         line   = substring( val = lv_paragraph
                                             len = lv_len ) ) INTO TABLE result.

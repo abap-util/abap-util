@@ -6187,6 +6187,7 @@ CLASS ltcl_system_api DEFINITION FINAL
     METHODS longtext_lines_split      FOR TESTING.
     METHODS longtext_lines_join       FOR TESTING.
     METHODS longtext_lines_roundtrip  FOR TESTING.
+    METHODS longtext_lines_blank_cut  FOR TESTING.
     METHODS parallel_sequential       FOR TESTING.
 
 ENDCLASS.
@@ -6256,6 +6257,32 @@ CLASS ltcl_system_api IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
         exp = |Dear customer,{ zabaputil_cl_util_context=>cv_char_util_newline }thanks.|
         act = zabaputil_cl_util_context=>longtext_from_lines( lt_line ) ).
+
+  ENDMETHOD.
+
+  METHOD longtext_lines_blank_cut.
+
+    " a blank exactly at the 132-character boundary
+    DATA(lv_text) = repeat( val = `a`
+                            occ = 131 ) && ` next word`.
+    DATA(lt_line) = zabaputil_cl_util_context=>longtext_to_lines( lv_text ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = lines( lt_line ) ).
+    " no chunk ends in a blank - TDLINE (CHAR132) would drop it
+    cl_abap_unit_assert=>assert_equals( exp = 131
+                                        act = strlen( lt_line[ 1 ]-line ) ).
+    cl_abap_unit_assert=>assert_equals( exp = ` next word`
+                                        act = lt_line[ 2 ]-line ).
+
+    " as stored: every line through CHAR132 and back
+    DATA lv_tdline TYPE c LENGTH 132.
+    LOOP AT lt_line REFERENCE INTO DATA(lr_line).
+      lv_tdline = lr_line->line.
+      lr_line->line = lv_tdline.
+    ENDLOOP.
+    cl_abap_unit_assert=>assert_equals( exp = lv_text
+                                        act = zabaputil_cl_util_context=>longtext_from_lines( lt_line ) ).
 
   ENDMETHOD.
 
