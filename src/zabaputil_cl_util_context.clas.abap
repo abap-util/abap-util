@@ -331,11 +331,11 @@ CLASS zabaputil_cl_util_context DEFINITION
     " (every numeric kind), S for a string (character, numeric text, string
     " and binary - all of which |{ }| renders as ajson does), D for a date
     " and T for a time (which ajson writes as ISO text, YYYY-MM-DD and
-    " HH:MM:SS, and empty when initial), and empty for a kind no such
-    " writer should take on - utclong, an enumeration, and a packed field
-    " TYPED timestamp or timestampl, which ajson converts through the time
-    " zone (rare in a bound row, and ajson's own rendering stays the
-    " reference for them)
+    " HH:MM:SS, and empty when initial), U for a packed field TYPED
+    " timestamp and L for one typed timestampl (by type name as well -
+    " ajson writes both as an ISO instant in UTC, time_get_iso_by_stamp
+    " and time_get_iso_by_stampl), and empty for a kind no such writer
+    " should take on - utclong and an enumeration
     TYPES:
       BEGIN OF ty_s_flat_comp,
         name      TYPE string,
@@ -345,19 +345,33 @@ CLASS zabaputil_cl_util_context DEFINITION
 
     "! The components of the FLAT structure behind a data reference - the
     "! structure itself, or the line of the STANDARD table it points to -
-    "! each with its json_kind (see the type). Empty when the reference
-    "! points to anything else (a scalar, a sorted or hashed table, a table
-    "! of scalars), when any component is no elementary one (a nested
-    "! structure, a table, a reference), when the structure has an include
-    "! (whose components are a question of their own), or when a component
-    "! has no json_kind - so a caller that gets rows can write every cell
-    "! of every row as a scalar, and one that gets none takes the general
-    "! road
+    "! each with its json_kind (see the type). The components of an include
+    "! are listed in its place, under the names the structure addresses
+    "! them by (a RENAMING WITH SUFFIX applied, an include of an include
+    "! resolved): the included view of the structure, which is what ajson
+    "! walks. Empty when the reference points to anything else (a scalar, a
+    "! sorted or hashed table, a table of scalars), when any component - an
+    "! included one too - is no elementary one (a nested structure, a
+    "! table, a reference), or when a component has no json_kind - so a
+    "! caller that gets rows can write every cell of every row as a scalar,
+    "! and one that gets none takes the general road
     CLASS-METHODS rtti_get_flat_components
       IMPORTING
         val           TYPE REF TO data
       RETURNING
         VALUE(result) TYPE ty_t_flat_comp.
+
+    "! Whether the type of the data object behind a data reference names a
+    "! component with a namespace (`/ABC/FIELD`) - in the structure itself,
+    "! in the line of the table it is, and in every structure and table line
+    "! below them (an include's components count, under the names the
+    "! structure addresses them by). References are not followed, and a
+    "! reference RTTI cannot describe answers false
+    CLASS-METHODS rtti_check_namespaced
+      IMPORTING
+        val           TYPE REF TO data
+      RETURNING
+        VALUE(result) TYPE abap_bool.
 
     CLASS-METHODS rtti_get_typedescr_by_data
       IMPORTING
@@ -1121,6 +1135,16 @@ CLASS zabaputil_cl_util_context DEFINITION
         VALUE(result) TYPE abap_bool.
 
     CLASS-METHODS check_is_numeric_string
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE abap_bool.
+
+    "! Is val, surrounding blanks aside, one to nine digits - a text that
+    "! converts into an i without rounding (`1.5`), a sign (`+1`, `-1`), an
+    "! exponent (`1e3`) or an overflow. For a number that comes from outside
+    "! (a browser, a request) and must never end it with a dump.
+    CLASS-METHODS check_int_digits
       IMPORTING
         val           TYPE clike
       RETURNING
@@ -1981,6 +2005,29 @@ CLASS zabaputil_cl_util_context DEFINITION
     CLASS-METHODS check_abap_cloud
       RETURNING
         VALUE(result) TYPE abap_bool.
+
+    " the system fields sy_get hands out, in the types SYST gives them
+    TYPES:
+      BEGIN OF ty_s_sy,
+        datum TYPE d,
+        uzeit TYPE t,
+        uname TYPE c LENGTH 12,
+        sysid TYPE c LENGTH 8,
+        saprl TYPE c LENGTH 4,
+      END OF ty_s_sy.
+
+    " THE one place that reads a system field for its VALUE - date, time,
+    " user, system id, release. Every other class asks here
+    " (sy_get( )-uname), for two reasons: ABAP for Cloud Development reports
+    " the old system fields on every statement that names one ("The old
+    " variant of SY-DATUM should not be used ..."), so one reader is one
+    " finding per field instead of one per use; and the day one of them
+    " has to come from another API, it changes here and nowhere else.
+    " Not meant: sy-subrc, sy-tabix and sy-index - those are the result of
+    " the statement before them and have to be read where it stands
+    CLASS-METHODS sy_get
+      RETURNING
+        VALUE(result) TYPE ty_s_sy.
 
     CLASS-METHODS context_get_user_tech
       RETURNING
@@ -3234,6 +3281,18 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE abap_bool.
 
+    " why a class cannot be described - the exception describe_by_name
+    " raised for a class that exists but cannot be loaded (a syntax error in
+    " it, a missing dependency); unbound when the class describes fine or
+    " does not exist at all. The follow-up question to a "no" of
+    " rtti_check_class_impl_intf, so a caller can say "broken" instead of
+    " "does not exist". Not cached: it is asked once, after a failure
+    CLASS-METHODS rtti_get_class_load_error
+      IMPORTING
+        class         TYPE clike
+      RETURNING
+        VALUE(result) TYPE REF TO cx_root.
+
     " the name of the class or interface an UNBOUND object reference
     " variable is typed with, upper case: `DATA li TYPE REF TO zif_any.`
     " answers `ZIF_ANY`. The way to hand an object name to a dynamic lookup
@@ -3245,6 +3304,28 @@ CLASS zabaputil_cl_util_context DEFINITION
     CLASS-METHODS rtti_get_ref_type_name
       IMPORTING
         val           TYPE any
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! A UTC time stamp as an ISO 8601 instant, `YYYY-MM-DDTHH:MM:SSZ` -
+    "! `0000-00-00T00:00:00Z` for an initial one and for one that is no
+    "! valid point in time. Statement for statement what
+    "! z2ui5_cl_ajson's lcl_abap_to_json=>format_timestamp does, because a
+    "! caller writes it into a document next to what ajson wrote
+    "! (z2ui5_cl_ui5_srv_model=>json_row): the two must not differ in a
+    "! single character, whatever the platform makes of an odd value
+    CLASS-METHODS time_get_iso_by_stamp
+      IMPORTING
+        val           TYPE timestamp
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! The same for a long time stamp, with its fraction -
+    "! `YYYY-MM-DDTHH:MM:SS.fZ`, the trailing zeros of the fraction dropped
+    "! and a single 0 left of an empty one (format_timestampl of ajson)
+    CLASS-METHODS time_get_iso_by_stampl
+      IMPORTING
+        val           TYPE timestampl
       RETURNING
         VALUE(result) TYPE string.
 
@@ -3753,6 +3834,15 @@ CLASS zabaputil_cl_util_context DEFINITION
         val           TYPE REF TO cl_abap_datadescr
       RETURNING
         VALUE(result) TYPE ty_s_flat_comp-json_kind.
+
+    " the type half of rtti_check_namespaced: a structure, the line of a
+    " table, and what is below them - depth-bounded like expand_components
+    CLASS-METHODS rtti_check_namespaced_type
+      IMPORTING
+        type          TYPE REF TO cl_abap_typedescr
+        depth         TYPE i DEFAULT 0
+      RETURNING
+        VALUE(result) TYPE abap_bool.
 
     " the character set c_escape_xml guards against, concatenated once per
     " roll area instead of once per attribute value. Lazily filled on first
@@ -4531,8 +4621,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       DATA(lv_index) = 0.
       LOOP AT <lt_source> ASSIGNING FIELD-SYMBOL(<ls_source>).
         lv_index = lv_index + 1.
+        UNASSIGN <ls_range>.
         ASSIGN lt_tab[ lv_index ] TO <ls_range>.
-        IF sy-subrc <> 0.
+        IF <ls_range> IS NOT ASSIGNED.
           EXIT.
         ENDIF.
         UNASSIGN <lv_part>.
@@ -4952,16 +5043,21 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD rtti_get_t_attri_by_oref.
 
+    DATA lo_descr TYPE REF TO cl_abap_typedescr.
+
     " describe_by_object_ref raises the classic exception REFERENCE_IS_INITIAL
     " for an initial reference - called functionally that is a runtime error no
-    " CATCH reaches. The open-abap runtime of the transpiled build declares no
-    " EXCEPTIONS for describe_by_data_ref, so the reference is tested here instead
-    IF val IS INITIAL.
+    " CATCH reaches
+    cl_abap_objectdescr=>describe_by_object_ref( EXPORTING  p_object_ref         = val
+                                                 RECEIVING p_descr_ref           = lo_descr
+                                                 EXCEPTIONS reference_is_initial = 1
+                                                            OTHERS               = 2 ).
+    IF sy-subrc <> 0.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
         EXPORTING
           val = `RTTI_REFERENCE_IS_INITIAL`.
     ENDIF.
-    result = CAST cl_abap_classdescr( cl_abap_objectdescr=>describe_by_object_ref( val ) )->attributes.
+    result = CAST cl_abap_classdescr( lo_descr )->attributes.
 
   ENDMETHOD.
 
@@ -4979,14 +5075,16 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     " a data object is no type name
     lo_type = cl_abap_typedescr=>describe_by_data( val ).
     IF lo_type->kind = cl_abap_typedescr=>kind_ref.
-      " an initial reference would be REFERENCE_IS_INITIAL, a runtime error -
-      " see rtti_get_t_attri_by_oref
-      IF val IS INITIAL.
+      " REFERENCE_IS_INITIAL - see rtti_get_t_attri_by_oref
+      cl_abap_typedescr=>describe_by_data_ref( EXPORTING  p_data_ref           = val
+                                               RECEIVING p_descr_ref           = lo_type
+                                               EXCEPTIONS reference_is_initial = 1
+                                                          OTHERS               = 2 ).
+      IF sy-subrc <> 0.
         RAISE EXCEPTION TYPE zabaputil_cx_util_error
           EXPORTING
             val = `RTTI_REFERENCE_IS_INITIAL`.
       ENDIF.
-      lo_type = cl_abap_typedescr=>describe_by_data_ref( val ).
     ENDIF.
 
     CASE lo_type->kind.
@@ -6156,7 +6254,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     " exception, so the TRY below cannot intercept it and the caller would go
     " down instead of reporting the error it was diagnosing. sy-saprl is
     " `OPEN` on that runtime and a real release everywhere else.
-    IF sy-saprl = `OPEN`.
+    IF sy_get( )-saprl = `OPEN`.
       RETURN.
     ENDIF.
 
@@ -6442,14 +6540,16 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD rtti_get_typedescr_by_data_ref.
 
-    " an initial reference would be REFERENCE_IS_INITIAL, a runtime error -
-    " see rtti_get_t_attri_by_oref
-    IF val IS INITIAL.
+    " REFERENCE_IS_INITIAL - see rtti_get_t_attri_by_oref
+    cl_abap_typedescr=>describe_by_data_ref( EXPORTING  p_data_ref           = val
+                                             RECEIVING p_descr_ref           = result
+                                             EXCEPTIONS reference_is_initial = 1
+                                                        OTHERS               = 2 ).
+    IF sy-subrc <> 0.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
         EXPORTING
           val = `RTTI_REFERENCE_IS_INITIAL`.
     ENDIF.
-    result = cl_abap_typedescr=>describe_by_data_ref( val ).
 
   ENDMETHOD.
 
@@ -7154,12 +7254,17 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD rtti_check_table_standard.
 
-    " the CATCH below cannot catch REFERENCE_IS_INITIAL, a classic exception
-    IF val IS INITIAL.
+    DATA lo_type TYPE REF TO cl_abap_typedescr.
+
+    " REFERENCE_IS_INITIAL is a classic exception, the CATCH below cannot see it
+    cl_abap_typedescr=>describe_by_data_ref( EXPORTING  p_data_ref           = val
+                                             RECEIVING p_descr_ref           = lo_type
+                                             EXCEPTIONS reference_is_initial = 1
+                                                        OTHERS               = 2 ).
+    IF sy-subrc <> 0.
       RETURN.
     ENDIF.
     TRY.
-        DATA(lo_type) = cl_abap_typedescr=>describe_by_data_ref( val ).
         IF lo_type->kind <> cl_abap_typedescr=>kind_table.
           RETURN.
         ENDIF.
@@ -7172,12 +7277,15 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD rtti_get_flat_components.
 
     DATA lo_type TYPE REF TO cl_abap_typedescr.
-    " the CATCH below cannot catch REFERENCE_IS_INITIAL, a classic exception
-    IF val IS INITIAL.
+    " REFERENCE_IS_INITIAL is a classic exception, the CATCH below cannot see it
+    cl_abap_typedescr=>describe_by_data_ref( EXPORTING  p_data_ref           = val
+                                             RECEIVING p_descr_ref           = lo_type
+                                             EXCEPTIONS reference_is_initial = 1
+                                                        OTHERS               = 2 ).
+    IF sy-subrc <> 0.
       RETURN.
     ENDIF.
     TRY.
-        lo_type = cl_abap_typedescr=>describe_by_data_ref( val ).
         IF lo_type->kind = cl_abap_typedescr=>kind_table.
           DATA(lo_table) = CAST cl_abap_tabledescr( lo_type ).
           IF lo_table->table_kind <> cl_abap_tabledescr=>tablekind_std.
@@ -7188,10 +7296,20 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         IF lo_type->kind <> cl_abap_typedescr=>kind_struct.
           RETURN.
         ENDIF.
-        DATA(lt_comp) = CAST cl_abap_structdescr( lo_type )->get_components( ).
+        " the included view, not get_components( ): an include arrives
+        " there as ONE component (as_include) that no cell can be read
+        " by, and a row type with an include - an append, a reuse
+        " structure, a DDIC table's .INCLUDE - is what many bound tables
+        " are made of. The view lists every field under the name
+        " ASSIGN COMPONENT takes, suffix applied and nested includes
+        " resolved, and it is the very call ajson's convert_struc makes -
+        " so the names are ajson's on every release, by construction. A
+        " NESTED structure stays one component of a structure kind and
+        " ends the fast path below, as before
+        DATA(lt_comp) = CAST cl_abap_structdescr( lo_type )->get_included_view( ).
         LOOP AT lt_comp REFERENCE INTO DATA(lr_comp).
           DATA(ls_flat) = VALUE ty_s_flat_comp( name = lr_comp->name ).
-          IF lr_comp->as_include = abap_true OR lr_comp->type->kind <> cl_abap_typedescr=>kind_elem.
+          IF lr_comp->type->kind <> cl_abap_typedescr=>kind_elem.
             CLEAR result.
             RETURN.
           ENDIF.
@@ -7218,7 +7336,11 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           OR `\TYPE=FLAG` OR `\TYPE=XFELD`.
         result = `B`.
         RETURN.
-      WHEN `\TYPE=TIMESTAMP` OR `\TYPE=TIMESTAMPL`.
+      WHEN `\TYPE=TIMESTAMP`.
+        result = `U`.
+        RETURN.
+      WHEN `\TYPE=TIMESTAMPL`.
+        result = `L`.
         RETURN.
     ENDCASE.
     CASE val->type_kind.
@@ -7237,6 +7359,58 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         " `8`: typekind_int8, a constant lower releases do not have
         result = `N`.
     ENDCASE.
+
+  ENDMETHOD.
+
+  METHOD rtti_check_namespaced.
+
+    DATA lo_type TYPE REF TO cl_abap_typedescr.
+    " REFERENCE_IS_INITIAL is a classic exception, the CATCH below cannot see it
+    cl_abap_typedescr=>describe_by_data_ref( EXPORTING  p_data_ref           = val
+                                             RECEIVING p_descr_ref           = lo_type
+                                             EXCEPTIONS reference_is_initial = 1
+                                                        OTHERS               = 2 ).
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    TRY.
+        result = rtti_check_namespaced_type( lo_type ).
+      CATCH cx_root.
+        result = abap_false.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD rtti_check_namespaced_type.
+
+    " no type nests deeper than this without a reference, which is not
+    " followed - the bound is a guard, not a limit an app meets
+    IF depth > 32.
+      RETURN.
+    ENDIF.
+    DATA(lo_type) = type.
+    IF lo_type->kind = cl_abap_typedescr=>kind_table.
+      lo_type = CAST cl_abap_tabledescr( lo_type )->get_table_line_type( ).
+    ENDIF.
+    IF lo_type->kind <> cl_abap_typedescr=>kind_struct.
+      RETURN.
+    ENDIF.
+    " the included view, as rtti_get_flat_components reads it: the name of
+    " an include's component is the one the structure addresses it by
+    DATA(lt_comp) = CAST cl_abap_structdescr( lo_type )->get_included_view( ).
+    LOOP AT lt_comp REFERENCE INTO DATA(lr_comp).
+      IF strlen( lr_comp->name ) > 1 AND lr_comp->name(1) = `/`.
+        result = abap_true.
+        RETURN.
+      ENDIF.
+      IF ( lr_comp->type->kind = cl_abap_typedescr=>kind_struct
+           OR lr_comp->type->kind = cl_abap_typedescr=>kind_table )
+          AND rtti_check_namespaced_type( type  = lr_comp->type
+                                          depth = depth + 1 ) = abap_true.
+        result = abap_true.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
 
   ENDMETHOD.
 
@@ -7721,6 +7895,15 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     result = lv_has_digit.
   ENDMETHOD.
 
+  METHOD check_int_digits.
+
+    " condensed first: `1 000` would pass a check that allows blanks and
+    " then dump in a conversion, and a blanks-only value is no number
+    DATA(lv_val) = condense( val ).
+    result = xsdbool( lv_val IS NOT INITIAL AND lv_val CO `0123456789` AND strlen( lv_val ) <= 9 ).
+
+  ENDMETHOD.
+
   METHOD check_is_date_valid.
     DATA lv_date  TYPE d.
     DATA lv_str   TYPE string.
@@ -8005,6 +8188,16 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDTRY.
     gv_check_cloud_cached = abap_true.
     result = gv_check_cloud.
+
+  ENDMETHOD.
+
+  METHOD sy_get.
+
+    result-datum = sy-datum.
+    result-uzeit = sy-uzeit.
+    result-uname = sy-uname.
+    result-sysid = sy-sysid.
+    result-saprl = sy-saprl.
 
   ENDMETHOD.
 
@@ -8564,7 +8757,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    ddic = CORRESPONDING #( BASE ( ddic ) <ddic> ).
+    MOVE-CORRESPONDING <ddic> TO ddic.
     texts-header = ddic-reptext.
     texts-short  = ddic-scrtext_s.
     texts-medium = ddic-scrtext_m.
@@ -9316,10 +9509,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CONTINUE.
       ENDIF.
       ASSIGN COMPONENT ls_attri->name OF STRUCTURE val TO FIELD-SYMBOL(<flag>).
-      IF sy-subrc <> 0.
-        CONTINUE.
-      ENDIF.
-      IF <flag> IS INITIAL.
+      IF sy-subrc <> 0 OR <flag> IS INITIAL.
         CONTINUE.
       ENDIF.
       INSERT ls_attri->name+lv_len INTO TABLE result.
@@ -15347,12 +15537,34 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           result = xsdbool( line_exists( lo_classdescr->interfaces[ name = lv_intf ] ) ). "#EC CI_SORTSEQ
         ENDIF.
 
-      CATCH cx_root ##NO_HANDLER.
+      CATCH cx_sy_move_cast_error ##NO_HANDLER.
+        " an interface or a data type - no class, a plain abap_false
+      CATCH cx_root.
+        " the descriptor failed - not cached, so a class fixed meanwhile is
+        " checked anew; rtti_get_class_load_error( ) says why
+        RETURN.
     ENDTRY.
 
     INSERT VALUE #( name   = lv_class
                     intf   = lv_intf
                     result = result ) INTO TABLE gt_class_impl_intf.
+
+  ENDMETHOD.
+
+  METHOD rtti_get_class_load_error.
+
+    DATA lo_typedescr TYPE REF TO cl_abap_typedescr.
+
+    TRY.
+        cl_abap_classdescr=>describe_by_name( EXPORTING p_name          = to_upper( class )
+                                              RECEIVING p_descr_ref     = lo_typedescr
+                                              EXCEPTIONS type_not_found = 1 ).
+        IF sy-subrc <> 0.
+          " no such type at all - that is no load error
+          CLEAR result.
+        ENDIF.
+      CATCH cx_root INTO result ##NO_HANDLER.
+    ENDTRY.
 
   ENDMETHOD.
 
@@ -15393,6 +15605,58 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDIF.
 
     result = ( time_get_seconds( time_to ) - time_get_seconds( time_from ) ) * 1000.
+
+  ENDMETHOD.
+
+  METHOD time_get_iso_by_stamp.
+
+    " the statements of ajson's format_timestamp, unchanged - the zone as
+    " a C(6) constant, the date and the time initial before the
+    " conversion, which leaves them alone for a time stamp it refuses
+    CONSTANTS lc_utc TYPE c LENGTH 6 VALUE 'UTC'.
+
+    DATA lv_date TYPE d.
+    DATA lv_time TYPE t.
+
+    CONVERT TIME STAMP val TIME ZONE lc_utc
+      INTO DATE lv_date TIME lv_time.
+
+    result = lv_date+0(4) && `-` && lv_date+4(2) && `-` && lv_date+6(2) &&
+             `T` &&
+             lv_time+0(2) && `:` && lv_time+2(2) && `:` && lv_time+4(2) &&
+             `Z`.
+
+  ENDMETHOD.
+
+  METHOD time_get_iso_by_stampl.
+
+    " the statements of ajson's format_timestampl, unchanged - see
+    " time_get_iso_by_stamp; the fraction is taken from the rendered
+    " number, not computed
+    CONSTANTS lc_utc TYPE c LENGTH 6 VALUE 'UTC'.
+
+    DATA lv_date TYPE d.
+    DATA lv_time TYPE t.
+    DATA lv_frac TYPE string.
+    DATA lv_int  TYPE string.
+
+    CONVERT TIME STAMP val TIME ZONE lc_utc
+      INTO DATE lv_date TIME lv_time.
+
+    SPLIT |{ val }| AT `.` INTO lv_int lv_frac.
+    lv_frac = shift_right( val = lv_frac
+                           sub = `0` ).
+    lv_frac = shift_left( val = lv_frac
+                          sub = ` ` ).
+    IF lv_frac IS INITIAL.
+      lv_frac = `0`.
+    ENDIF.
+
+    result = lv_date+0(4) && `-` && lv_date+4(2) && `-` && lv_date+6(2) &&
+             `T` &&
+             lv_time+0(2) && `:` && lv_time+2(2) && `:` && lv_time+4(2) &&
+             `.` && lv_frac &&
+             `Z`.
 
   ENDMETHOD.
 
