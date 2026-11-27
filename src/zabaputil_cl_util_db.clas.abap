@@ -171,8 +171,16 @@ CLASS zabaputil_cl_util_db IMPLEMENTATION.
         uname   = uname
         handle  = handle
         handle2 = handle2
-        handle3 = handle3
-        data    = zabaputil_cl_util_context=>xml_stringify( data ) ).
+        handle3 = handle3 ).
+    " the declared static exception of xml_stringify (data it cannot
+    " serialize) left save( ) as CX_SY_NO_HANDLER
+    TRY.
+        ls_db-data = zabaputil_cl_util_context=>xml_stringify( data ).
+      CATCH cx_transformation_error INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING val      = `DB_SAVE_FAILED - the data cannot be serialized`
+                    previous = x.
+    ENDTRY.
 
     IF lv_id IS NOT INITIAL.
       ls_db-id = lv_id.

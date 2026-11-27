@@ -5486,9 +5486,19 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    CALL TRANSFORMATION id
-         SOURCE XML xml
-         RESULT data = any.
+    " a broken document, or one written for a type that has changed since,
+    " raises a static transformation error - out of a method without RAISING
+    " it reached the caller as CX_SY_NO_HANDLER, which no CATCH of this
+    " repository's one exception class sees
+    TRY.
+        CALL TRANSFORMATION id
+             SOURCE XML xml
+             RESULT data = any.
+      CATCH cx_transformation_error INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING val      = `XML_PARSE_ERROR - the XML does not fit the target`
+                    previous = x.
+    ENDTRY.
 
   ENDMETHOD.
 
