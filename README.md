@@ -14,7 +14,7 @@ Utility functions for ABAP Cloud and Standard ABAP
 #### Key Features
 * Simplified SAP APIs as class-based methods — one façade class, no function modules to remember
 * One source for ABAP Cloud, Standard ABAP and NetWeaver 7.02 — release differences are hidden behind the methods
-* Strings, JSON/XML/CSV/XLSX, RTTI, messages, logging, locks, calendar, transports, persistence, GS1 barcodes, parallel processing, RFC, attachments and more
+* Strings, JSON/XML/CSV/XLSX, RTTI, messages, logging, locks, calendar, transports, persistence, GS1 and custom barcodes, parallel processing, RFC, attachments and more
 * Unit-tested without an SAP system — the tests run transpiled to JavaScript on every pull request
 
 #### Compatibility
@@ -403,6 +403,30 @@ DATA(lv_text)  = zabaputil_cl_util_context=>barcode_gs1_build( t_gs1 = lt_gs1  h
 " Check digits of GTIN, GLN, SSCC
 DATA(lv_digit) = zabaputil_cl_util_context=>barcode_gs1_calc_check_digit( `0950600013435` ). " => '2'
 DATA(lv_ok)    = zabaputil_cl_util_context=>check_is_gs1_check_digit( `09506000134352` ).    " => abap_true
+```
+
+###### Barcodes (own formats)
+```abap
+" A label that is not GS1: describe its fields once, then split every scan with it.
+" Fields with a separator between them - the n-th part is the n-th field
+DATA(lt_value) = zabaputil_cl_util_context=>barcode_split_separator(
+    val       = `4711|LOT42|12`
+    separator = `|`
+    t_field   = VALUE #( ( name = `MATERIAL` ) ( name = `BATCH` ) ( name = `QUANTITY` optional = abap_true ) ) ).
+" => name = `MATERIAL` value = `4711`, name = `BATCH` value = `LOT42`, name = `QUANTITY` value = `12`
+
+" Fields at fixed places - pos counts from 1, len 0 takes the rest, padding is dropped
+lt_value = zabaputil_cl_util_context=>barcode_split_position(
+    val     = `0004711LOT42A012`
+    t_field = VALUE #( ( name = `MATERIAL` pos = 1 len = 7 ) ( name = `BATCH` pos = 8 len = 6 ) ( name = `QUANTITY` pos = 14 ) ) ).
+
+" Fields that say what they are by a prefix - one per scan, or several with GS (or `separator`) between them
+lt_value = zabaputil_cl_util_context=>barcode_split_prefix(
+    val     = `Q12`
+    t_field = VALUE #( ( name = `MATERIAL` prefix = `P` optional = abap_true ) ( name = `QUANTITY` prefix = `Q` optional = abap_true ) ) ).
+" => name = `QUANTITY` value = `12`
+
+" A missing field that is not optional and a value longer than len raise zabaputil_cx_util_error
 ```
 
 ###### Error Handling
