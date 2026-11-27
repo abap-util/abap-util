@@ -219,6 +219,8 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     DATA lv_destination TYPE c LENGTH 32.
     lv_destination = destination.
     DATA(lv_url) = CONV string( url ).
+    " the classic exception by name - each one has another fix
+    DATA lv_error TYPE string.
 
     TRY.
 
@@ -236,6 +238,18 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
               plugin_not_active        = 4
               internal_error           = 5
               OTHERS                   = 6.
+          CASE sy-subrc.
+            WHEN 0.
+            WHEN 1. lv_error = `ARGUMENT_NOT_FOUND`.
+            WHEN 2. lv_error = `DESTINATION_NOT_FOUND`.
+            WHEN 3. lv_error = `DESTINATION_NO_AUTHORITY`.
+            WHEN 4. lv_error = `PLUGIN_NOT_ACTIVE`.
+            WHEN 5. lv_error = `INTERNAL_ERROR`.
+            WHEN OTHERS. lv_error = `OTHERS`.
+          ENDCASE.
+          IF lv_error IS NOT INITIAL.
+            lv_error = |{ lv_error } ({ condense( lv_destination ) })|.
+          ENDIF.
 
         ELSE.
 
@@ -249,10 +263,18 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
               plugin_not_active  = 2
               internal_error     = 3
               OTHERS             = 4.
+          " the url itself stays out of the text - its query may carry a key
+          CASE sy-subrc.
+            WHEN 0.
+            WHEN 1. lv_error = `ARGUMENT_NOT_FOUND`.
+            WHEN 2. lv_error = `PLUGIN_NOT_ACTIVE`.
+            WHEN 3. lv_error = `INTERNAL_ERROR`.
+            WHEN OTHERS. lv_error = `OTHERS`.
+          ENDCASE.
 
         ENDIF.
 
-        IF sy-subrc <> 0.
+        IF lv_error IS NOT INITIAL.
           CLEAR result.
         ENDIF.
 
@@ -261,9 +283,14 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
           EXPORTING val = x.
     ENDTRY.
 
+    " destination_no_authority, destination_not_found and plugin_not_active
+    " (HTTPS not set up) need different fixes - the text names which one
     IF result IS NOT BOUND.
+      IF lv_error IS INITIAL.
+        lv_error = `check the destination/url configuration`.
+      ENDIF.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
-        EXPORTING val = `HTTP_CLIENT_CREATE_ERROR - check the destination/url configuration`.
+        EXPORTING val = |HTTP_CLIENT_CREATE_ERROR - { lv_error }|.
     ENDIF.
 
     " No logon popup: the client runs inside an ICF request, a work process
