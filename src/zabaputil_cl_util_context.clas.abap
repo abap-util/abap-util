@@ -12274,8 +12274,29 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         DATA(lv_name) = c_trim_upper( val ).
         lv_name = replace( val = lv_name sub = `ENQUEUE_` with = `` ).
 
-        LOOP AT lt_locks INTO DATA(ls_lock)
-             WHERE lock_object CS lv_name.
+        " SEQG3-GNAME (lock_object) holds the TABLE that is locked, not the
+        " name of the lock object - the tables of a lock object are in
+        " DD26E. Where DD26E cannot be read the names are compared as before
+        TYPES ty_c30 TYPE c LENGTH 30.
+        DATA lt_tabname TYPE STANDARD TABLE OF ty_c30 WITH EMPTY KEY.
+        DATA lv_lock_object TYPE ty_c30.
+        lv_lock_object = lv_name.
+        TRY.
+            DATA(lv_dd26e) = `DD26E`.
+            SELECT tabname FROM (lv_dd26e)
+              WHERE viewname = @lv_lock_object
+              INTO TABLE @lt_tabname.
+          CATCH cx_root ##NO_HANDLER.
+        ENDTRY.
+
+        LOOP AT lt_locks INTO DATA(ls_lock).
+          IF lt_tabname IS INITIAL.
+            IF ls_lock-lock_object NS lv_name.
+              CONTINUE.
+            ENDIF.
+          ELSEIF NOT line_exists( lt_tabname[ table_line = ls_lock-lock_object ] ).
+            CONTINUE.
+          ENDIF.
           IF lv_arg IS INITIAL OR ls_lock-argument CS lv_arg.
             result = ls_lock-user.
             RETURN.
