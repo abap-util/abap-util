@@ -18345,6 +18345,13 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA lv_was_quoted TYPE abap_bool.
     DATA lv_pos   TYPE i.
     DATA lv_next  TYPE string.
+    " the next separator, CR and LF at or behind lv_pos, lv_len for none:
+    " the text between two of them goes into the cell in one piece - one
+    " concatenation per character made a long cell cost its length squared.
+    " Each is searched again only when lv_pos has passed it
+    DATA lv_next_sep TYPE i VALUE -1.
+    DATA lv_next_cr  TYPE i VALUE -1.
+    DATA lv_next_lf  TYPE i VALUE -1.
 
     DATA(lv_len) = strlen( val ).
     DATA(lv_sep_len) = strlen( separator ).
@@ -18366,9 +18373,32 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CONTINUE.
       ENDIF.
 
-      IF lv_pos + lv_sep_len <= lv_len AND substring( val = val
-                                                      off = lv_pos
-                                                      len = lv_sep_len ) = separator.
+      IF lv_next_sep < lv_pos.
+        lv_next_sep = find( val = val
+                            sub = separator
+                            off = lv_pos ).
+        IF lv_next_sep < 0.
+          lv_next_sep = lv_len.
+        ENDIF.
+      ENDIF.
+      IF lv_next_cr < lv_pos.
+        lv_next_cr = find( val = val
+                           sub = |\r|
+                           off = lv_pos ).
+        IF lv_next_cr < 0.
+          lv_next_cr = lv_len.
+        ENDIF.
+      ENDIF.
+      IF lv_next_lf < lv_pos.
+        lv_next_lf = find( val = val
+                           sub = |\n|
+                           off = lv_pos ).
+        IF lv_next_lf < 0.
+          lv_next_lf = lv_len.
+        ENDIF.
+      ENDIF.
+
+      IF lv_next_sep = lv_pos.
         INSERT lv_cell INTO TABLE lt_cells.
         CLEAR lv_cell.
         lv_was_quoted = abap_false.
@@ -18377,8 +18407,13 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       ENDIF.
 
       IF lv_char <> |\n| AND lv_char <> |\r|.
-        lv_cell = lv_cell && lv_char.
-        lv_pos = lv_pos + 1.
+        DATA(lv_end) = nmin( val1 = lv_next_sep
+                             val2 = nmin( val1 = lv_next_cr
+                                          val2 = lv_next_lf ) ).
+        lv_cell = lv_cell && substring( val = val
+                                        off = lv_pos
+                                        len = lv_end - lv_pos ).
+        lv_pos = lv_end.
         CONTINUE.
       ENDIF.
 
@@ -18570,18 +18605,26 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD csv_read_quoted.
 
+    " the text up to the next quote in one piece, not one concatenation
+    " per character
     DATA(lv_len) = strlen( val ).
     pos = pos + 1.
 
     WHILE pos < lv_len.
-      DATA(lv_char) = substring( val = val
-                                 off = pos
-                                 len = 1 ).
-      pos = pos + 1.
-      IF lv_char <> `"`.
-        cell = cell && lv_char.
-        CONTINUE.
+      DATA(lv_quote) = find( val = val
+                             sub = `"`
+                             off = pos ).
+      " a quote that is never closed: the cell runs to the end of the text
+      IF lv_quote < 0.
+        cell = cell && substring( val = val
+                                  off = pos ).
+        pos = lv_len.
+        RETURN.
       ENDIF.
+      cell = cell && substring( val = val
+                                off = pos
+                                len = lv_quote - pos ).
+      pos = lv_quote + 1.
       " a quote: doubled it is one quote of the text, alone it closes the cell
       IF pos >= lv_len OR substring( val = val
                                      off = pos

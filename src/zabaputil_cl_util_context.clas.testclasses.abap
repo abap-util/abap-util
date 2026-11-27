@@ -6964,6 +6964,7 @@ CLASS ltcl_fixes DEFINITION FINAL
     METHODS csv_quotes_special_cells FOR TESTING.
     METHODS csv_reads_own_output     FOR TESTING.
     METHODS csv_reads_quoted_cells   FOR TESTING.
+    METHODS csv_quote_edge_cases     FOR TESTING.
     METHODS csv_empty_input          FOR TESTING.
     METHODS csv_byte_order_mark      FOR TESTING.
     METHODS csv_fallback_name_taken  FOR TESTING.
@@ -7199,6 +7200,18 @@ CLASS ltcl_fixes IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( <lt_back> ) ).
     cl_abap_unit_assert=>assert_equals(
       exp = `[{"c_2nd":"p;q","first_name":"x"},{"c_2nd":"z","first_name":"y"}]`
+      act = zabaputil_cl_util_context=>json_stringify( <lt_back> ) ).
+  ENDMETHOD.
+
+  METHOD csv_quote_edge_cases.
+    FIELD-SYMBOLS <lt_back> TYPE STANDARD TABLE.
+    " CR alone ends a row; text behind a closing quote belongs to the cell;
+    " a quote inside a cell is text; an empty quoted cell; a quote that is
+    " never closed runs to the end of the text
+    DATA(lr_back) = zabaputil_cl_util_context=>itab_get_itab_by_csv( |H1;H2\r"a""b"x;c"d\r"";\n"open;end| ).
+    ASSIGN lr_back->* TO <lt_back>.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `[{"h1":"a\"bx","h2":"c\"d"},{"h1":"","h2":""},{"h1":"open;end","h2":""}]`
       act = zabaputil_cl_util_context=>json_stringify( <lt_back> ) ).
   ENDMETHOD.
 
