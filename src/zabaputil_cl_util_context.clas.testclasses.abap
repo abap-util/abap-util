@@ -5806,6 +5806,301 @@ CLASS ltcl_barcode_gs1 IMPLEMENTATION.
 
 ENDCLASS.
 
+CLASS ltcl_barcode_split DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+    CLASS-METHODS gs
+      RETURNING
+        VALUE(result) TYPE string.
+
+    CLASS-METHODS to_text
+      IMPORTING
+        t_value       TYPE zabaputil_cl_util_context=>ty_t_barcode_value
+      RETURNING
+        VALUE(result) TYPE string.
+
+    METHODS separator_in_order      FOR TESTING.
+    METHODS separator_optional_tail FOR TESTING.
+    METHODS separator_trailing_crlf FOR TESTING.
+    METHODS separator_errors        FOR TESTING.
+    METHODS position_fields         FOR TESTING.
+    METHODS position_to_the_end     FOR TESTING.
+    METHODS position_padding        FOR TESTING.
+    METHODS position_errors         FOR TESTING.
+    METHODS prefix_single_field     FOR TESTING.
+    METHODS prefix_several_with_gs  FOR TESTING.
+    METHODS prefix_own_separator    FOR TESTING.
+    METHODS prefix_longest_wins     FOR TESTING.
+    METHODS prefix_result_order     FOR TESTING.
+    METHODS prefix_errors           FOR TESTING.
+
+ENDCLASS.
+
+
+CLASS ltcl_barcode_split IMPLEMENTATION.
+
+  METHOD gs.
+
+    result = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `1D` ) ).
+
+  ENDMETHOD.
+
+  METHOD to_text.
+
+    LOOP AT t_value INTO DATA(ls_value).
+      result = |{ result }{ ls_value-name }={ ls_value-value };|.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD separator_in_order.
+
+    DATA(lt_value) = zabaputil_cl_util_context=>barcode_split_separator(
+                         val       = `4711|LOT42|12`
+                         separator = `|`
+                         t_field   = VALUE #( ( name = `MATERIAL` )
+                                              ( name = `BATCH` )
+                                              ( name = `QUANTITY` ) ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `MATERIAL=4711;BATCH=LOT42;QUANTITY=12;`
+                                        act = to_text( lt_value ) ).
+
+  ENDMETHOD.
+
+  METHOD separator_optional_tail.
+
+    " an optional field may be missing at the end or empty in the middle
+    DATA(lt_field) = VALUE zabaputil_cl_util_context=>ty_t_barcode_field(
+                         ( name = `MATERIAL` )
+                         ( name = `BATCH`    optional = abap_true )
+                         ( name = `QUANTITY` optional = abap_true ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = `MATERIAL=4711;`
+        act = to_text( zabaputil_cl_util_context=>barcode_split_separator( val       = `4711`
+                                                                           separator = `;`
+                                                                           t_field   = lt_field ) ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = `MATERIAL=4711;QUANTITY=12;`
+        act = to_text( zabaputil_cl_util_context=>barcode_split_separator( val       = `4711;;12`
+                                                                           separator = `;`
+                                                                           t_field   = lt_field ) ) ).
+
+  ENDMETHOD.
+
+  METHOD separator_trailing_crlf.
+
+    DATA(lt_value) = zabaputil_cl_util_context=>barcode_split_separator(
+                         val       = |4711-LOT42{ zabaputil_cl_util_context=>cv_char_util_cr_lf }|
+                         separator = `-`
+                         t_field   = VALUE #( ( name = `MATERIAL` )
+                                              ( name = `BATCH` ) ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `MATERIAL=4711;BATCH=LOT42;`
+                                        act = to_text( lt_value ) ).
+
+  ENDMETHOD.
+
+  METHOD separator_errors.
+
+    DATA(lt_field) = VALUE zabaputil_cl_util_context=>ty_t_barcode_field(
+                         ( name = `MATERIAL` len = 6 )
+                         ( name = `BATCH` ) ).
+    DATA lt_bad TYPE string_table.
+
+    lt_bad = VALUE #( ( `4711|LOT42|12` )                   " more parts than fields
+                      ( `4711` )                            " batch is missing
+                      ( `4711|` )                           " batch is empty
+                      ( `1234567|LOT42` ) ).                " material longer than 6
+
+    LOOP AT lt_bad INTO DATA(lv_bad).
+      TRY.
+          zabaputil_cl_util_context=>barcode_split_separator( val       = lv_bad
+                                                              separator = `|`
+                                                              t_field   = lt_field ).
+          cl_abap_unit_assert=>fail( |no exception for { lv_bad }| ).
+        CATCH zabaputil_cx_util_error ##NO_HANDLER.
+      ENDTRY.
+    ENDLOOP.
+
+    TRY.
+        zabaputil_cl_util_context=>barcode_split_separator( val       = `4711|LOT42`
+                                                            separator = ``
+                                                            t_field   = lt_field ).
+        cl_abap_unit_assert=>fail( `no exception without a separator` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD position_fields.
+
+    DATA(lt_value) = zabaputil_cl_util_context=>barcode_split_position(
+                         val     = `0004711LOT42A012`
+                         t_field = VALUE #( ( name = `MATERIAL` pos = 1  len = 7 )
+                                            ( name = `BATCH`    pos = 8  len = 6 )
+                                            ( name = `QUANTITY` pos = 14 len = 3 ) ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `MATERIAL=0004711;BATCH=LOT42A;QUANTITY=012;`
+                                        act = to_text( lt_value ) ).
+
+  ENDMETHOD.
+
+  METHOD position_to_the_end.
+
+    " len 0 takes the rest, and a field may end before its len does
+    DATA(lt_value) = zabaputil_cl_util_context=>barcode_split_position(
+                         val     = `AB12345`
+                         t_field = VALUE #( ( name = `TYPE`   pos = 1 len = 2 )
+                                            ( name = `NUMBER` pos = 3 )
+                                            ( name = `TAIL`   pos = 6 len = 10 ) ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `TYPE=AB;NUMBER=12345;TAIL=45;`
+                                        act = to_text( lt_value ) ).
+
+  ENDMETHOD.
+
+  METHOD position_padding.
+
+    DATA(lt_value) = zabaputil_cl_util_context=>barcode_split_position(
+                         val     = `4711      LOT42 `
+                         t_field = VALUE #( ( name = `MATERIAL` pos = 1  len = 10 )
+                                            ( name = `BATCH`    pos = 11 len = 6 )
+                                            ( name = `NOTE`     pos = 17 len = 4 optional = abap_true ) ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `MATERIAL=4711;BATCH=LOT42;`
+                                        act = to_text( lt_value ) ).
+
+  ENDMETHOD.
+
+  METHOD position_errors.
+
+    DATA lt_field TYPE zabaputil_cl_util_context=>ty_t_barcode_field.
+
+    " a field beyond the end of the barcode
+    TRY.
+        lt_field = VALUE #( ( name = `MATERIAL` pos = 1 len = 4 )
+                            ( name = `BATCH`    pos = 5 len = 4 ) ).
+        zabaputil_cl_util_context=>barcode_split_position( val     = `4711`
+                                                           t_field = lt_field ).
+        cl_abap_unit_assert=>fail( `no exception for a field beyond the end` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+
+    " a field that holds blanks only
+    TRY.
+        zabaputil_cl_util_context=>barcode_split_position( val     = `4711    `
+                                                           t_field = lt_field ).
+        cl_abap_unit_assert=>fail( `no exception for an empty field` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+
+    " a field without a position
+    TRY.
+        lt_field = VALUE #( ( name = `MATERIAL` len = 4 ) ).
+        zabaputil_cl_util_context=>barcode_split_position( val     = `4711`
+                                                           t_field = lt_field ).
+        cl_abap_unit_assert=>fail( `no exception for a field without pos` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD prefix_single_field.
+
+    " one scan, one field - the prefix says which one
+    DATA(lt_field) = VALUE zabaputil_cl_util_context=>ty_t_barcode_field(
+                         ( name = `MATERIAL` prefix = `P` optional = abap_true )
+                         ( name = `QUANTITY` prefix = `Q` optional = abap_true ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = `QUANTITY=12;`
+        act = to_text( zabaputil_cl_util_context=>barcode_split_prefix( val     = `Q12`
+                                                                        t_field = lt_field ) ) ).
+
+  ENDMETHOD.
+
+  METHOD prefix_several_with_gs.
+
+    DATA(lt_value) = zabaputil_cl_util_context=>barcode_split_prefix(
+                         val     = |P4711{ gs( ) }Q12{ gs( ) }1TLOT42|
+                         t_field = VALUE #( ( name = `MATERIAL` prefix = `P` )
+                                            ( name = `QUANTITY` prefix = `Q` )
+                                            ( name = `BATCH`    prefix = `1T` ) ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `MATERIAL=4711;QUANTITY=12;BATCH=LOT42;`
+                                        act = to_text( lt_value ) ).
+
+  ENDMETHOD.
+
+  METHOD prefix_own_separator.
+
+    DATA(lt_value) = zabaputil_cl_util_context=>barcode_split_prefix(
+                         val       = `P4711~Q12`
+                         separator = `~`
+                         t_field   = VALUE #( ( name = `MATERIAL` prefix = `P` )
+                                              ( name = `QUANTITY` prefix = `Q` ) ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `MATERIAL=4711;QUANTITY=12;`
+                                        act = to_text( lt_value ) ).
+
+  ENDMETHOD.
+
+  METHOD prefix_longest_wins.
+
+    " `1T` and `1` both fit `1TLOT42` - the longer prefix is the field
+    DATA(lt_value) = zabaputil_cl_util_context=>barcode_split_prefix(
+                         val     = `1TLOT42`
+                         t_field = VALUE #( ( name = `SUPPLIER` prefix = `1`  optional = abap_true )
+                                            ( name = `BATCH`    prefix = `1T` optional = abap_true ) ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `BATCH=LOT42;`
+                                        act = to_text( lt_value ) ).
+
+  ENDMETHOD.
+
+  METHOD prefix_result_order.
+
+    " the result follows t_field, whatever order the label has
+    DATA(lt_value) = zabaputil_cl_util_context=>barcode_split_prefix(
+                         val       = `Q12|P4711`
+                         separator = `|`
+                         t_field   = VALUE #( ( name = `MATERIAL` prefix = `P` )
+                                              ( name = `QUANTITY` prefix = `Q` ) ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `MATERIAL=4711;QUANTITY=12;`
+                                        act = to_text( lt_value ) ).
+
+  ENDMETHOD.
+
+  METHOD prefix_errors.
+
+    DATA(lt_field) = VALUE zabaputil_cl_util_context=>ty_t_barcode_field(
+                         ( name = `MATERIAL` prefix = `P` len = 6 )
+                         ( name = `QUANTITY` prefix = `Q` optional = abap_true ) ).
+    DATA lt_bad TYPE string_table.
+
+    lt_bad = VALUE #( ( `X4711` )                           " no field starts like this
+                      ( `Q12` )                             " material is missing
+                      ( `P` )                               " material is empty
+                      ( `P4711|P4712` )                     " material comes twice
+                      ( `P1234567` ) ).                     " material longer than 6
+
+    LOOP AT lt_bad INTO DATA(lv_bad).
+      TRY.
+          zabaputil_cl_util_context=>barcode_split_prefix( val       = lv_bad
+                                                           separator = `|`
+                                                           t_field   = lt_field ).
+          cl_abap_unit_assert=>fail( |no exception for { lv_bad }| ).
+        CATCH zabaputil_cx_util_error ##NO_HANDLER.
+      ENDTRY.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+ENDCLASS.
+
 
 CLASS ltcl_system_task DEFINITION FINAL FOR TESTING.
 
