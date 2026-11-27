@@ -528,6 +528,12 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE string.
 
+    "! The filters of a WHERE clause written as filter_get_sql_where writes
+    "! it: conditions on one field joined with OR, those groups joined with
+    "! AND. A condition: =, <>, <, <=, >, >= (with or without blanks),
+    "! [NOT] BETWEEN, [NOT] LIKE [ESCAPE], [NOT] IN ( list ). Anything a
+    "! filter cannot say - an OR across fields, IS NULL, NOT in front, a
+    "! subquery - raises zabaputil_cx_util_error instead of being dropped.
     CLASS-METHODS filter_get_multi_by_sql_where
       IMPORTING
         val           TYPE clike
@@ -4029,11 +4035,21 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE string_table.
 
-    CLASS-METHODS filter_sql_strip_quotes
+    " The value of a literal in a condition: a quoted literal (a doubled
+    " quote inside is one quote) or one word without blanks (a number, a
+    " host variable). Anything else - a literal followed by more text, an
+    " unclosed quote - raises zabaputil_cx_util_error.
+    CLASS-METHODS filter_sql_get_literal
       IMPORTING
         val           TYPE clike
       RETURNING
         VALUE(result) TYPE string.
+
+    " Raises zabaputil_cx_util_error unless the name is a plain field name -
+    " the characters filter_get_sql_where accepts.
+    CLASS-METHODS filter_sql_check_name
+      IMPORTING
+        val TYPE clike.
 
     CLASS-DATA gv_check_cloud TYPE abap_bool.
     CLASS-DATA gv_check_cloud_cached TYPE abap_bool.
@@ -4226,8 +4242,10 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE string.
 
-    " The ranges of conditions joined with OR; the name is the field of the
-    " first one.
+    " The ranges of conditions joined with OR - all on one field, which is
+    " the name. A condition on another field, a condition joined with AND
+    " inside the OR, NOT IN inside an OR or a condition no range can hold
+    " raises zabaputil_cx_util_error: a filter cannot say it.
     CLASS-METHODS filter_sql_get_or_group
       IMPORTING
         val           TYPE string
@@ -5533,6 +5551,27 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       DATA(lv_pos) = sy-fdpos + 7.
       result-where = c_trim( substring( val = lv_sql
                                         off = lv_pos ) ).
+      " the clauses behind the WHERE are no part of it - `ORDER BY b` was
+      " read into the value of the last condition
+      DATA(lv_end) = strlen( result-where ).
+      DATA(lt_clause) = VALUE string_table( ( ` ORDER BY ` ) ( ` GROUP BY ` ) ( ` HAVING ` )
+                                            ( ` UP TO ` ) ( ` INTO ` ) ( ` OFFSET ` )
+                                            ( ` OPTIONS ` ) ( ` UNION ` ) ).
+      LOOP AT lt_clause INTO DATA(lv_clause).
+        DATA(lv_clause_off) = filter_sql_find( val     = result-where
+                                               keyword = lv_clause ).
+        IF lv_clause_off >= 0 AND lv_clause_off < lv_end.
+          lv_end = lv_clause_off.
+        ENDIF.
+      ENDLOOP.
+      result-where = c_trim( substring( val = result-where
+                                        len = lv_end ) ).
+      lv_end = strlen( result-where ).
+      IF lv_end > 0 AND substring( val = result-where
+                                   off = lv_end - 1 ) = `.`.
+        result-where = c_trim( substring( val = result-where
+                                          len = lv_end - 1 ) ).
+      ENDIF.
       result-t_filter = filter_get_multi_by_sql_where( result-where ).
     ENDIF.
 
@@ -6105,6 +6144,15 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       RETURN.
     ENDIF.
 
+    " an OR on the top level binds weaker than every AND: the whole clause is
+    " one OR group then - splitting at the AND first read `A OR B AND C` as
+    " `( A OR B ) AND C`
+    IF lines( filter_sql_split_top_level( val = lv_where
+                                          sep = ` OR ` ) ) > 1.
+      INSERT filter_sql_get_or_group( lv_where ) INTO TABLE result.
+      RETURN.
+    ENDIF.
+
     DATA(lt_groups) = filter_sql_split_top_level( val = lv_where
                                                   sep = ` AND ` ).
 
@@ -6115,19 +6163,20 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       DATA(lt_parts) = filter_sql_split_top_level( val = lv_group
                                                    sep = ` AND ` ).
 
-      IF lines( lt_parts ) <= 1.
-        DATA(ls_filter) = filter_sql_get_or_group( lv_group ).
-        IF ls_filter-name IS NOT INITIAL.
-          INSERT ls_filter INTO TABLE result.
-        ENDIF.
+      IF lines( lt_parts ) <= 1
+          OR lines( filter_sql_split_top_level( val = lv_group
+                                                sep = ` OR ` ) ) > 1.
+        INSERT filter_sql_get_or_group( lv_group ) INTO TABLE result.
         CONTINUE.
       ENDIF.
 
       " several conditions joined with AND inside one group. On one field
       " that is the shape filter_get_sql_where writes for excluding ranges:
       " `( includes ) AND exclude AND exclude`, or the excludes alone. The
-      " excludes were negated on the way out and are turned back here.
-      " On different fields they are filters of their own
+      " excludes were negated on the way out and are turned back here - one
+      " condition each, an OR group or an IN list cannot be one exclude.
+      " Otherwise every part is a filter of its own: filters are joined with
+      " AND too
       DATA lt_sub TYPE ty_t_filter_multi.
       DATA lv_first_wrapped TYPE abap_bool.
       DATA lv_same_field TYPE abap_bool.
@@ -6139,14 +6188,20 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         IF lv_tabix = 1.
           lv_first_wrapped = xsdbool( lv_part IS NOT INITIAL AND lv_part(1) = `(` ).
         ENDIF.
-        DATA(ls_sub) = filter_sql_get_or_group( filter_sql_strip_parens( lv_part ) ).
-        IF ls_sub-name IS INITIAL.
-          CONTINUE.
-        ENDIF.
-        IF lt_sub IS NOT INITIAL AND to_upper( lt_sub[ 1 ]-name ) <> to_upper( ls_sub-name ).
+        DATA(lt_part_filter) = filter_get_multi_by_sql_where( lv_part ).
+        IF lines( lt_part_filter ) <> 1.
           lv_same_field = abap_false.
         ENDIF.
-        INSERT ls_sub INTO TABLE lt_sub.
+        LOOP AT lt_part_filter INTO DATA(ls_sub).
+          IF lt_sub IS NOT INITIAL AND to_upper( lt_sub[ 1 ]-name ) <> to_upper( ls_sub-name ).
+            lv_same_field = abap_false.
+          ENDIF.
+          IF ( lv_tabix > 1 OR lv_first_wrapped = abap_false )
+              AND ( lines( ls_sub-t_range ) <> 1 OR ls_sub-t_range[ 1 ]-sign <> `I` ).
+            lv_same_field = abap_false.
+          ENDIF.
+          INSERT ls_sub INTO TABLE lt_sub.
+        ENDLOOP.
       ENDLOOP.
 
       IF lv_same_field = abap_false.
@@ -6154,6 +6209,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CONTINUE.
       ENDIF.
 
+      DATA ls_filter TYPE ty_s_filter_multi.
       CLEAR ls_filter.
       LOOP AT lt_sub INTO ls_sub.
         lv_tabix = sy-tabix.
@@ -6207,16 +6263,19 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     IF lv_off >= 0.
       fieldname = c_trim( substring( val = lv_cond
                                      len = lv_off ) ).
+      " the AND of BETWEEN, not of another condition
       lv_and = filter_sql_find( val     = lv_rest
                                 keyword = ` AND ` ).
+      filter_sql_check_name( fieldname ).
       IF lv_and < 0.
-        range-low = filter_sql_strip_quotes( lv_rest ).
-      ELSE.
-        range-low  = filter_sql_strip_quotes( substring( val = lv_rest
-                                                         len = lv_and ) ).
-        range-high = filter_sql_strip_quotes( substring( val = lv_rest
-                                                         off = lv_and + 5 ) ).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |{ lv_cond }: BETWEEN without AND|.
       ENDIF.
+      range-low  = filter_sql_get_literal( substring( val = lv_rest
+                                                      len = lv_and ) ).
+      range-high = filter_sql_get_literal( substring( val = lv_rest
+                                                      off = lv_and + 5 ) ).
       RETURN.
     ENDIF.
 
@@ -6238,17 +6297,18 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     IF lv_off >= 0.
       fieldname = c_trim( substring( val = lv_cond
                                      len = lv_off ) ).
+      filter_sql_check_name( fieldname ).
       " `'A#%%' ESCAPE '#'`: the pattern, and the character that makes the
       " next one a plain character
       lv_esc = filter_sql_find( val     = lv_rest
                                 keyword = ` ESCAPE ` ).
       IF lv_esc < 0.
-        range-low = filter_sql_like_to_pattern( filter_sql_strip_quotes( lv_rest ) ).
+        range-low = filter_sql_like_to_pattern( filter_sql_get_literal( lv_rest ) ).
       ELSE.
-        DATA(lv_escape) = filter_sql_strip_quotes( substring( val = lv_rest
-                                                              off = lv_esc + 8 ) ).
-        DATA(lv_like) = filter_sql_strip_quotes( substring( val = lv_rest
-                                                            len = lv_esc ) ).
+        DATA(lv_escape) = filter_sql_get_literal( substring( val = lv_rest
+                                                             off = lv_esc + 8 ) ).
+        DATA(lv_like) = filter_sql_get_literal( substring( val = lv_rest
+                                                           len = lv_esc ) ).
         DATA(lv_pos) = 0.
         DATA(lv_plain) = ``.
         DATA(lv_segment) = ``.
@@ -6279,27 +6339,59 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    " the two-character operators before the ones they contain
-    DATA lt_operator TYPE ty_t_name_value.
-    lt_operator = VALUE #( ( n = `<>` v = `NE` )
-                           ( n = `<=` v = `LE` )
-                           ( n = `>=` v = `GE` )
-                           ( n = `<`  v = `LT` )
-                           ( n = `>`  v = `GT` )
-                           ( n = `=`  v = `EQ` ) ).
-    LOOP AT lt_operator INTO DATA(ls_operator).
-      lv_off = filter_sql_find( val     = lv_cond
-                                keyword = | { ls_operator-n } | ).
-      IF lv_off < 0.
-        CONTINUE.
+    " the comparison: the first <, > or = outside of a literal, with or
+    " without blanks around it (`A='1'`) - the operator only counted with a
+    " blank on each side, and a condition without one was dropped
+    DATA lv_in_quote TYPE abap_bool.
+    DATA lv_op_len   TYPE i.
+    DATA(lv_len) = strlen( lv_cond ).
+    lv_off = -1.
+    lv_pos = 0.
+    WHILE lv_pos < lv_len.
+      lv_char = substring( val = lv_cond
+                           off = lv_pos
+                           len = 1 ).
+      IF lv_char = `'`.
+        lv_in_quote = xsdbool( lv_in_quote = abap_false ).
+      ELSEIF lv_in_quote = abap_false AND lv_char CA `<>=`.
+        lv_off = lv_pos.
+        EXIT.
       ENDIF.
-      fieldname    = c_trim( substring( val = lv_cond
-                                        len = lv_off ) ).
-      range-option = ls_operator-v.
-      range-low    = filter_sql_strip_quotes( substring( val = lv_cond
-                                                         off = lv_off + strlen( ls_operator-n ) + 2 ) ).
-      RETURN.
-    ENDLOOP.
+      lv_pos = lv_pos + 1.
+    ENDWHILE.
+
+    IF lv_off < 0.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |{ lv_cond }: no condition a range can hold (=, <>, <, <=, >, >=, BETWEEN, LIKE, IN)|.
+    ENDIF.
+
+    lv_op_len = 1.
+    IF lv_off + 1 < lv_len.
+      DATA(lv_op) = substring( val = lv_cond
+                               off = lv_off
+                               len = 2 ).
+      IF lv_op = `<>` OR lv_op = `<=` OR lv_op = `>=`.
+        lv_op_len = 2.
+      ENDIF.
+    ENDIF.
+    IF lv_op_len = 1.
+      lv_op = substring( val = lv_cond
+                         off = lv_off
+                         len = 1 ).
+    ENDIF.
+    range-option = SWITCH #( lv_op
+                             WHEN `<>` THEN `NE`
+                             WHEN `<=` THEN `LE`
+                             WHEN `>=` THEN `GE`
+                             WHEN `<`  THEN `LT`
+                             WHEN `>`  THEN `GT`
+                             ELSE `EQ` ).
+    fieldname = c_trim( substring( val = lv_cond
+                                   len = lv_off ) ).
+    filter_sql_check_name( fieldname ).
+    range-low = filter_sql_get_literal( substring( val = lv_cond
+                                                   off = lv_off + lv_op_len ) ).
   ENDMETHOD.
 
   METHOD filter_sql_split_top_level.
@@ -6356,8 +6448,16 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
       " Track BETWEEN ... AND to avoid splitting at the AND inside BETWEEN
       " Only check when current char is B or b (performance: skip to_upper on every pos)
+      " a word of its own - `ZBETWEEN = 'X' AND F = 'Y'` is no BETWEEN
+      DATA(lv_word_start) = abap_true.
+      IF ( lv_char = `B` OR lv_char = `b` ) AND lv_pos > 0.
+        lv_word_start = xsdbool( substring( val = lv_val
+                                            off = lv_pos - 1
+                                            len = 1 ) CA ` (` ).
+      ENDIF.
       IF lv_depth = 0 AND lv_in_between = abap_false
          AND ( lv_char = `B` OR lv_char = `b` )
+         AND lv_word_start = abap_true
          AND lv_pos + 8 <= lv_len
          AND to_upper( lv_val+lv_pos(8) ) = `BETWEEN `.
         lv_in_between = abap_true.
@@ -6398,23 +6498,71 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD filter_sql_strip_quotes.
+  METHOD filter_sql_get_literal.
 
-    result = c_trim( val ).
-    DATA(lv_len) = strlen( result ).
+    DATA(lv_val) = c_trim( val ).
+    DATA(lv_len) = strlen( lv_val ).
+    DATA(lv_pos) = 1.
 
-    IF lv_len >= 2
-       AND result(1) = `'`
-       AND substring( val = result
-                      off = lv_len - 1
-                      len = 1 ) = `'`.
-      result = substring( val = result
-                          off = 1
-                          len = lv_len - 2 ).
-      result = replace( val  = result
-                        sub  = `''`
-                        with = `'`
-                        occ  = 0 ).
+    IF lv_len = 0.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = `A condition without a value`.
+    ENDIF.
+
+    IF lv_val(1) <> `'`.
+      " a number or a host variable - one word. More words are another
+      " clause or a condition that a range cannot hold
+      IF lv_val CA ` '()`.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |{ lv_val }: no single value|.
+      ENDIF.
+      result = lv_val.
+      RETURN.
+    ENDIF.
+
+    " the literal ends at the first quote that is not doubled - and that has
+    " to be the last character: `'1' ORDER BY b` is no value
+    WHILE lv_pos < lv_len.
+      IF substring( val = lv_val
+                    off = lv_pos
+                    len = 1 ) = `'`.
+        IF lv_pos + 1 < lv_len AND substring( val = lv_val
+                                               off = lv_pos + 1
+                                               len = 1 ) = `'`.
+          result = result && `'`.
+          lv_pos = lv_pos + 2.
+          CONTINUE.
+        ENDIF.
+        IF lv_pos <> lv_len - 1.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |{ lv_val }: text behind the literal|.
+        ENDIF.
+        RETURN.
+      ENDIF.
+      result = result && substring( val = lv_val
+                                    off = lv_pos
+                                    len = 1 ).
+      lv_pos = lv_pos + 1.
+    ENDWHILE.
+
+    RAISE EXCEPTION TYPE zabaputil_cx_util_error
+      EXPORTING
+        val = |{ lv_val }: the literal is not closed|.
+
+  ENDMETHOD.
+
+  METHOD filter_sql_check_name.
+
+    " a character set instead of a regex: PCRE is not on 7.02, POSIX not on
+    " ABAP Cloud - the same set filter_get_sql_where accepts
+    IF val IS INITIAL
+        OR val CN `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_/`.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |{ val }: no field name - NOT in front, an expression or an alias is no filter|.
     ENDIF.
 
   ENDMETHOD.
@@ -18976,28 +19124,90 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     DATA ls_range     TYPE ty_s_range.
     DATA lv_fieldname TYPE string.
+    DATA lt_range     TYPE ty_t_range.
 
     DATA(lt_conds) = filter_sql_split_top_level( val = val
                                                  sep = ` OR ` ).
 
     LOOP AT lt_conds INTO DATA(lv_cond).
 
-      CLEAR ls_range.
+      CLEAR lt_range.
       CLEAR lv_fieldname.
+      lv_cond = filter_sql_strip_parens( lv_cond ).
 
-      filter_get_range_by_sql_cond(
-        EXPORTING val       = filter_sql_strip_parens( lv_cond )
-        IMPORTING fieldname = lv_fieldname
-                  range     = ls_range ).
+      IF lines( filter_sql_split_top_level( val = lv_cond
+                                            sep = ` OR ` ) ) > 1.
+        " ( A = '1' OR A = '2' ) OR A = '3'
+        DATA(ls_nested) = filter_sql_get_or_group( lv_cond ).
+        lv_fieldname = ls_nested-name.
+        lt_range = ls_nested-t_range.
 
-      IF ls_range-option IS INITIAL.
-        CONTINUE.
+      ELSEIF lines( filter_sql_split_top_level( val = lv_cond
+                                                sep = ` AND ` ) ) > 1.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |{ lv_cond }: conditions joined with AND inside an OR are no filter|.
+
+      ELSE.
+        " [NOT] IN ( list ): one EQ row per value, excluding for NOT IN
+        DATA(lv_in) = filter_sql_find( val     = lv_cond
+                                       keyword = ` IN ` ).
+        IF lv_in < 0.
+          lv_in = filter_sql_find( val     = lv_cond
+                                   keyword = ` IN(` ).
+        ENDIF.
+        IF lv_in >= 0.
+          DATA(lv_sign) = `I`.
+          lv_fieldname = c_trim( substring( val = lv_cond
+                                            len = lv_in ) ).
+          IF to_upper( lv_fieldname ) CP `* NOT`.
+            lv_sign = `E`.
+            lv_fieldname = c_trim( substring( val = lv_fieldname
+                                              len = strlen( lv_fieldname ) - 4 ) ).
+          ENDIF.
+          filter_sql_check_name( lv_fieldname ).
+          DATA(lv_list) = c_trim( substring( val = lv_cond
+                                             off = lv_in + 3 ) ).
+          DATA(lv_items) = filter_sql_strip_parens( lv_list ).
+          IF lv_items = lv_list.
+            RAISE EXCEPTION TYPE zabaputil_cx_util_error
+              EXPORTING
+                val = |{ lv_cond }: IN without a list|.
+          ENDIF.
+          LOOP AT filter_sql_split_top_level( val = lv_items
+                                              sep = `,` ) INTO DATA(lv_item).
+            INSERT VALUE #( sign   = lv_sign
+                            option = `EQ`
+                            low    = filter_sql_get_literal( lv_item ) ) INTO TABLE lt_range.
+          ENDLOOP.
+        ELSE.
+          filter_get_range_by_sql_cond( EXPORTING val       = lv_cond
+                                        IMPORTING fieldname = lv_fieldname
+                                                  range     = ls_range ).
+          INSERT ls_range INTO TABLE lt_range.
+        ENDIF.
       ENDIF.
 
+      " one filter is one field: `A = '1' OR B = '2'` came back as A = '1'
+      " OR A = '2'
       IF result-name IS INITIAL.
         result-name = lv_fieldname.
+      ELSEIF to_upper( result-name ) <> to_upper( lv_fieldname ).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |{ val }: an OR across the fields { result-name } and { lv_fieldname } is no filter|.
       ENDIF.
-      INSERT ls_range INTO TABLE result-t_range.
+
+      " the excluding rows of a filter are joined with AND, not with OR
+      IF lines( lt_conds ) > 1.
+        LOOP AT lt_range TRANSPORTING NO FIELDS WHERE sign = `E`.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |{ val }: NOT IN inside an OR is no filter|.
+        ENDLOOP.
+      ENDIF.
+
+      INSERT LINES OF lt_range INTO TABLE result-t_range.
 
     ENDLOOP.
 

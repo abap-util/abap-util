@@ -7039,6 +7039,8 @@ CLASS ltcl_fixes DEFINITION FINAL
     METHODS sql_exclude_roundtrip    FOR TESTING.
     METHODS sql_groups_keep_parens   FOR TESTING.
     METHODS sql_tabname_with_keyword FOR TESTING.
+    METHODS sql_roundtrip_kept       FOR TESTING.
+    METHODS sql_not_a_filter         FOR TESTING.
 
 ENDCLASS.
 
@@ -7443,6 +7445,57 @@ CLASS ltcl_fixes IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( exp = `A` act = lt_filter[ 1 ]-name ).
     cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_filter[ 1 ]-t_range ) ).
     cl_abap_unit_assert=>assert_equals( exp = `2` act = lt_filter[ 1 ]-t_range[ 2 ]-low ).
+  ENDMETHOD.
+
+  METHOD sql_roundtrip_kept.
+    " each WHERE comes back from its filters as a WHERE of the same rows
+    DATA(lt_filter) = zabaputil_cl_util_context=>filter_get_multi_by_sql_where( `A IN ('1','2') AND B = '3'` ).
+    cl_abap_unit_assert=>assert_equals( exp = `( A = '1' OR A = '2' ) AND ( B = '3' )`
+                                        act = zabaputil_cl_util_context=>filter_get_sql_where( lt_filter ) ).
+
+    lt_filter = zabaputil_cl_util_context=>filter_get_multi_by_sql_where( `A='1' AND B >= '3'` ).
+    cl_abap_unit_assert=>assert_equals( exp = `( A = '1' ) AND ( B >= '3' )`
+                                        act = zabaputil_cl_util_context=>filter_get_sql_where( lt_filter ) ).
+
+    lt_filter = zabaputil_cl_util_context=>filter_get_multi_by_sql_where( `ZBETWEEN = 'X' AND F = 'Y'` ).
+    cl_abap_unit_assert=>assert_equals( exp = `( ZBETWEEN = 'X' ) AND ( F = 'Y' )`
+                                        act = zabaputil_cl_util_context=>filter_get_sql_where( lt_filter ) ).
+
+    lt_filter = zabaputil_cl_util_context=>filter_get_multi_by_sql_where( `A NOT IN ( '1', '2' )` ).
+    cl_abap_unit_assert=>assert_equals( exp = `( A <> '1' AND A <> '2' )`
+                                        act = zabaputil_cl_util_context=>filter_get_sql_where( lt_filter ) ).
+
+    lt_filter = zabaputil_cl_util_context=>filter_get_multi_by_sql_where( `( A = '1' OR A = '2' ) AND ( A = '3' OR A = '4' )` ).
+    cl_abap_unit_assert=>assert_equals( exp = `( A = '1' OR A = '2' ) AND ( A = '3' OR A = '4' )`
+                                        act = zabaputil_cl_util_context=>filter_get_sql_where( lt_filter ) ).
+
+    lt_filter = zabaputil_cl_util_context=>filter_get_multi_by_sql_where( `( A = '1' AND A <> '2' )` ).
+    cl_abap_unit_assert=>assert_equals( exp = `( A = '1' AND A <> '2' )`
+                                        act = zabaputil_cl_util_context=>filter_get_sql_where( lt_filter ) ).
+
+    DATA(ls_sql) = zabaputil_cl_util_context=>filter_get_sql_by_sql_string( `SELECT * FROM ztab WHERE a = '1' ORDER BY b` ).
+    cl_abap_unit_assert=>assert_equals( exp = `a = '1'` act = ls_sql-where ).
+    cl_abap_unit_assert=>assert_equals( exp = `1` act = ls_sql-t_filter[ 1 ]-t_range[ 1 ]-low ).
+  ENDMETHOD.
+
+  METHOD sql_not_a_filter.
+    " a condition a filter cannot say raises - it was dropped or rewritten
+    DATA(lt_where) = VALUE string_table( ( `A = '1' OR B = '2'` )
+                                         ( `NOT A = '1' AND B = '2'` )
+                                         ( `( A = '1' OR A IS NULL ) AND B = '1'` )
+                                         ( `( A = '1' AND B = '2' ) OR C = '3'` )
+                                         ( `A = '1' OR A = '2' AND A = '3'` )
+                                         ( `A = '1' ORDER BY b` )
+                                         ( `A IN ( SELECT b FROM c )` )
+                                         ( `A NOT IN ('1') OR A = '2'` )
+                                         ( `A = 'open` ) ).
+    LOOP AT lt_where INTO DATA(lv_where).
+      TRY.
+          zabaputil_cl_util_context=>filter_get_multi_by_sql_where( lv_where ).
+          cl_abap_unit_assert=>fail( |no exception for { lv_where }| ).
+        CATCH zabaputil_cx_util_error ##NO_HANDLER.
+      ENDTRY.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD sql_tabname_with_keyword.
