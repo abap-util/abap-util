@@ -12895,11 +12895,13 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         lv_fm = `CHANGEDOCUMENT_READ_HEADERS`.
         CALL FUNCTION lv_fm
           EXPORTING
-            objectclass = lv_objectclas
-            objectid    = lv_objectid
+            objectclass    = lv_objectclas
+            objectid       = lv_objectid
             date_of_change = date_from
+            " the upper bound the cloud branch filters on as well
+            date_until     = date_to
           TABLES
-            i_cdhdr     = <headers>
+            i_cdhdr        = <headers>
           EXCEPTIONS
             error_message = 1
             OTHERS        = 1.
