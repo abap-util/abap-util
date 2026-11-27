@@ -7090,6 +7090,9 @@ CLASS ltcl_fixes IMPLEMENTATION.
     DATA(lv_ctrl) = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `411F42` ) ).
     cl_abap_unit_assert=>assert_equals( exp = `A\u001FB`
                                         act = zabaputil_cl_util_context=>c_escape_json( lv_ctrl ) ).
+    DATA(lv_nul) = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `410042` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `A\u0000B`
+                                        act = zabaputil_cl_util_context=>c_escape_json( lv_nul ) ).
     cl_abap_unit_assert=>assert_equals( exp = `say \"hi\"\n`
                                         act = zabaputil_cl_util_context=>c_escape_json( |say "hi"\n| ) ).
     cl_abap_unit_assert=>assert_equals( exp = `plain`

@@ -13574,7 +13574,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD c_escape_json.
-    CONSTANTS lc_ctrl_hex TYPE string VALUE `01020304050607080B0C0E0F101112131415161718191A1B1C1D1E1F`.
+    " U+0000 included - RFC 8259 asks for every character below U+0020, and
+    " a raw NUL out of a binary-to-text conversion made JSON.parse refuse
+    " the whole document
+    CONSTANTS lc_ctrl_hex TYPE string VALUE `0001020304050607080B0C0E0F101112131415161718191A1B1C1D1E1F`.
 
     IF gv_json_specials IS INITIAL.
       TRY.
