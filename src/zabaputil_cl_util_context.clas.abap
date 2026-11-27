@@ -12788,13 +12788,22 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CREATE DATA lr_cofile TYPE (`CTSLG_COFILE`).
         ASSIGN lr_cofile->* TO <cofile>.
 
+        " ERROR_MESSAGE: a MESSAGE TYPE E of the module would end the
+        " request where no CATCH reaches it
         lv_fm = `TR_READ_GLOBAL_INFO_OF_REQUEST`.
         CALL FUNCTION lv_fm
           EXPORTING
-            iv_trkorr   = trkorr
-            is_settings = <settings>
+            iv_trkorr     = trkorr
+            is_settings   = <settings>
           IMPORTING
-            es_cofile   = <cofile>.
+            es_cofile     = <cofile>
+          EXCEPTIONS
+            error_message = 2.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |TR_READ_GLOBAL_INFO_OF_REQUEST failed (sy-subrc { sy-subrc })|.
+        ENDIF.
 
         ASSIGN COMPONENT `EXISTS` OF STRUCTURE <cofile> TO <comp>.
         IF <comp> = abap_false.
@@ -18230,6 +18239,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         ( name = `PARAMS`   kind = abap_func_tables    value = lr_params ) ).
     DATA(lt_exception) = VALUE abap_func_excpbind_tab( ( name = `FU_NOT_FOUND` value = 1 )
                                                         ( name = `OTHERS`       value = 2 ) ).
+    IF destination IS INITIAL.
+      INSERT VALUE #( name  = `ERROR_MESSAGE`
+                      value = 3 ) INTO TABLE lt_exception.
+    ENDIF.
     IF sys_fm_call( function    = `RFC_GET_FUNCTION_INTERFACE`
                     destination = destination
                     t_param     = lt_param
@@ -18679,6 +18692,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         IF destination IS NOT INITIAL.
           INSERT VALUE #( name = `SYSTEM_FAILURE`        value = lv_count + 1 ) INTO TABLE lt_exception.
           INSERT VALUE #( name = `COMMUNICATION_FAILURE` value = lv_count + 2 ) INTO TABLE lt_exception.
+        ELSE.
+          " a MESSAGE TYPE E of a local module would end the request (via
+          " RFC it arrives as SYSTEM_FAILURE)
+          INSERT VALUE #( name = `ERROR_MESSAGE` value = lv_count + 4 ) INTO TABLE lt_exception.
         ENDIF.
         INSERT VALUE #( name = `OTHERS` value = lv_count + 3 ) INTO TABLE lt_exception.
 
@@ -18989,12 +19006,22 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     lv_form = c_trim_upper( form_name ).
 
     TRY.
+        " class-based exceptions (CX_FP_API) reach the CATCH below; only
+        " ERROR_MESSAGE can be named next to them - a MESSAGE TYPE E would
+        " end the request otherwise
         DATA(lv_fm) = `FP_FUNCTION_MODULE_NAME`.
         CALL FUNCTION lv_fm
           EXPORTING
-            i_name     = lv_form
+            i_name        = lv_form
           IMPORTING
-            e_funcname = lv_function.
+            e_funcname    = lv_function
+          EXCEPTIONS
+            error_message = 2.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |FP_FUNCTION_MODULE_NAME failed for { lv_form }|.
+        ENDIF.
 
         " no dialog, no printer: the PDF comes back in the form output
         CREATE DATA lr_output TYPE (`SFPOUTPUTPARAMS`).
