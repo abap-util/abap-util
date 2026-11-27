@@ -26,6 +26,7 @@ CLASS ltcl_unit_test DEFINITION FINAL
     METHODS test_leaf_if_false     FOR TESTING RAISING cx_static_check.
     METHODS test_ui5_page_sample   FOR TESTING RAISING cx_static_check.
     METHODS test_ui5_page_sample_indent FOR TESTING RAISING cx_static_check.
+    METHODS test_p_overwrites      FOR TESTING RAISING cx_static_check.
 
     METHODS build_page_view
       RETURNING VALUE(result) TYPE REF TO zabaputil_cl_util_xml.
@@ -324,6 +325,23 @@ CLASS ltcl_unit_test IMPLEMENTATION.
     cl_abap_unit_assert=>assert_true( xsdbool( lv_xml CS `text="OK"` ) ).
     cl_abap_unit_assert=>assert_true( xsdbool( lv_xml CS `type="Emphasized"` ) ).
     cl_abap_unit_assert=>assert_true( xsdbool( lv_xml CS `sap-icon://accept` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_p_overwrites.
+
+    " a name set twice is written once, with the last value - two of them
+    " are not well-formed XML
+    DATA(lo_root) = zabaputil_cl_util_xml=>factory( ).
+    lo_root->__( n = `Input`
+                 a = `value`
+                 v = `a`
+                 p = VALUE #( ( n = `value` v = `b` ) ( n = `width` v = `10rem` ) )
+      )->p( n = `width`
+            v = `20rem` ).
+
+    cl_abap_unit_assert=>assert_equals( exp = ` <Input value="a" width="20rem"/>`
+                                        act = lo_root->stringify( ) ).
 
   ENDMETHOD.
 
