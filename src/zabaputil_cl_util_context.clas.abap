@@ -14427,13 +14427,22 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
         LOOP AT lt_source INTO lv_source.
 
-          lv_source_upper = to_upper( lv_source ).
+          " the statement at the start of the line, outside of comments:
+          " `CS |METHOD GET|` also started at GET_DATA, GET_TEXT and at a
+          " comment naming the method, and stopped at one naming ENDMETHOD
+          lv_source_upper = condense( to_upper( lv_source ) ).
+          IF ( lv_source IS NOT INITIAL AND lv_source(1) = `*` ) OR lv_source_upper CP `"*`.
+            IF lv_check_method = abap_true.
+              INSERT lv_source INTO TABLE lt_string.
+            ENDIF.
+            CONTINUE.
+          ENDIF.
 
-          IF lv_source_upper CS `ENDMETHOD`.
+          IF lv_source_upper CP `ENDMETHOD*`.
             lv_check_method = abap_false.
           ENDIF.
 
-          IF lv_source_upper CS |METHOD { lv_method }|.
+          IF lv_source_upper CP |METHOD { lv_method }.*| OR lv_source_upper CP |METHOD { lv_method } *|.
             lv_check_method = abap_true.
             CONTINUE.
           ENDIF.
