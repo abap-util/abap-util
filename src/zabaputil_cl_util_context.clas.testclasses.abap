@@ -2711,11 +2711,38 @@ ENDCLASS.
 "! ================================================================
 "! Z2UI5_CL_UTIL_EXT - Comprehensive Unit Tests for JS Transpilation
 "! ================================================================
-"! No BAL tests: the BAL function modules and CL_BALI_* do not exist in
+"! Few BAL tests: the BAL function modules and CL_BALI_* do not exist in
 "! the transpiled runtime, and every bal_* method raises when they fail.
 "! (The ASSIGN_TYPE_CONFLICT of bal_search is fixed - the BAL tables are
-"! typed generically.)
+"! typed generically.) What runs here is what happens before any of them
+"! is called.
 "! ================================================================
+CLASS ltcl_bal_ops DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+    METHODS delete_without_keys FOR TESTING.
+
+ENDCLASS.
+
+CLASS ltcl_bal_ops IMPLEMENTATION.
+
+  METHOD delete_without_keys.
+    " no keys are no filter - they would delete every log of the client
+    " (or of every object), so nothing is searched and nothing deleted:
+    " no call that could fail is made
+    TRY.
+        zabaputil_cl_util_context=>bal_delete( object    = ``
+                                               subobject = ``
+                                               id        = `` ).
+        zabaputil_cl_util_context=>bal_delete_before( `` ).
+      CATCH zabaputil_cx_util_error INTO DATA(lx).
+        cl_abap_unit_assert=>fail( lx->get_text( ) ).
+    ENDTRY.
+  ENDMETHOD.
+
+ENDCLASS.
+
 
 "! ================================================================
 "! LOCK / DEQUEUE HELPER

@@ -2521,11 +2521,17 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE ty_s_msg.
 
+    "! with_commit: COMMIT WORK after the delete (the default, as before
+    "! the parameter existed) - that commits the caller's open work too.
+    "! abap_false leaves the commit to the caller: a RAP handler must not
+    "! commit, a program that may still roll back should not.
+    "! An initial object deletes nothing.
     CLASS-METHODS bal_delete_before
       IMPORTING
-        object    TYPE clike
-        subobject TYPE clike OPTIONAL
-        !days     TYPE i DEFAULT 30.
+        object      TYPE clike
+        subobject   TYPE clike OPTIONAL
+        !days       TYPE i DEFAULT 30
+        with_commit TYPE abap_bool DEFAULT abap_true.
 
     CLASS-METHODS bal_read_by_type
       IMPORTING
@@ -2552,25 +2558,39 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE ty_t_msg.
 
+    "! with_commit: COMMIT WORK after the log is saved (the default, as
+    "! before the parameter existed) - that commits the caller's open work
+    "! too. abap_false leaves the commit to the caller, whose LUW then
+    "! writes the log: a RAP handler must not commit, a program that may
+    "! still roll back should not.
     CLASS-METHODS bal_create
       IMPORTING
-        object    TYPE clike
-        subobject TYPE clike
-        id        TYPE clike
-        t_log     TYPE ty_t_msg.
+        object      TYPE clike
+        subobject   TYPE clike
+        id          TYPE clike
+        t_log       TYPE ty_t_msg
+        with_commit TYPE abap_bool DEFAULT abap_true.
 
+    "! Appends to the newest log of object, subobject and id (on-premise;
+    "! on ABAP Cloud the first one the log API returns), or creates one.
+    "! with_commit as in bal_create.
     CLASS-METHODS bal_update
       IMPORTING
-        object    TYPE clike
-        subobject TYPE clike
-        id        TYPE clike
-        t_log     TYPE ty_t_msg.
+        object      TYPE clike
+        subobject   TYPE clike
+        id          TYPE clike
+        t_log       TYPE ty_t_msg
+        with_commit TYPE abap_bool DEFAULT abap_true.
 
+    "! Deletes the logs of object, subobject and id - all three initial
+    "! deletes nothing, never every log of the client. with_commit as in
+    "! bal_create.
     CLASS-METHODS bal_delete
       IMPORTING
-        object    TYPE clike
-        subobject TYPE clike
-        id        TYPE clike.
+        object      TYPE clike
+        subobject   TYPE clike
+        id          TYPE clike
+        with_commit TYPE abap_bool DEFAULT abap_true.
 
     " ========== Transport Requests ==========
 
@@ -4076,13 +4096,32 @@ CLASS zabaputil_cl_util_context DEFINITION
         handle TYPE any
         t_log  TYPE ty_t_msg.
 
+    " the handles (BAL_T_LOGH) of the logs loaded for the keys - unbound
+    " when none matches. latest_only: only the newest one (ALDATE, ALTIME,
+    " LOGNUMBER)
     CLASS-METHODS bal_std_load_handles
       IMPORTING
         object        TYPE clike
         subobject     TYPE clike
         id            TYPE clike
+        latest_only   TYPE abap_bool DEFAULT abap_false
       RETURNING
         VALUE(result) TYPE REF TO data.
+
+    " the headers (BALHDR_T) BAL_DB_SEARCH finds for a BAL_S_LFIL filter -
+    " unbound when none matches
+    CLASS-METHODS bal_std_search
+      IMPORTING
+        filter        TYPE any
+      RETURNING
+        VALUE(result) TYPE REF TO data.
+
+    " deletes the logs of the headers BAL_DB_SEARCH found - BAL_DB_DELETE
+    " takes the headers, it has no filter parameter
+    CLASS-METHODS bal_std_delete
+      IMPORTING
+        headers     TYPE ANY TABLE
+        with_commit TYPE abap_bool.
 
     CLASS-METHODS bal_std_build_filter
       IMPORTING
@@ -11202,7 +11241,6 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDIF.
 
     " Standard ABAP: use BAL_DB_SEARCH
-    DATA lv_fm      TYPE string.
     DATA lr_filter  TYPE REF TO data.
     DATA lr_headers TYPE REF TO data.
     FIELD-SYMBOLS <filter>  TYPE any.
@@ -11228,22 +11266,12 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                                       value  = user
                             CHANGING  filter = <filter> ).
 
-        CREATE DATA lr_headers TYPE ('BALHDR_T').
-        ASSIGN lr_headers->* TO <headers>.
-
-        lv_fm = `BAL_DB_SEARCH`.
-        CALL FUNCTION lv_fm
-          EXPORTING
-            i_s_log_filter = <filter>
-          IMPORTING
-            e_t_log_header = <headers>
-          EXCEPTIONS
-            error_message  = 2
-            OTHERS         = 1.
-        IF sy-subrc <> 0.
-          " LOG_NOT_FOUND: nothing matches the filter
+        lr_headers = bal_std_search( <filter> ).
+        " LOG_NOT_FOUND: nothing matches the filter
+        IF lr_headers IS NOT BOUND.
           RETURN.
         ENDIF.
+        ASSIGN lr_headers->* TO <headers>.
 
         LOOP AT <headers> ASSIGNING <header>.
           DATA(ls_hdr) = VALUE ty_s_bal_header( ).
@@ -11277,6 +11305,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA(lt_msgs) = bal_read( object    = object
                               subobject = subobject
                               id        = id ).
+    " the logs come in the order of their handles, not of their age: the
+    " newest message is the one with the latest time stamp (filled
+    " on-premise - on ABAP Cloud the order stays as read)
+    SORT lt_msgs STABLE BY timestampl.
     IF lt_msgs IS NOT INITIAL.
       result = lt_msgs[ lines( lt_msgs ) ].
     ENDIF.
@@ -11286,6 +11318,12 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD bal_delete_before.
 
     DATA(lv_cutoff) = CONV d( sy-datum - days ).
+
+    " the filter always restricted OBJECT - an initial object matched no
+    " log. Without it the old logs of EVERY object would go
+    IF object IS INITIAL.
+      RETURN.
+    ENDIF.
 
     IF check_abap_cloud( ).
       " Cloud: use CL_BALI_LOG_DB to delete via filter
@@ -11322,7 +11360,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                 log = lo_log_c.
           ENDLOOP.
 
-          COMMIT WORK AND WAIT.
+          IF with_commit = abap_true.
+            COMMIT WORK AND WAIT.
+          ENDIF.
 
         CATCH cx_root INTO DATA(lx_delete_c).
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -11332,17 +11372,11 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    " Standard ABAP: use BAL_DB_DELETE
-    DATA lv_fm     TYPE string.
-    DATA lr_filter TYPE REF TO data.
-    FIELD-SYMBOLS <filter> TYPE any.
-
-    " the filter always restricted OBJECT - an initial object matched no
-    " log. bal_std_build_filter leaves an initial value out, which would
-    " delete the old logs of EVERY object instead
-    IF object IS INITIAL.
-      RETURN.
-    ENDIF.
+    " Standard ABAP: BAL_DB_SEARCH, then BAL_DB_DELETE with the headers
+    DATA lr_filter  TYPE REF TO data.
+    DATA lr_headers TYPE REF TO data.
+    FIELD-SYMBOLS <filter>  TYPE any.
+    FIELD-SYMBOLS <headers> TYPE ANY TABLE.
 
     TRY.
         lr_filter = bal_std_build_filter( object    = object
@@ -11356,17 +11390,14 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                                       high   = lv_cutoff
                             CHANGING  filter = <filter> ).
 
-        lv_fm = `BAL_DB_DELETE`.
-        CALL FUNCTION lv_fm
-          EXPORTING
-            i_s_log_filter = <filter>
-          EXCEPTIONS
-            error_message  = 2
-            OTHERS         = 1.
-        " sy-subrc <> 0: no log older than the cutoff - nothing to delete
-        IF sy-subrc = 0.
-          COMMIT WORK AND WAIT.
+        lr_headers = bal_std_search( <filter> ).
+        " no log older than the cutoff - nothing to delete
+        IF lr_headers IS NOT BOUND.
+          RETURN.
         ENDIF.
+        ASSIGN lr_headers->* TO <headers>.
+        bal_std_delete( headers     = <headers>
+                        with_commit = with_commit ).
 
       CATCH cx_root INTO DATA(lx_delete).
         RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -11639,7 +11670,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             EXPORTING
               log = lo_log.
 
-          COMMIT WORK AND WAIT.
+          IF with_commit = abap_true.
+            COMMIT WORK AND WAIT.
+          ENDIF.
 
         CATCH cx_root INTO DATA(lx_create_c).
           " the log was not written - the caller must not see a success
@@ -11707,7 +11740,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
               EXPORTING
                 val = |BAL_DB_SAVE failed (sy-subrc { sy-subrc })|.
           ENDIF.
-          COMMIT WORK AND WAIT.
+          IF with_commit = abap_true.
+            COMMIT WORK AND WAIT.
+          ENDIF.
 
         CATCH cx_root INTO DATA(lx_create).
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -11745,15 +11780,23 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             RECEIVING
               log_table = lt_logs.
 
-          IF lt_logs IS INITIAL.
-            bal_create( object    = object
-                        subobject = subobject
-                        id        = id
-                        t_log     = t_log ).
-            RETURN.
-          ENDIF.
+        CATCH cx_root INTO DATA(lx_load_c).
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = lx_load_c.
+      ENDTRY.
 
-          " Append to the first (most recent) log
+      IF lt_logs IS INITIAL.
+        bal_create( object      = object
+                    subobject   = subobject
+                    id          = id
+                    t_log       = t_log
+                    with_commit = with_commit ).
+        RETURN.
+      ENDIF.
+
+      TRY.
+          " the first log the API returns - its order is not documented
           DATA(lo_log) = lt_logs[ 1 ].
           bal_cloud_add_items( log   = lo_log
                                t_log = t_log ).
@@ -11762,46 +11805,48 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             EXPORTING
               log = lo_log.
 
-          COMMIT WORK AND WAIT.
+          IF with_commit = abap_true.
+            COMMIT WORK AND WAIT.
+          ENDIF.
 
-        CATCH cx_root.
-          " Fallback: create new log if update fails
-          bal_create( object    = object
-                      subobject = subobject
-                      id        = id
-                      t_log     = t_log ).
+        CATCH cx_root INTO DATA(lx_update_c).
+          " no second log with the same messages: the items may be in the
+          " first one already - the caller sees the failure instead
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = lx_update_c.
       ENDTRY.
 
     ELSE.
 
-      " Append the given messages to an already persisted log; create a new one if none exists.
+      " Append the given messages to the newest persisted log; create a new one if none exists.
       DATA lv_fm      TYPE string.
       DATA lr_handles TYPE REF TO data.
-      FIELD-SYMBOLS <handles> TYPE INDEX TABLE.
+      FIELD-SYMBOLS <handles> TYPE ANY TABLE.
       FIELD-SYMBOLS <handle>  TYPE any.
 
       TRY.
-          lr_handles = bal_std_load_handles( object    = object
-                                             subobject = subobject
-                                             id        = id ).
-          IF lr_handles IS NOT BOUND.
-            bal_create( object    = object
-                        subobject = subobject
-                        id        = id
-                        t_log     = t_log ).
+          lr_handles = bal_std_load_handles( object      = object
+                                             subobject   = subobject
+                                             id          = id
+                                             latest_only = abap_true ).
+          DATA(lv_found) = abap_false.
+          IF lr_handles IS BOUND.
+            ASSIGN lr_handles->* TO <handles>.
+            lv_found = xsdbool( <handles> IS NOT INITIAL ).
+          ENDIF.
+          IF lv_found = abap_false.
+            bal_create( object      = object
+                        subobject   = subobject
+                        id          = id
+                        t_log       = t_log
+                        with_commit = with_commit ).
             RETURN.
           ENDIF.
 
-          ASSIGN lr_handles->* TO <handles>.
-          IF <handles> IS INITIAL.
-            bal_create( object    = object
-                        subobject = subobject
-                        id        = id
-                        t_log     = t_log ).
-            RETURN.
-          ENDIF.
-
-          ASSIGN <handles>[ 1 ] TO <handle>.
+          LOOP AT <handles> ASSIGNING <handle>.
+            EXIT.
+          ENDLOOP.
           bal_std_msg_add( handle = <handle>
                            t_log  = t_log ).
 
@@ -11817,7 +11862,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
               EXPORTING
                 val = |BAL_DB_SAVE failed (sy-subrc { sy-subrc })|.
           ENDIF.
-          COMMIT WORK AND WAIT.
+          IF with_commit = abap_true.
+            COMMIT WORK AND WAIT.
+          ENDIF.
 
         CATCH cx_root INTO DATA(lx_update).
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -11830,6 +11877,12 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD bal_delete.
+
+    " three initial keys are no filter at all - they matched every log of
+    " the client
+    IF object IS INITIAL AND subobject IS INITIAL AND id IS INITIAL.
+      RETURN.
+    ENDIF.
 
     IF check_abap_cloud( ).
 
@@ -11860,7 +11913,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                 log = lo_log.
           ENDLOOP.
 
-          COMMIT WORK AND WAIT.
+          IF with_commit = abap_true.
+            COMMIT WORK AND WAIT.
+          ENDIF.
 
         CATCH cx_root INTO DATA(lx_delete_c).
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -11870,9 +11925,12 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     ELSE.
 
-      DATA lv_fm     TYPE string.
-      DATA lr_filter TYPE REF TO data.
-      FIELD-SYMBOLS <filter> TYPE any.
+      " BAL_DB_DELETE has no filter parameter: the logs are searched first
+      " and deleted by their headers
+      DATA lr_filter  TYPE REF TO data.
+      DATA lr_headers TYPE REF TO data.
+      FIELD-SYMBOLS <filter>  TYPE any.
+      FIELD-SYMBOLS <headers> TYPE ANY TABLE.
 
       TRY.
           lr_filter = bal_std_build_filter( object    = object
@@ -11880,16 +11938,13 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                                             id        = id ).
           ASSIGN lr_filter->* TO <filter>.
 
-          lv_fm = `BAL_DB_DELETE`.
-          CALL FUNCTION lv_fm
-            EXPORTING
-              i_s_log_filter = <filter>
-            EXCEPTIONS
-              error_message  = 2
-              OTHERS         = 1.
-          IF sy-subrc = 0.
-            COMMIT WORK AND WAIT.
+          lr_headers = bal_std_search( <filter> ).
+          IF lr_headers IS NOT BOUND.
+            RETURN.
           ENDIF.
+          ASSIGN lr_headers->* TO <headers>.
+          bal_std_delete( headers     = <headers>
+                          with_commit = with_commit ).
 
         CATCH cx_root INTO DATA(lx_delete).
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -12669,10 +12724,17 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA lv_fm      TYPE string.
     DATA lr_filter  TYPE REF TO data.
     DATA lr_headers TYPE REF TO data.
+    DATA lr_latest  TYPE REF TO data.
+    DATA lr_newest  TYPE REF TO data.
+    DATA lv_newest  TYPE string.
+    DATA lv_key     TYPE string.
     FIELD-SYMBOLS <filter>  TYPE any.
     " generic: BALHDR_T and BAL_T_LOGH are typed STANDARD in bal_search and
     " bal_read - with SORTED here one of the two sides could only dump
     FIELD-SYMBOLS <headers> TYPE ANY TABLE.
+    FIELD-SYMBOLS <latest>  TYPE ANY TABLE.
+    FIELD-SYMBOLS <header>  TYPE any.
+    FIELD-SYMBOLS <comp>    TYPE any.
     FIELD-SYMBOLS <handles> TYPE ANY TABLE.
 
     lr_filter = bal_std_build_filter( object    = object
@@ -12680,20 +12742,39 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                                       id        = id ).
     ASSIGN lr_filter->* TO <filter>.
 
-    CREATE DATA lr_headers TYPE ('BALHDR_T').
+    lr_headers = bal_std_search( <filter> ).
+    IF lr_headers IS NOT BOUND.
+      RETURN.
+    ENDIF.
     ASSIGN lr_headers->* TO <headers>.
 
-    lv_fm = `BAL_DB_SEARCH`.
-    CALL FUNCTION lv_fm
-      EXPORTING
-        i_s_log_filter = <filter>
-      IMPORTING
-        e_t_log_header = <headers>
-      EXCEPTIONS
-        error_message  = 2
-        OTHERS         = 1.
-    IF sy-subrc <> 0 OR <headers> IS INITIAL.
-      RETURN.
+    " the newest log by date, time and number - BAL_DB_SEARCH does not
+    " return them by age, and the first one was an arbitrary old log
+    IF latest_only = abap_true AND lines( <headers> ) > 1.
+      LOOP AT <headers> ASSIGNING <header>.
+        CLEAR lv_key.
+        ASSIGN COMPONENT `ALDATE` OF STRUCTURE <header> TO <comp>.
+        IF sy-subrc = 0.
+          lv_key = |{ <comp> }|.
+        ENDIF.
+        ASSIGN COMPONENT `ALTIME` OF STRUCTURE <header> TO <comp>.
+        IF sy-subrc = 0.
+          lv_key = |{ lv_key }{ <comp> }|.
+        ENDIF.
+        ASSIGN COMPONENT `LOGNUMBER` OF STRUCTURE <header> TO <comp>.
+        IF sy-subrc = 0.
+          lv_key = |{ lv_key }{ <comp> }|.
+        ENDIF.
+        IF lr_newest IS NOT BOUND OR lv_key > lv_newest.
+          lv_newest = lv_key.
+          lr_newest = REF #( <header> ).
+        ENDIF.
+      ENDLOOP.
+      CREATE DATA lr_latest TYPE ('BALHDR_T').
+      ASSIGN lr_latest->* TO <latest>.
+      ASSIGN lr_newest->* TO <header>.
+      INSERT <header> INTO TABLE <latest>.
+      ASSIGN lr_latest->* TO <headers>.
     ENDIF.
 
     CREATE DATA result TYPE ('BAL_T_LOGH').
@@ -12708,6 +12789,52 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       EXCEPTIONS
         error_message  = 2
         OTHERS         = 1.
+
+  ENDMETHOD.
+
+  METHOD bal_std_search.
+
+    DATA lv_fm TYPE string.
+    FIELD-SYMBOLS <headers> TYPE ANY TABLE.
+
+    CREATE DATA result TYPE ('BALHDR_T').
+    ASSIGN result->* TO <headers>.
+
+    lv_fm = `BAL_DB_SEARCH`.
+    CALL FUNCTION lv_fm
+      EXPORTING
+        i_s_log_filter = filter
+      IMPORTING
+        e_t_log_header = <headers>
+      EXCEPTIONS
+        error_message  = 2
+        OTHERS         = 1.
+    " LOG_NOT_FOUND: nothing matches the filter
+    IF sy-subrc <> 0 OR <headers> IS INITIAL.
+      CLEAR result.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD bal_std_delete.
+
+    DATA lv_fm TYPE string.
+
+    lv_fm = `BAL_DB_DELETE`.
+    CALL FUNCTION lv_fm
+      EXPORTING
+        i_t_logs_to_delete = headers
+      EXCEPTIONS
+        error_message      = 2
+        OTHERS             = 1.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |BAL_DB_DELETE failed (sy-subrc { sy-subrc })|.
+    ENDIF.
+    IF with_commit = abap_true.
+      COMMIT WORK AND WAIT.
+    ENDIF.
 
   ENDMETHOD.
 
