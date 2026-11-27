@@ -4220,6 +4220,16 @@ CLASS zabaputil_cl_util_context DEFINITION
         result   TYPE string
         invalid  TYPE abap_bool.
 
+    " the text half of itab_filter_check_field: abap_true when text holds
+    " search - upper case already when ignore_case is set
+    CLASS-METHODS itab_filter_check_text
+      IMPORTING
+        !text         TYPE string
+        search        TYPE string
+        ignore_case   TYPE abap_bool
+      RETURNING
+        VALUE(result) TYPE abap_bool.
+
     " a run of percent escapes of url_decode as text: the bytes as UTF-8,
     " or the escapes as they were written (raw) when they are no UTF-8
     CLASS-METHODS url_decode_bytes
@@ -4665,6 +4675,13 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     " uses find( ) for a genuinely case-sensitive match (JS: plain includes()).
     FIELD-SYMBOLS <row>   TYPE any.
     FIELD-SYMBOLS <field> TYPE any.
+    FIELD-SYMBOLS <kept>  TYPE STANDARD TABLE.
+    " the components that hold text: by position without a field list, by
+    " name with one
+    DATA lt_index TYPE STANDARD TABLE OF i WITH EMPTY KEY.
+    DATA lt_name  TYPE string_table.
+    DATA lv_whole_row TYPE abap_bool.
+    DATA lr_kept TYPE REF TO data.
 
     DATA(lv_search) = COND string( WHEN ignore_case = abap_true
                                    THEN to_upper( val )
@@ -4677,52 +4694,83 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     IF lv_search IS INITIAL.
       RETURN.
     ENDIF.
-    DATA(lv_field_count) = lines( fields ).
+
+    " Which component holds text is a property of the line type: decided
+    " once, on the first row, instead of describing every cell of every
+    " row - this runs on every search keystroke over the whole table. A
+    " table, a deep structure or a reference cannot go into a string
+    " template - such a component holds no text to match
+    ASSIGN tab[ 1 ] TO <row>.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    IF fields IS INITIAL.
+      DATA(lv_index) = 1.
+      DO.
+        ASSIGN COMPONENT lv_index OF STRUCTURE <row> TO <field>.
+        IF sy-subrc <> 0.
+          EXIT.
+        ENDIF.
+        IF rtti_check_printable( <field> ) = abap_true.
+          INSERT lv_index INTO TABLE lt_index.
+        ENDIF.
+        lv_index = lv_index + 1.
+      ENDDO.
+      " elementary line type (e.g. string_table) has no components -
+      " match against the whole line instead of deleting every row
+      IF lv_index = 1.
+        lv_whole_row = rtti_check_printable( <row> ).
+      ENDIF.
+    ELSE.
+      LOOP AT fields REFERENCE INTO DATA(lr_field).
+        ASSIGN COMPONENT lr_field->* OF STRUCTURE <row> TO <field>.
+        IF sy-subrc = 0 AND rtti_check_printable( <field> ) = abap_true.
+          INSERT lr_field->* INTO TABLE lt_name.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+
+    " the matching rows go into a copy - a DELETE ... INDEX per dropped row
+    " shifted the rest of the table every time
+    CREATE DATA lr_kept LIKE tab.
+    ASSIGN lr_kept->* TO <kept>.
 
     LOOP AT tab ASSIGNING <row>.
 
-      DATA(lv_tabix) = sy-tabix.
       DATA(lv_check_found) = abap_false.
-      DATA(lv_index) = 1.
-      DO.
-        IF fields IS INITIAL.
-          ASSIGN COMPONENT lv_index OF STRUCTURE <row> TO <field>.
-          IF sy-subrc <> 0.
-            IF lv_index = 1.
-              " elementary line type (e.g. string_table) has no components -
-              " match against the whole line instead of deleting every row
-              ASSIGN <row> TO <field>.
-            ELSE.
-              EXIT.
-            ENDIF.
-          ENDIF.
-        ELSE.
-          IF lv_index > lv_field_count.
-            EXIT.
-          ENDIF.
-          DATA(lv_name) = fields[ lv_index ].
-          ASSIGN COMPONENT lv_name OF STRUCTURE <row> TO <field>.
-          IF sy-subrc <> 0.
-            lv_index = lv_index + 1.
-            CONTINUE.
-          ENDIF.
-        ENDIF.
-
-        IF itab_filter_check_field( field       = <field>
-                                    search      = lv_search
-                                    ignore_case = ignore_case ) = abap_true.
+      IF lv_whole_row = abap_true.
+        lv_check_found = itab_filter_check_text( text        = |{ <row> }|
+                                                 search      = lv_search
+                                                 ignore_case = ignore_case ).
+      ENDIF.
+      LOOP AT lt_index REFERENCE INTO DATA(lr_index).
+        ASSIGN COMPONENT lr_index->* OF STRUCTURE <row> TO <field>.
+        IF itab_filter_check_text( text        = |{ <field> }|
+                                   search      = lv_search
+                                   ignore_case = ignore_case ) = abap_true.
           lv_check_found = abap_true.
           EXIT.
         ENDIF.
+      ENDLOOP.
+      LOOP AT lt_name REFERENCE INTO DATA(lr_name).
+        ASSIGN COMPONENT lr_name->* OF STRUCTURE <row> TO <field>.
+        IF itab_filter_check_text( text        = |{ <field> }|
+                                   search      = lv_search
+                                   ignore_case = ignore_case ) = abap_true.
+          lv_check_found = abap_true.
+          EXIT.
+        ENDIF.
+      ENDLOOP.
 
-        lv_index = lv_index + 1.
-      ENDDO.
-
-      IF lv_check_found = abap_false.
-        DELETE tab INDEX lv_tabix.
+      IF lv_check_found = abap_true.
+        INSERT <row> INTO TABLE <kept>.
       ENDIF.
 
     ENDLOOP.
+
+    IF lines( <kept> ) <> lines( tab ).
+      tab = <kept>.
+    ENDIF.
 
   ENDMETHOD.
 
@@ -15356,13 +15404,19 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    DATA(lv_value) = |{ field }|.
+    result = itab_filter_check_text( text        = |{ field }|
+                                     search      = search
+                                     ignore_case = ignore_case ).
+
+  ENDMETHOD.
+
+  METHOD itab_filter_check_text.
+
     IF ignore_case = abap_true.
-      lv_value = to_upper( lv_value ).
-      IF lv_value CS search.
+      IF to_upper( text ) CS search.
         result = abap_true.
       ENDIF.
-    ELSEIF find( val = lv_value
+    ELSEIF find( val = text
                  sub = search ) >= 0.
       result = abap_true.
     ENDIF.
