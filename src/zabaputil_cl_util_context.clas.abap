@@ -2820,6 +2820,8 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE abap_bool.
 
+    "! The name of the job started - job_get_status needs its count as
+    "! well, which job_submit returns.
     CLASS-METHODS job_submit_report
       IMPORTING
         report          TYPE clike
@@ -2828,6 +2830,26 @@ CLASS zabaputil_cl_util_context DEFINITION
         job_name        TYPE clike OPTIONAL
       RETURNING
         VALUE(result)   TYPE string.
+
+    TYPES:
+      BEGIN OF ty_s_job,
+        jobname  TYPE string,
+        jobcount TYPE string,
+      END OF ty_s_job.
+
+    "! Starts the report as a background job (JOB_OPEN, JOB_SUBMIT,
+    "! JOB_CLOSE) and returns its name and count, the key job_get_status
+    "! takes. job_name: initial is JOB_<date><time>. A job that cannot be
+    "! submitted or closed is deleted again and raises
+    "! zabaputil_cx_util_error. Not on ABAP Cloud (application jobs).
+    CLASS-METHODS job_submit
+      IMPORTING
+        report          TYPE clike
+        variant         TYPE clike OPTIONAL
+        start_immediate TYPE abap_bool DEFAULT abap_true
+        job_name        TYPE clike OPTIONAL
+      RETURNING
+        VALUE(result)   TYPE ty_s_job.
 
     CLASS-METHODS numrange_get_next
       IMPORTING
@@ -13857,6 +13879,15 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD job_submit_report.
 
+    result = job_submit( report          = report
+                         variant         = variant
+                         start_immediate = start_immediate
+                         job_name        = job_name )-jobname.
+
+  ENDMETHOD.
+
+  METHOD job_submit.
+
     IF check_abap_cloud( ).
       " Cloud: Application Jobs have a different architecture (job catalog + templates).
       " Direct report submission is not available. Raise informative exception.
@@ -13871,14 +13902,16 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA lv_jobcount TYPE c LENGTH 8.
     DATA lv_report   TYPE c LENGTH 40.
     DATA lv_variant  TYPE c LENGTH 14.
+    DATA lx_failed   TYPE REF TO cx_root.
+    DATA lx_util     TYPE REF TO zabaputil_cx_util_error.
 
     lv_report = report.
     lv_variant = variant.
     lv_jobname = COND #( WHEN job_name IS NOT INITIAL THEN job_name
-                         ELSE |Z2UI5_{ sy-datum }{ sy-uzeit }| ).
+                         ELSE |JOB_{ sy-datum }{ sy-uzeit }| ).
 
+    lv_fm = `JOB_OPEN`.
     TRY.
-        lv_fm = `JOB_OPEN`.
         CALL FUNCTION lv_fm
           EXPORTING
             jobname  = lv_jobname
@@ -13887,12 +13920,19 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           EXCEPTIONS
             error_message = 1
             OTHERS        = 1.
-        IF sy-subrc <> 0.
-          RAISE EXCEPTION TYPE zabaputil_cx_util_error
-            EXPORTING
-              val = `JOB_OPEN failed`.
-        ENDIF.
+        DATA(lv_open_subrc) = sy-subrc.
+      CATCH cx_root INTO DATA(x_open).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = x_open.
+    ENDTRY.
+    IF lv_open_subrc <> 0.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = `JOB_OPEN failed`.
+    ENDIF.
 
+    TRY.
         lv_fm = `JOB_SUBMIT`.
         CALL FUNCTION lv_fm
           EXPORTING
@@ -13935,15 +13975,37 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
               val = `JOB_CLOSE failed`.
         ENDIF.
 
-        result = lv_jobname.
+        result-jobname  = lv_jobname.
+        result-jobcount = lv_jobcount.
 
-      CATCH zabaputil_cx_util_error INTO DATA(lx).
-        RAISE EXCEPTION lx.
-      CATCH cx_root INTO DATA(x).
-        RAISE EXCEPTION TYPE zabaputil_cx_util_error
-          EXPORTING
-            val = x.
+      CATCH cx_root INTO lx_failed.
     ENDTRY.
+
+    IF lx_failed IS BOUND.
+      " the job JOB_OPEN created would stay in SM37 without a step or
+      " without a start
+      TRY.
+          lv_fm = `BP_JOB_DELETE`.
+          CALL FUNCTION lv_fm
+            EXPORTING
+              jobcount = lv_jobcount
+              jobname  = lv_jobname
+            EXCEPTIONS
+              error_message = 1
+              OTHERS        = 1.
+        CATCH cx_root ##NO_HANDLER.
+      ENDTRY.
+      TRY.
+          lx_util ?= lx_failed.
+        CATCH cx_sy_move_cast_error ##NO_HANDLER.
+      ENDTRY.
+      IF lx_util IS BOUND.
+        RAISE EXCEPTION lx_util.
+      ENDIF.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = lx_failed.
+    ENDIF.
 
   ENDMETHOD.
 
