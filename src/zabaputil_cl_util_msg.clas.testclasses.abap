@@ -176,7 +176,8 @@ CLASS ltcl_unit_test_msg_mapper IMPLEMENTATION.
 
     ASSIGN COMPONENT `%FAIL` OF STRUCTURE <row> TO FIELD-SYMBOL(<fail>).
     ASSIGN COMPONENT `CAUSE` OF STRUCTURE <fail> TO FIELD-SYMBOL(<cause>).
-    <cause> = 2.
+    " 423: IF_ABAP_BEHV=>CAUSE-LOCKED
+    <cause> = 423.
 
     INSERT <row> INTO TABLE <ftab>.
 
@@ -351,7 +352,8 @@ CLASS ltcl_unit_test_msg_mapper IMPLEMENTATION.
 
     ASSIGN COMPONENT `%FAIL` OF STRUCTURE <row> TO FIELD-SYMBOL(<fail>).
     ASSIGN COMPONENT `CAUSE` OF STRUCTURE <fail> TO FIELD-SYMBOL(<cause>).
-    <cause> = 1.
+    " 401: IF_ABAP_BEHV=>CAUSE-UNAUTHORIZED
+    <cause> = 401.
 
     ASSIGN COMPONENT `%TKY` OF STRUCTURE <row> TO FIELD-SYMBOL(<tky>).
     ASSIGN COMPONENT `%KEY` OF STRUCTURE <tky> TO FIELD-SYMBOL(<key>).
