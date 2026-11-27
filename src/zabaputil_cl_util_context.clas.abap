@@ -4220,6 +4220,15 @@ CLASS zabaputil_cl_util_context DEFINITION
         result   TYPE string
         invalid  TYPE abap_bool.
 
+    " a run of percent escapes of url_decode as text: the bytes as UTF-8,
+    " or the escapes as they were written (raw) when they are no UTF-8
+    CLASS-METHODS url_decode_bytes
+      IMPORTING
+        hex           TYPE string
+        raw           TYPE string
+      RETURNING
+        VALUE(result) TYPE string.
+
 ENDCLASS.
 
 CLASS zabaputil_cl_util_context IMPLEMENTATION.
@@ -14067,6 +14076,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     " the pending bytes as hex digits - a byte string has no expression
     " that appends to it, the hex text converts back in one step
     DATA lv_xbuf TYPE string.
+    " the same escapes as written - what comes out when they are no UTF-8
+    DATA lv_raw TYPE string.
 
     WHILE lv_i < lv_len.
 
@@ -14086,13 +14097,18 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         DATA lv_x TYPE x LENGTH 1.
         lv_x = lv_hex.
         lv_xbuf = |{ lv_xbuf }{ lv_x }|.
+        lv_raw = lv_raw && substring( val = lv_val
+                                      off = lv_i
+                                      len = 3 ).
         lv_i = lv_i + 3.
         CONTINUE.
       ENDIF.
 
       IF lv_xbuf IS NOT INITIAL.
-        result = result && conv_get_string_by_xstring( CONV xstring( lv_xbuf ) ).
+        result = result && url_decode_bytes( hex = lv_xbuf
+                                             raw = lv_raw ).
         CLEAR lv_xbuf.
+        CLEAR lv_raw.
       ENDIF.
 
       IF lv_char = `+`.
@@ -14105,7 +14121,26 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDWHILE.
 
     IF lv_xbuf IS NOT INITIAL.
-      result = result && conv_get_string_by_xstring( CONV xstring( lv_xbuf ) ).
+      result = result && url_decode_bytes( hex = lv_xbuf
+                                           raw = lv_raw ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD url_decode_bytes.
+
+    DATA lv_invalid TYPE abap_bool.
+
+    " `%E9` (a Latin-1 client), `%FF` or a cut `%C3` raised INVALID_UTF8
+    " out of user-controlled input - such a run stays as it was written,
+    " like `%ZZ` does
+    conv_get_string_by_xstring_cp( EXPORTING val      = CONV xstring( hex )
+                                             codepage = `UTF-8`
+                                             encoding = `UTF-8`
+                                   IMPORTING result   = result
+                                             invalid  = lv_invalid ).
+    IF lv_invalid = abap_true.
+      result = raw.
     ENDIF.
 
   ENDMETHOD.

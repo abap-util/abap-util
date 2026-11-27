@@ -7106,6 +7106,13 @@ CLASS ltcl_fixes IMPLEMENTATION.
                                         act = zabaputil_cl_util_context=>url_decode( `a%20b` ) ).
     cl_abap_unit_assert=>assert_equals( exp = `100%`
                                         act = zabaputil_cl_util_context=>url_decode( `100%` ) ).
+    " escapes that are no UTF-8 stay as they were written
+    cl_abap_unit_assert=>assert_equals( exp = `a%FFb`
+                                        act = zabaputil_cl_util_context=>url_decode( `a%FFb` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `a%C3`
+                                        act = zabaputil_cl_util_context=>url_decode( `a%C3` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `a b%e9`
+                                        act = zabaputil_cl_util_context=>url_decode( `a%20b%e9` ) ).
   ENDMETHOD.
 
   METHOD csv_quotes_special_cells.
