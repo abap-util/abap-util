@@ -7395,14 +7395,40 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     DATA(lv_val) = c_trim( CONV string( val ) ).
 
-    " Heuristic: A comma is treated as DECIMAL separator when it is the
-    " LAST separator in the string (no further comma or dot follows).
-    " Otherwise it is treated as THOUSANDS separator and skipped.
-    " Edge case: '1,000' (no dot) is interpreted as 1.000 (decimal), NOT 1000.
-    " This matches European number formatting conventions.
-    " Normalize: keep only digits, minus, and decimal point
-    DATA(lv_clean) = ``.
+    " Which separator is the decimal one:
+    " - both a dot and a comma occur: the one that occurs LAST
+    "   (`1.234,56` and `1,234.56` are both 1234.56)
+    " - only one kind, more than once: thousands separators, no decimals
+    "   (`1.234.567`, `1,000,000`)
+    " - only one kind, once: the decimal separator (`3,14`, `3.14`). So
+    "   `1,000` is 1 (European convention) - a single separator cannot be
+    "   told apart from a thousands separator, the decimal reading wins
+    " Every other separator is a thousands separator and is skipped.
+    DATA lv_dot_count   TYPE i.
+    DATA lv_comma_count TYPE i.
+    DATA lv_decimal     TYPE string.
     DATA(lv_i) = 0.
+    WHILE lv_i < strlen( lv_val ).
+      CASE lv_val+lv_i(1).
+        WHEN `.`.
+          lv_dot_count = lv_dot_count + 1.
+          lv_decimal = `.`.
+        WHEN `,`.
+          lv_comma_count = lv_comma_count + 1.
+          lv_decimal = `,`.
+      ENDCASE.
+      lv_i = lv_i + 1.
+    ENDWHILE.
+    " lv_decimal holds the last separator - right when both kinds occur
+    IF lv_dot_count = 0 OR lv_comma_count = 0.
+      IF lv_dot_count > 1 OR lv_comma_count > 1.
+        CLEAR lv_decimal.
+      ENDIF.
+    ENDIF.
+
+    " Normalize: keep only digits, minus, and the decimal separator as `.`
+    DATA(lv_clean) = ``.
+    lv_i = 0.
     WHILE lv_i < strlen( lv_val ).
       DATA(lv_c) = lv_val+lv_i(1).
       IF lv_c >= `0` AND lv_c <= `9`.
@@ -7412,26 +7438,20 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       ELSEIF lv_c = `-` AND lv_i = strlen( lv_val ) - 1 AND lv_val(1) <> `-`.
         " the sign behind the number, as a MOVE and WRITE put it
         lv_clean = `-` && lv_clean.
-      ELSEIF lv_c = `.`.
-        lv_clean = lv_clean && lv_c.
-      ELSEIF lv_c = `,`.
-        " Check if comma is decimal separator (last separator in string)
-        DATA(lv_rest) = substring( val = lv_val off = lv_i + 1 ).
-        IF lv_rest NA `,` AND lv_rest NA `.`.
-          lv_clean = lv_clean && `.`.
-        ENDIF.
-        " Otherwise it's a thousands separator — skip it
+      ELSEIF lv_c = lv_decimal.
+        lv_clean = lv_clean && `.`.
       ENDIF.
+      " any other separator is a thousands separator - skipped
       lv_i = lv_i + 1.
     ENDWHILE.
 
     " Validate the normalized value explicitly: it needs at least one
-    " digit and at most one decimal point (e.g. European format `1.234,56`
-    " normalizes to the invalid `1.234.56`). Return 0 for invalid input -
-    " the JS transpiler converts such strings leniently instead of raising
-    DATA(lv_dot_count) = count( val = lv_clean
-                                sub = `.` ).
-    IF lv_dot_count > 1 OR lv_clean NA `0123456789`.
+    " digit and at most one decimal point (`1,234.5.6` keeps two). Return 0
+    " for invalid input - the JS transpiler converts such strings leniently
+    " instead of raising
+    DATA(lv_point_count) = count( val = lv_clean
+                                  sub = `.` ).
+    IF lv_point_count > 1 OR lv_clean NA `0123456789`.
       result = 0.
       RETURN.
     ENDIF.

@@ -2299,6 +2299,7 @@ CLASS ltcl_edge_cases DEFINITION FINAL
     " conv_string_to_number edge cases
     METHODS num_one_thousand_no_dot        FOR TESTING.
     METHODS num_european_format            FOR TESTING.
+    METHODS num_thousands_only             FOR TESTING.
     METHODS num_only_minus                 FOR TESTING.
     METHODS num_leading_zeros              FOR TESTING.
 
@@ -2440,20 +2441,30 @@ CLASS ltcl_edge_cases IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD num_one_thousand_no_dot.
-    " EDGE CASE: '1,000' without dot → comma is last separator → decimal!
-    " Result is 1.0 NOT 1000. This is documented European behavior.
+    " a single separator is the decimal one: '1,000' is 1 (European
+    " convention) - see conv_string_to_number
     DATA(lv_result) = zabaputil_cl_util_context=>conv_string_to_number( `1,000` ).
     cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( '1.000' ) act = lv_result ).
   ENDMETHOD.
 
   METHOD num_european_format.
-    " TRANSPILER NOTE: European format (dot=thousands, comma=decimal)
-    " does NOT work correctly! The dot is always kept as-is, creating
-    " invalid numbers like '1.234.56'. Only the comma heuristic applies.
-    " Result: falls back to 0 due to conversion error.
-    DATA(lv_result) = zabaputil_cl_util_context=>conv_string_to_number( `1.234,56` ).
-    " Documents actual (broken) behavior - returns 0 due to double-dot
-    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( 0 ) act = lv_result ).
+    " both separators: the last one is the decimal separator
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( '1234.56' )
+                                        act = zabaputil_cl_util_context=>conv_string_to_number( `1.234,56` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( '1234567.89' )
+                                        act = zabaputil_cl_util_context=>conv_string_to_number( `1.234.567,89` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( '1234567.89' )
+                                        act = zabaputil_cl_util_context=>conv_string_to_number( `1,234,567.89` ) ).
+  ENDMETHOD.
+
+  METHOD num_thousands_only.
+    " one kind of separator, several times: thousands separators
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( 1234567 )
+                                        act = zabaputil_cl_util_context=>conv_string_to_number( `1.234.567` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( 1000000 )
+                                        act = zabaputil_cl_util_context=>conv_string_to_number( `1,000,000` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( -1000000 )
+                                        act = zabaputil_cl_util_context=>conv_string_to_number( `-1,000,000` ) ).
   ENDMETHOD.
 
   METHOD num_only_minus.
