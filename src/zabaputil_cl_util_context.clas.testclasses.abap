@@ -3356,6 +3356,7 @@ CLASS ltcl_itab_aggregations DEFINITION FINAL
     METHODS sum_by_unknown_field          FOR TESTING.
     METHODS distinct                      FOR TESTING.
     METHODS group_sum_by                  FOR TESTING.
+    METHODS group_negative_numbers        FOR TESTING.
 
 ENDCLASS.
 
@@ -3394,6 +3395,38 @@ CLASS ltcl_itab_aggregations IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
         act = lt_distinct[ 2 ]
         exp = `AA` ).
+  ENDMETHOD.
+
+  METHOD group_negative_numbers.
+    " a negative number is written `-5` by distinct, group_sum_by and
+    " count_by alike - a plain move wrote `5-`
+    TYPES: BEGIN OF ty, grp TYPE i, val TYPE i, END OF ty.
+    DATA lt_tab TYPE STANDARD TABLE OF ty WITH EMPTY KEY.
+    lt_tab = VALUE #( ( grp = -5 val = 1 ) ( grp = 3 val = 2 ) ( grp = -5 val = 4 ) ).
+
+    DATA(lt_distinct) = zabaputil_cl_util_context=>itab_distinct( tab       = lt_tab
+                                                                  fieldname = `GRP` ).
+    cl_abap_unit_assert=>assert_equals( exp = VALUE string_table( ( `-5` ) ( `3` ) )
+                                        act = lt_distinct ).
+
+    DATA(lt_sums) = zabaputil_cl_util_context=>itab_group_sum_by( tab      = lt_tab
+                                                                  group_by = `GRP`
+                                                                  sum_by   = `VAL` ).
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = lines( lt_sums ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `-5`
+                                        act = lt_sums[ 1 ]-n ).
+    cl_abap_unit_assert=>assert_equals( exp = `5`
+                                        act = lt_sums[ 1 ]-v ).
+
+    DATA(lt_count) = zabaputil_cl_util_context=>itab_count_by( tab       = lt_tab
+                                                               fieldname = `GRP` ).
+    cl_abap_unit_assert=>assert_equals( exp = `-5`
+                                        act = lt_count[ 1 ]-n ).
+    cl_abap_unit_assert=>assert_equals( exp = `2`
+                                        act = lt_count[ 1 ]-v ).
+    cl_abap_unit_assert=>assert_equals( exp = `3`
+                                        act = lt_count[ 2 ]-n ).
   ENDMETHOD.
 
   METHOD group_sum_by.

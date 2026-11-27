@@ -7848,8 +7848,20 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD itab_count_by.
 
+    TYPES:
+      BEGIN OF ty_s_count,
+        n     TYPE string,
+        count TYPE i,
+      END OF ty_s_count.
+
     FIELD-SYMBOLS <row>   TYPE any.
     FIELD-SYMBOLS <field> TYPE any.
+    FIELD-SYMBOLS <count> TYPE ty_s_count.
+    " counted in a hashed table as integers - a key read on result scanned
+    " every value for every row, and converted the count from text and back
+    DATA lt_count TYPE HASHED TABLE OF ty_s_count WITH UNIQUE KEY n.
+    " the values in the order they first came, which is the order of result
+    DATA lt_order TYPE string_table.
 
     LOOP AT tab ASSIGNING <row>.
       ASSIGN COMPONENT fieldname OF STRUCTURE <row> TO <field>.
@@ -7857,13 +7869,19 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CONTINUE.
       ENDIF.
       DATA(lv_val) = |{ <field> }|.
-      ASSIGN result[ n = lv_val ] TO FIELD-SYMBOL(<entry>).
+      ASSIGN lt_count[ n = lv_val ] TO <count>.
       IF sy-subrc = 0.
-        DATA(lv_count) = CONV i( <entry>-v ) + 1.
-        <entry>-v = |{ lv_count }|.
+        <count>-count = <count>-count + 1.
       ELSE.
-        INSERT VALUE #( n = lv_val v = `1` ) INTO TABLE result.
+        INSERT VALUE #( n     = lv_val
+                        count = 1 ) INTO TABLE lt_count.
+        INSERT lv_val INTO TABLE lt_order.
       ENDIF.
+    ENDLOOP.
+
+    LOOP AT lt_order REFERENCE INTO DATA(lr_val).
+      INSERT VALUE #( n = lr_val->*
+                      v = |{ lt_count[ n = lr_val->* ]-count }| ) INTO TABLE result.
     ENDLOOP.
 
   ENDMETHOD.
@@ -14450,6 +14468,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD itab_distinct.
 
     FIELD-SYMBOLS <row> TYPE any.
+    " the values already in result - a line_exists( ) on result itself made
+    " a near-unique column of n rows cost n * n / 2 comparisons
+    DATA lt_seen TYPE HASHED TABLE OF string WITH UNIQUE KEY table_line.
     DATA(lv_fieldname) = to_upper( fieldname ).
 
     LOOP AT tab ASSIGNING <row>.
@@ -14457,8 +14478,11 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       IF sy-subrc <> 0.
         CONTINUE.
       ENDIF.
-      DATA(lv_str) = CONV string( <val> ).
-      IF NOT line_exists( result[ table_line = lv_str ] ).
+      " a string template, not CONV: a plain move writes the sign of a
+      " number behind it (`5-`), where itab_count_by and the UI write `-5`
+      DATA(lv_str) = |{ <val> }|.
+      INSERT lv_str INTO TABLE lt_seen.
+      IF sy-subrc = 0.
         INSERT lv_str INTO TABLE result.
       ENDIF.
     ENDLOOP.
@@ -14472,9 +14496,18 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         n   TYPE string,
         sum TYPE decfloat34,
       END OF ty_s_sum.
+    TYPES:
+      BEGIN OF ty_s_index,
+        n   TYPE string,
+        idx TYPE i,
+      END OF ty_s_index.
 
     DATA lt_sum TYPE STANDARD TABLE OF ty_s_sum WITH EMPTY KEY.
+    " group -> its row in lt_sum: a key read on lt_sum itself scanned every
+    " group for every row
+    DATA lt_index TYPE HASHED TABLE OF ty_s_index WITH UNIQUE KEY n.
     FIELD-SYMBOLS <row> TYPE any.
+    FIELD-SYMBOLS <sum> TYPE ty_s_sum.
 
     DATA(lv_group_by) = to_upper( group_by ).
     DATA(lv_sum_by) = to_upper( sum_by ).
@@ -14490,10 +14523,15 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CONTINUE.
       ENDIF.
 
-      DATA(lv_group) = CONV string( <group> ).
-      ASSIGN lt_sum[ n = lv_group ] TO FIELD-SYMBOL(<sum>).
-      IF sy-subrc <> 0.
+      " a string template, not CONV - see itab_distinct
+      DATA(lv_group) = |{ <group> }|.
+      ASSIGN lt_index[ n = lv_group ] TO FIELD-SYMBOL(<index>).
+      IF sy-subrc = 0.
+        ASSIGN lt_sum[ <index>-idx ] TO <sum>.
+      ELSE.
         INSERT VALUE #( n = lv_group ) INTO TABLE lt_sum ASSIGNING <sum>.
+        INSERT VALUE #( n   = lv_group
+                        idx = lines( lt_sum ) ) INTO TABLE lt_index.
       ENDIF.
       <sum>-sum = <sum>-sum + <val>.
 
