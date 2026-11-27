@@ -5020,7 +5020,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             IMPORTING
               output   = value
             EXCEPTIONS
-              OTHERS   = 99.
+              " a plain MESSAGE TYPE E of the exit ends the request without it
+              error_message = 98
+              OTHERS        = 99.
         ELSEIF from IS SUPPLIED.
           CALL FUNCTION conex
             EXPORTING
@@ -5028,7 +5030,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             IMPORTING
               output = value
             EXCEPTIONS
-              OTHERS = 99.
+              error_message = 98
+              OTHERS        = 99.
         ELSEIF convexit = `CUNIT`.
           CALL FUNCTION conex
             EXPORTING
@@ -5037,7 +5040,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             IMPORTING
               output   = value
             EXCEPTIONS
-              OTHERS   = 99.
+              error_message = 98
+              OTHERS        = 99.
         ELSE.
           CALL FUNCTION conex
             EXPORTING
@@ -5045,7 +5049,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             IMPORTING
               output = value
             EXCEPTIONS
-              OTHERS = 99.
+              error_message = 98
+              OTHERS        = 99.
         ENDIF.
 
       CATCH cx_root INTO lx_error.
@@ -5056,8 +5061,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDTRY.
 
     IF sy-subrc <> 0.
-      " the exit raised its exception with MESSAGE ... RAISING, which leaves
-      " the message in sy-msg*
+      " the exit raised its exception with MESSAGE ... RAISING, or sent a
+      " plain MESSAGE TYPE E (error_message) - both leave it in sy-msg*
       IF sy-msgid IS NOT INITIAL.
         MESSAGE ID sy-msgid TYPE `E` NUMBER sy-msgno
                 WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4 INTO lv_message.
@@ -9650,6 +9655,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           field_not_found   = 1
           no_help_for_field = 2
           inconsistent_help = 3
+          error_message     = 4
           OTHERS            = 4.
       IF sy-subrc <> 0.
         RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -9672,9 +9678,14 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         " function module called by name wants the exact type
         CALL FUNCTION lv_fm
           EXPORTING
-            shlp_top = <shlp>
+            shlp_top      = <shlp>
           IMPORTING
-            shlp_tab = <shlp2>.
+            shlp_tab      = <shlp2>
+          EXCEPTIONS
+            " a MESSAGE TYPE E would end the request - on failure <shlp2>
+            " stays empty and the collective help is used as it is
+            error_message = 1
+            OTHERS        = 2.
 
         FIELD-SYMBOLS <row2> TYPE any.
         ASSIGN <shlp2>[ 1 ] TO <row2>.
@@ -9753,7 +9764,17 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         call_shlp_exit = abap_true
       TABLES
         record_tab     = lt_result_tab
-        recdescr_tab   = mt_result_desc.
+        recdescr_tab   = mt_result_desc
+      EXCEPTIONS
+        " a search help exit may send MESSAGE TYPE E - without this the
+        " request ends there
+        error_message  = 1
+        OTHERS         = 2.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |F4IF_SELECT_VALUES failed for { ms_shlp-shlpname }|.
+    ENDIF.
 
     SORT ms_shlp-fieldprop BY shlplispos ASCENDING.
 
@@ -11253,6 +11274,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           IMPORTING
             et_objects        = <objects>
           EXCEPTIONS
+            error_message     = 1
             OTHERS            = 1.
         IF sy-subrc <> 0.
           RETURN.
@@ -11509,6 +11531,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             iv_obj_name    = lv_obj_name
             iv_order       = lv_trkorr
           EXCEPTIONS
+            error_message  = 1
             OTHERS         = 1.
         IF sy-subrc <> 0.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -11624,6 +11647,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             et_request_headers = <headers>
           EXCEPTIONS
             invalid_input      = 1
+            error_message      = 2
             OTHERS             = 2.
         IF sy-subrc <> 0.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -11647,6 +11671,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
               wi_trkorr_to             = destination
               wi_without_documentation = abap_false
             EXCEPTIONS
+              error_message            = 1
               OTHERS                   = 1.
           IF sy-subrc <> 0.
             RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -11708,7 +11733,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           IMPORTING
             es_exception = <exc>
           EXCEPTIONS
-            OTHERS       = 99.
+            error_message = 99
+            OTHERS        = 99.
         IF sy-subrc = 99.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
             EXPORTING
@@ -11727,6 +11753,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           EXCEPTIONS
             read_config_failed         = 1
             table_of_requests_is_empty = 2
+            error_message              = 3
             OTHERS                     = 3.
         IF sy-subrc <> 0.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -12607,7 +12634,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           IMPORTING
             jobcount = lv_jobcount
           EXCEPTIONS
-            OTHERS   = 1.
+            error_message = 1
+            OTHERS        = 1.
         IF sy-subrc <> 0.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
             EXPORTING
@@ -12623,7 +12651,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             report    = lv_report
             variant   = lv_variant
           EXCEPTIONS
-            OTHERS    = 1.
+            error_message = 1
+            OTHERS        = 1.
         IF sy-subrc <> 0.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
             EXPORTING
@@ -12638,14 +12667,16 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
               jobname   = lv_jobname
               strtimmed = abap_true
             EXCEPTIONS
-              OTHERS    = 1.
+              error_message = 1
+              OTHERS        = 1.
         ELSE.
           CALL FUNCTION lv_fm
             EXPORTING
               jobcount  = lv_jobcount
               jobname   = lv_jobname
             EXCEPTIONS
-              OTHERS    = 1.
+              error_message = 1
+              OTHERS        = 1.
         ENDIF.
         IF sy-subrc <> 0.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -12694,7 +12725,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             IMPORTING
               number      = lv_number
             EXCEPTIONS
-              OTHERS      = 1.
+              error_message = 1
+              OTHERS        = 1.
           IF sy-subrc <> 0.
             RAISE EXCEPTION TYPE zabaputil_cx_util_error
               EXPORTING
@@ -12808,7 +12840,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           TABLES
             i_cdhdr     = <headers>
           EXCEPTIONS
-            OTHERS      = 1.
+            error_message = 1
+            OTHERS        = 1.
         IF sy-subrc <> 0.
           RETURN.
         ENDIF.
@@ -12836,7 +12869,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             TABLES
               editpos      = <positions>
             EXCEPTIONS
-              OTHERS       = 1.
+              error_message = 1
+              OTHERS        = 1.
 
           IF <positions> IS INITIAL.
             INSERT ls_doc INTO TABLE result.
@@ -14836,7 +14870,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             sync    = abap_true
             tabname = lv_tabname
           EXCEPTIONS
-            OTHERS  = 1.
+            error_message = 1
+            OTHERS        = 1.
       CATCH cx_root ##NO_HANDLER.
     ENDTRY.
 
@@ -16463,8 +16498,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           TABLES
             lines     = <lines>
           EXCEPTIONS
-            not_found = 1
-            OTHERS    = 2.
+            not_found     = 1
+            error_message = 2
+            OTHERS        = 2.
         IF sy-subrc = 1.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
             EXPORTING
@@ -16537,6 +16573,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           TABLES
             lines           = <lines>
           EXCEPTIONS
+            error_message   = 1
             OTHERS          = 1.
         IF sy-subrc <> 0.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -16579,6 +16616,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             savemode_direct = abap_true
           EXCEPTIONS
             not_found       = 1
+            error_message   = 2
             OTHERS          = 2.
         IF sy-subrc = 2.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -16758,6 +16796,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           EXCEPTIONS
             system_failure        = 1 MESSAGE lv_msg
             communication_failure = 2 MESSAGE lv_msg
+            error_message         = 3
             OTHERS                = 3.
         IF sy-subrc <> 0.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -16940,6 +16979,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           TABLES
             pdf           = <pdf>
           EXCEPTIONS
+            error_message = 1
             OTHERS        = 1.
         IF sy-subrc <> 0.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -16997,6 +17037,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           CHANGING
             ie_outputparams = <output>
           EXCEPTIONS
+            error_message   = 1
             OTHERS          = 1.
         IF sy-subrc <> 0.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -17039,7 +17080,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         lv_fm = `FP_JOB_CLOSE`.
         CALL FUNCTION lv_fm
           EXCEPTIONS
-            OTHERS = 1.
+            error_message = 1
+            OTHERS        = 1.
         lv_job_open = abap_false.
 
       CATCH cx_root INTO DATA(x).
@@ -17047,7 +17089,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           lv_fm = `FP_JOB_CLOSE`.
           CALL FUNCTION lv_fm
             EXCEPTIONS
-              OTHERS = 1.
+              error_message = 1
+              OTHERS        = 1.
         ENDIF.
         IF x IS INSTANCE OF zabaputil_cx_util_error.
           DATA(lx_util) = CAST zabaputil_cx_util_error( x ).
@@ -17128,6 +17171,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           EXCEPTIONS
             variant_non_existent = 1
             variant_obsolete     = 2
+            error_message        = 3
             OTHERS               = 3.
         IF sy-subrc <> 0.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -17280,7 +17324,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           IMPORTING
             folder_id = <object_a>
           EXCEPTIONS
-            OTHERS    = 1.
+            error_message = 1
+            OTHERS        = 1.
         IF sy-subrc <> 0.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
             EXPORTING
@@ -17325,6 +17370,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             object_header = <header>
             contents_hex  = <hex>
           EXCEPTIONS
+            error_message = 1
             OTHERS        = 1.
         IF sy-subrc <> 0.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -17355,7 +17401,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             obj_roleb    = <object_b>
             relationtype = lv_reltype
           EXCEPTIONS
-            OTHERS       = 1.
+            error_message = 1
+            OTHERS        = 1.
         IF sy-subrc <> 0.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
             EXPORTING
@@ -17458,6 +17505,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             TABLES
               object_header = <header>
             EXCEPTIONS
+              error_message = 1
               OTHERS        = 1.
           IF sy-subrc = 0.
             ASSIGN COMPONENT `OBJ_DESCR` OF STRUCTURE <docdata> TO <field>.
@@ -17540,6 +17588,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             object_content = <content>
             contents_hex   = <hex>
           EXCEPTIONS
+            error_message  = 1
             OTHERS         = 1.
         IF sy-subrc <> 0.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -17827,7 +17876,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       TRY.
           CALL FUNCTION lv_fm
             EXCEPTIONS
-              OTHERS = 1.
+              error_message = 1
+              OTHERS        = 1.
         CATCH cx_root ##NO_HANDLER.
       ENDTRY.
     ENDLOOP.
