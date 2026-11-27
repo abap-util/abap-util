@@ -3885,27 +3885,6 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE ty_s_http_response.
 
-    CLASS-METHODS http_execute_cloud
-      IMPORTING
-        method        TYPE string
-        url           TYPE string
-        body          TYPE string
-        content_type  TYPE string
-        t_header      TYPE ty_t_name_value
-      RETURNING
-        VALUE(result) TYPE ty_s_http_response.
-
-    CLASS-METHODS http_execute_std
-      IMPORTING
-        method        TYPE string
-        url           TYPE string
-        body          TYPE string
-        content_type  TYPE string
-        t_header      TYPE ty_t_name_value
-      RETURNING
-        VALUE(result) TYPE ty_s_http_response.
-
-
     CLASS-METHODS rtti_get_classes_intf_cloud
       IMPORTING
         val              TYPE clike
@@ -15034,191 +15013,25 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD http_execute.
 
-    IF check_abap_cloud( ) = abap_true.
-      result = http_execute_cloud( method       = method
-                                   url          = url
-                                   body         = body
-                                   content_type = content_type
-                                   t_header     = t_header ).
-    ELSE.
-      result = http_execute_std( method       = method
-                                 url          = url
-                                 body         = body
-                                 content_type = content_type
-                                 t_header     = t_header ).
+    " the one HTTP client of this catalog, zabaputil_cl_util_http - the two
+    " branches that sat here were a second client: no CLOSE when the call
+    " failed, no UTF-8 decoding of a body without a charset, and the cloud
+    " request read into the wrong parameter
+    DATA(ls_req) = VALUE zabaputil_cl_util_http=>ty_s_client_req( method   = method
+                                                                  url      = url
+                                                                  body     = body
+                                                                  t_header = t_header ).
+    IF content_type IS NOT INITIAL
+        AND NOT line_exists( ls_req-t_header[ n = `content-type` ] )
+        AND NOT line_exists( ls_req-t_header[ n = `Content-Type` ] ).
+      INSERT VALUE #( n = `content-type`
+                      v = content_type ) INTO TABLE ls_req-t_header.
     ENDIF.
 
-  ENDMETHOD.
-
-  METHOD http_execute_cloud.
-
-    DATA lo_dest   TYPE REF TO object.
-    DATA lo_client TYPE REF TO object.
-    DATA lo_req    TYPE REF TO object.
-    DATA lo_resp   TYPE REF TO object.
-    DATA lr_status TYPE REF TO data.
-    DATA lv_class  TYPE string.
-    FIELD-SYMBOLS <status> TYPE any.
-
-    TRY.
-
-        lv_class = `CL_HTTP_DESTINATION_PROVIDER`.
-        CALL METHOD (lv_class)=>(`CREATE_BY_URL`)
-          EXPORTING
-            i_url              = url
-          RECEIVING
-            r_http_destination = lo_dest.
-
-        lv_class = `CL_WEB_HTTP_CLIENT_MANAGER`.
-        CALL METHOD (lv_class)=>(`CREATE_BY_HTTP_DESTINATION`)
-          EXPORTING
-            i_destination = lo_dest
-          RECEIVING
-            r_client      = lo_client.
-
-        CALL METHOD lo_client->(`IF_WEB_HTTP_CLIENT~GET_HTTP_REQUEST`)
-          RECEIVING
-            r_value = lo_req.
-
-        LOOP AT t_header INTO DATA(ls_header).
-          CALL METHOD lo_req->(`IF_WEB_HTTP_REQUEST~SET_HEADER_FIELD`)
-            EXPORTING
-              i_name  = ls_header-n
-              i_value = ls_header-v.
-        ENDLOOP.
-
-        IF content_type IS NOT INITIAL.
-          CALL METHOD lo_req->(`IF_WEB_HTTP_REQUEST~SET_HEADER_FIELD`)
-            EXPORTING
-              i_name  = `Content-Type`
-              i_value = content_type.
-        ENDIF.
-
-        IF body IS NOT INITIAL.
-          CALL METHOD lo_req->(`IF_WEB_HTTP_REQUEST~SET_TEXT`)
-            EXPORTING
-              i_text = body.
-        ENDIF.
-
-        CALL METHOD lo_client->(`IF_WEB_HTTP_CLIENT~EXECUTE`)
-          EXPORTING
-            i_method   = method
-          RECEIVING
-            r_response = lo_resp.
-
-        CALL METHOD lo_resp->(`IF_WEB_HTTP_RESPONSE~GET_TEXT`)
-          RECEIVING
-            r_value = result-body.
-
-        CREATE DATA lr_status TYPE (`IF_WEB_HTTP_RESPONSE=>HTTP_STATUS`).
-        ASSIGN lr_status->* TO <status>.
-        CALL METHOD lo_resp->(`IF_WEB_HTTP_RESPONSE~GET_STATUS`)
-          RECEIVING
-            r_value = <status>.
-
-        ASSIGN COMPONENT `CODE` OF STRUCTURE <status> TO FIELD-SYMBOL(<code>).
-        IF sy-subrc = 0.
-          result-code = <code>.
-        ENDIF.
-        ASSIGN COMPONENT `REASON` OF STRUCTURE <status> TO FIELD-SYMBOL(<reason>).
-        IF sy-subrc = 0.
-          result-reason = <reason>.
-        ENDIF.
-
-        CALL METHOD lo_client->(`IF_WEB_HTTP_CLIENT~CLOSE`).
-
-      CATCH cx_root INTO DATA(lx_error).
-        RAISE EXCEPTION TYPE zabaputil_cx_util_error
-          EXPORTING
-            val = lx_error.
-    ENDTRY.
-
-  ENDMETHOD.
-
-  METHOD http_execute_std.
-
-    DATA lo_client TYPE REF TO object.
-    DATA lo_req    TYPE REF TO object.
-    DATA lo_resp   TYPE REF TO object.
-    DATA lv_class  TYPE string.
-    FIELD-SYMBOLS <obj> TYPE any.
-
-    TRY.
-
-        lv_class = `CL_HTTP_CLIENT`.
-        CALL METHOD (lv_class)=>(`CREATE_BY_URL`)
-          EXPORTING
-            url    = url
-          IMPORTING
-            client = lo_client.
-
-        ASSIGN lo_client->(`IF_HTTP_CLIENT~REQUEST`) TO <obj>.
-        IF sy-subrc <> 0.
-          x_raise( `HTTP_REQUEST_FAILED` ).
-        ENDIF.
-        lo_req = <obj>.
-
-        CALL METHOD lo_req->(`IF_HTTP_REQUEST~SET_METHOD`)
-          EXPORTING
-            method = method.
-
-        LOOP AT t_header INTO DATA(ls_header).
-          CALL METHOD lo_req->(`IF_HTTP_ENTITY~SET_HEADER_FIELD`)
-            EXPORTING
-              name  = ls_header-n
-              value = ls_header-v.
-        ENDLOOP.
-
-        IF content_type IS NOT INITIAL.
-          CALL METHOD lo_req->(`IF_HTTP_ENTITY~SET_CONTENT_TYPE`)
-            EXPORTING
-              content_type = content_type.
-        ENDIF.
-
-        IF body IS NOT INITIAL.
-          CALL METHOD lo_req->(`IF_HTTP_ENTITY~SET_CDATA`)
-            EXPORTING
-              data = body.
-        ENDIF.
-
-        CALL METHOD lo_client->(`IF_HTTP_CLIENT~SEND`)
-          EXCEPTIONS
-            OTHERS = 1.
-        IF sy-subrc <> 0.
-          x_raise( `HTTP_SEND_FAILED` ).
-        ENDIF.
-
-        CALL METHOD lo_client->(`IF_HTTP_CLIENT~RECEIVE`)
-          EXCEPTIONS
-            OTHERS = 1.
-        IF sy-subrc <> 0.
-          x_raise( `HTTP_RECEIVE_FAILED` ).
-        ENDIF.
-
-        ASSIGN lo_client->(`IF_HTTP_CLIENT~RESPONSE`) TO <obj>.
-        IF sy-subrc <> 0.
-          x_raise( `HTTP_RECEIVE_FAILED` ).
-        ENDIF.
-        lo_resp = <obj>.
-
-        CALL METHOD lo_resp->(`IF_HTTP_RESPONSE~GET_STATUS`)
-          IMPORTING
-            code   = result-code
-            reason = result-reason.
-
-        CALL METHOD lo_resp->(`IF_HTTP_ENTITY~GET_CDATA`)
-          RECEIVING
-            data = result-body.
-
-        CALL METHOD lo_client->(`IF_HTTP_CLIENT~CLOSE`)
-          EXCEPTIONS
-            OTHERS = 1.
-
-      CATCH cx_root INTO DATA(lx_error).
-        RAISE EXCEPTION TYPE zabaputil_cx_util_error
-          EXPORTING
-            val = lx_error.
-    ENDTRY.
+    DATA(ls_res) = zabaputil_cl_util_http=>client_request( ls_req ).
+    result-code   = ls_res-status_code.
+    result-reason = ls_res-status_reason.
+    result-body   = ls_res-body.
 
   ENDMETHOD.
 
