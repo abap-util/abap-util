@@ -2982,12 +2982,19 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE string.
 
+    "! The URL-safe base64 form (A-Z a-z 0-9 - _) of a c32 UUID. NOT the
+    "! alphabet of uuid_get_c22 (the kernel's c22, which uses other
+    "! characters and is post-processed there): a c22 from uuid_get_c22 does
+    "! not convert back with uuid_conv_c22_to_c32, and the c22 of a c32 here
+    "! differs from the kernel's for the same UUID - convert only between
+    "! the forms of these two methods
     CLASS-METHODS uuid_conv_c32_to_c22
       IMPORTING
         val           TYPE clike
       RETURNING
         VALUE(result) TYPE string.
 
+    "! The inverse of uuid_conv_c32_to_c22 - same alphabet, see there
     CLASS-METHODS uuid_conv_c22_to_c32
       IMPORTING
         val           TYPE clike
