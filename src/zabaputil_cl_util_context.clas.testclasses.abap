@@ -1257,7 +1257,8 @@ CLASS ltcl_filter_ops IMPLEMENTATION.
     DATA(ls_range) = zabaputil_cl_util_context=>filter_get_range_by_token( `*test*` ).
     cl_abap_unit_assert=>assert_equals( exp = `I` act = ls_range-sign ).
     cl_abap_unit_assert=>assert_equals( exp = `CP` act = ls_range-option ).
-    cl_abap_unit_assert=>assert_equals( exp = `test` act = ls_range-low ).
+    " the pattern keeps its asterisks - they make it a pattern for IN and LIKE
+    cl_abap_unit_assert=>assert_equals( exp = `*test*` act = ls_range-low ).
   ENDMETHOD.
 
   METHOD token_bt.
@@ -2349,11 +2350,11 @@ CLASS ltcl_edge_cases IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD token_single_star.
-    " Single '*' - after fix: CP with empty low (match-all pattern)
+    " Single '*' - the match-all pattern, kept as it was typed
     DATA(ls_range) = zabaputil_cl_util_context=>filter_get_range_by_token( `*` ).
     cl_abap_unit_assert=>assert_equals( exp = `I` act = ls_range-sign ).
     cl_abap_unit_assert=>assert_equals( exp = `CP` act = ls_range-option ).
-    cl_abap_unit_assert=>assert_equals( exp = `` act = ls_range-low ).
+    cl_abap_unit_assert=>assert_equals( exp = `*` act = ls_range-low ).
   ENDMETHOD.
 
   METHOD token_single_equals.
@@ -2467,15 +2468,10 @@ CLASS ltcl_edge_cases IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD date_short_input.
-    " TRANSPILER NOTE: Short input causes STRING_OFFSET_TOO_LARGE in ABAP
-    " because conv_string_to_date has no bounds checking.
-    " This is a known limitation - skip this test to document it.
-    " A JS transpiler should add bounds checking.
-    TRY.
-        DATA(lv_result) = zabaputil_cl_util_context=>conv_string_to_date( val = `24` format = `YYYY-MM-DD` ) ##NEEDED.
-      CATCH cx_root.
-        " Expected: crashes with short input - JS must guard against this
-    ENDTRY.
+    " fewer digits than the format asks for: no date, and no exception
+    DATA(lv_result) = zabaputil_cl_util_context=>conv_string_to_date( val    = `24`
+                                                                      format = `YYYY-MM-DD` ).
+    cl_abap_unit_assert=>assert_initial( lv_result ).
   ENDMETHOD.
 
   METHOD email_with_plus.
@@ -6248,6 +6244,332 @@ CLASS ltcl_bapi_ops IMPLEMENTATION.
                                         act = zabaputil_cl_util_context=>conv_alpha_in( `MAT-1` ) ).
     cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>conv_alpha_in( `` ) ).
 
+  ENDMETHOD.
+
+ENDCLASS.
+
+"! Regression tests for defects found by comparing the behaviour with what
+"! the method names promise - each test is the input that went wrong.
+CLASS ltcl_fixes DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+    TYPES:
+      BEGIN OF ty_s_row,
+        col1 TYPE string,
+        col2 TYPE string,
+      END OF ty_s_row,
+      ty_t_row TYPE STANDARD TABLE OF ty_s_row WITH EMPTY KEY.
+
+    METHODS date_impossible          FOR TESTING.
+    METHODS date_leap_year           FOR TESTING.
+    METHODS paginate_exact_pages     FOR TESTING.
+    METHODS token_operator_alone     FOR TESTING.
+    METHODS token_patterns           FOR TESTING.
+    METHODS token_pattern_roundtrip  FOR TESTING.
+    METHODS numeric_needs_digit      FOR TESTING.
+    METHODS number_trailing_minus    FOR TESTING.
+    METHODS pad_multi_char           FOR TESTING.
+    METHODS mimetype_empty_name      FOR TESTING.
+    METHODS round_modes              FOR TESTING.
+    METHODS number_string_rounds     FOR TESTING.
+    METHODS email_malformed          FOR TESTING.
+    METHODS language_codes           FOR TESTING.
+    METHODS json_control_chars       FOR TESTING.
+    METHODS url_decode_invalid_hex   FOR TESTING.
+    METHODS csv_quotes_special_cells FOR TESTING.
+    METHODS csv_reads_own_output     FOR TESTING.
+    METHODS csv_reads_quoted_cells   FOR TESTING.
+    METHODS csv_empty_input          FOR TESTING.
+    METHODS sql_like_escape          FOR TESTING.
+    METHODS sql_lowercase_keywords   FOR TESTING.
+    METHODS sql_keyword_in_literal   FOR TESTING.
+    METHODS sql_exclude_roundtrip    FOR TESTING.
+    METHODS sql_groups_keep_parens   FOR TESTING.
+    METHODS sql_tabname_with_keyword FOR TESTING.
+
+ENDCLASS.
+
+CLASS ltcl_fixes IMPLEMENTATION.
+
+  METHOD date_impossible.
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_is_date_valid( `2024-02-30` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_is_date_valid( `2024-13-45` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_is_date_valid( `2024-04-31` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_is_date_valid( `2024-00-10` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_is_date_valid( `24` ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_is_date_valid( `2024-12-31` ) ).
+  ENDMETHOD.
+
+  METHOD date_leap_year.
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_is_date_valid( `2024-02-29` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_is_date_valid( `2023-02-29` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_is_date_valid( `1900-02-29` ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_is_date_valid( `2000-02-29` ) ).
+  ENDMETHOD.
+
+  METHOD paginate_exact_pages.
+    DATA lv_pages TYPE i.
+    DATA(lt_tab) = VALUE ty_t_row( ( col1 = `1` ) ( col1 = `2` ) ( col1 = `3` ) ( col1 = `4` )
+                                   ( col1 = `5` ) ( col1 = `6` ) ( col1 = `7` ) ).
+    zabaputil_cl_util_context=>itab_paginate( EXPORTING tab         = lt_tab
+                                                        page_size   = 4
+                                              IMPORTING total_pages = lv_pages ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lv_pages ).
+
+    DELETE lt_tab FROM 5.
+    zabaputil_cl_util_context=>itab_paginate( EXPORTING tab         = lt_tab
+                                                        page_size   = 2
+                                              IMPORTING total_pages = lv_pages ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lv_pages ).
+
+    zabaputil_cl_util_context=>itab_paginate( EXPORTING tab         = lt_tab
+                                                        page_size   = 3
+                                              IMPORTING total_pages = lv_pages ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lv_pages ).
+  ENDMETHOD.
+
+  METHOD token_operator_alone.
+    DATA(ls_range) = zabaputil_cl_util_context=>filter_get_range_by_token( `<` ).
+    cl_abap_unit_assert=>assert_equals( exp = `LT` act = ls_range-option ).
+    cl_abap_unit_assert=>assert_initial( ls_range-low ).
+    ls_range = zabaputil_cl_util_context=>filter_get_range_by_token( `>` ).
+    cl_abap_unit_assert=>assert_equals( exp = `GT` act = ls_range-option ).
+    ls_range = zabaputil_cl_util_context=>filter_get_range_by_token( `<=` ).
+    cl_abap_unit_assert=>assert_equals( exp = `LE` act = ls_range-option ).
+    cl_abap_unit_assert=>assert_initial( ls_range-low ).
+  ENDMETHOD.
+
+  METHOD token_patterns.
+    DATA(ls_range) = zabaputil_cl_util_context=>filter_get_range_by_token( `*abc` ).
+    cl_abap_unit_assert=>assert_equals( exp = `I` act = ls_range-sign ).
+    cl_abap_unit_assert=>assert_equals( exp = `CP` act = ls_range-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `*abc` act = ls_range-low ).
+
+    ls_range = zabaputil_cl_util_context=>filter_get_range_by_token( `abc*` ).
+    cl_abap_unit_assert=>assert_equals( exp = `CP` act = ls_range-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `abc*` act = ls_range-low ).
+
+    " the pattern works as one: the range selects by it
+    DATA lt_range TYPE RANGE OF string.
+    lt_range = VALUE #( ( sign = `I` option = `CP` low = ls_range-low ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( `abcdef` IN lt_range ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( `xabc` IN lt_range ) ).
+  ENDMETHOD.
+
+  METHOD token_pattern_roundtrip.
+    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range( ( sign = `I` option = `CP` low = `abc*` )
+                                                                  ( sign = `I` option = `CP` low = `xyz` ) ).
+    DATA(lt_token) = zabaputil_cl_util_context=>filter_get_token_t_by_range_t( lt_range ).
+    cl_abap_unit_assert=>assert_equals( exp = `abc*` act = lt_token[ 1 ]-key ).
+    " a CP row without an asterisk keeps the rendering it always had
+    cl_abap_unit_assert=>assert_equals( exp = `*xyz*` act = lt_token[ 2 ]-key ).
+  ENDMETHOD.
+
+  METHOD numeric_needs_digit.
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_is_numeric_string( `-` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_is_numeric_string( `+` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_is_numeric_string( `.` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_is_numeric_string( `-.` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_is_numeric_string( `-5-` ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_is_numeric_string( `-1.5` ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_is_numeric_string( `123-` ) ).
+  ENDMETHOD.
+
+  METHOD number_trailing_minus.
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( '-123' )
+                                        act = zabaputil_cl_util_context=>conv_string_to_number( `123-` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( '-1.5' )
+                                        act = zabaputil_cl_util_context=>conv_string_to_number( `1,5-` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( '-7' )
+                                        act = zabaputil_cl_util_context=>conv_string_to_number( `-7` ) ).
+  ENDMETHOD.
+
+  METHOD pad_multi_char.
+    cl_abap_unit_assert=>assert_equals( exp = `aba5`
+                                        act = zabaputil_cl_util_context=>c_pad_left( val = `5` len = 4 pad = 'ab' ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `5aba`
+                                        act = zabaputil_cl_util_context=>c_pad_right( val = `5` len = 4 pad = 'ab' ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `005`
+                                        act = zabaputil_cl_util_context=>c_pad_left( val = `5` len = 3 ) ).
+  ENDMETHOD.
+
+  METHOD mimetype_empty_name.
+    cl_abap_unit_assert=>assert_equals( exp = `application/octet-stream`
+                                        act = zabaputil_cl_util_context=>file_get_mimetype( `` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `application/pdf`
+                                        act = zabaputil_cl_util_context=>file_get_mimetype( `a.b.PDF` ) ).
+  ENDMETHOD.
+
+  METHOD round_modes.
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( '2' )
+      act = zabaputil_cl_util_context=>num_round( val = CONV decfloat34( '2.5' ) mode = `HALF_EVEN` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( '4' )
+      act = zabaputil_cl_util_context=>num_round( val = CONV decfloat34( '3.5' ) mode = `HALF_EVEN` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( '2' )
+      act = zabaputil_cl_util_context=>num_round( val = CONV decfloat34( '2.5' ) mode = `HALF_DOWN` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( '3' )
+      act = zabaputil_cl_util_context=>num_round( val = CONV decfloat34( '2.1' ) mode = `CEILING` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( '-2' )
+      act = zabaputil_cl_util_context=>num_round( val = CONV decfloat34( '-2.9' ) mode = `CEILING` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( '-3' )
+      act = zabaputil_cl_util_context=>num_round( val = CONV decfloat34( '-2.1' ) mode = `FLOOR` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( '2' )
+      act = zabaputil_cl_util_context=>num_round( val = CONV decfloat34( '2.9' ) mode = `FLOOR` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( '2.35' )
+      act = zabaputil_cl_util_context=>num_round( val = CONV decfloat34( '2.345' ) decimals = 2 ) ).
+  ENDMETHOD.
+
+  METHOD number_string_rounds.
+    cl_abap_unit_assert=>assert_equals( exp = `2.00`
+      act = zabaputil_cl_util_context=>conv_number_to_string( val = CONV decfloat34( '1.999' ) decimals = 2 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `1`
+      act = zabaputil_cl_util_context=>conv_number_to_string( val = CONV decfloat34( '0.5' ) decimals = 0 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `0`
+      act = zabaputil_cl_util_context=>conv_number_to_string( val = CONV decfloat34( '-0.4' ) decimals = 0 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `1,234.57`
+      act = zabaputil_cl_util_context=>conv_number_to_string( val           = CONV decfloat34( '1234.567' )
+                                                              decimals      = 2
+                                                              sep_thousands = ',' ) ).
+  ENDMETHOD.
+
+  METHOD email_malformed.
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_is_email( `a@.` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_is_email( `a@b.` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_is_email( `a@.com` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_is_email( `john doe@x.y` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_is_email( `a@b..c` ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_is_email( `first.last@sub.example.org` ) ).
+  ENDMETHOD.
+
+  METHOD language_codes.
+    cl_abap_unit_assert=>assert_equals( exp = `cs` act = zabaputil_cl_util_context=>lang_sap_to_iso( 'C' ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `ar` act = zabaputil_cl_util_context=>lang_sap_to_iso( 'A' ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `zh` act = zabaputil_cl_util_context=>lang_sap_to_iso( '1' ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `1` act = zabaputil_cl_util_context=>lang_iso_to_sap( `zh` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `C` act = zabaputil_cl_util_context=>lang_iso_to_sap( `cs` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `D` act = zabaputil_cl_util_context=>lang_iso_to_sap( `de` ) ).
+  ENDMETHOD.
+
+  METHOD json_control_chars.
+    DATA(lv_text) = |a{ cl_abap_char_utilities=>form_feed }b{ cl_abap_char_utilities=>backspace }c|.
+    cl_abap_unit_assert=>assert_equals( exp = `a\fb\bc`
+                                        act = zabaputil_cl_util_context=>c_escape_json( lv_text ) ).
+    DATA(lv_ctrl) = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `411F42` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `A\u001FB`
+                                        act = zabaputil_cl_util_context=>c_escape_json( lv_ctrl ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `say \"hi\"\n`
+                                        act = zabaputil_cl_util_context=>c_escape_json( |say "hi"\n| ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `plain`
+                                        act = zabaputil_cl_util_context=>c_escape_json( `plain` ) ).
+  ENDMETHOD.
+
+  METHOD url_decode_invalid_hex.
+    cl_abap_unit_assert=>assert_equals( exp = `a%ZZb`
+                                        act = zabaputil_cl_util_context=>url_decode( `a%ZZb` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `a b`
+                                        act = zabaputil_cl_util_context=>url_decode( `a%20b` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `100%`
+                                        act = zabaputil_cl_util_context=>url_decode( `100%` ) ).
+  ENDMETHOD.
+
+  METHOD csv_quotes_special_cells.
+    DATA(lt_tab) = VALUE ty_t_row( ( col1 = `a;b` col2 = `say "hi"` )
+                                   ( col1 = |line1\nline2| col2 = `plain` ) ).
+    DATA(lv_csv) = zabaputil_cl_util_context=>itab_get_csv_by_itab( lt_tab ).
+    DATA(lv_exp) = |COL1;COL2\r\n"a;b";"say ""hi"""\r\n"line1\nline2";plain|.
+    cl_abap_unit_assert=>assert_equals( exp = lv_exp act = lv_csv ).
+  ENDMETHOD.
+
+  METHOD csv_reads_own_output.
+    FIELD-SYMBOLS <lt_back> TYPE STANDARD TABLE.
+    DATA(lt_tab) = VALUE ty_t_row( ( col1 = `a;b` col2 = `say "hi"` )
+                                   ( col1 = |line1\nline2| col2 = `` )
+                                   ( col1 = `a value that is longer than forty characters in total` col2 = `x` ) ).
+    DATA(lr_back) = zabaputil_cl_util_context=>itab_get_itab_by_csv(
+                      zabaputil_cl_util_context=>itab_get_csv_by_itab( lt_tab ) ).
+    ASSIGN lr_back->* TO <lt_back>.
+    DATA lt_back TYPE ty_t_row.
+    lt_back = CORRESPONDING #( <lt_back> ).
+    cl_abap_unit_assert=>assert_equals( exp = lt_tab act = lt_back ).
+  ENDMETHOD.
+
+  METHOD csv_reads_quoted_cells.
+    FIELD-SYMBOLS <lt_back> TYPE STANDARD TABLE.
+    " LF only, a separator behind the last column, a blank and a digit in the header
+    DATA(lr_back) = zabaputil_cl_util_context=>itab_get_itab_by_csv( |First Name;2nd;\nx;"p;q";\n\ny;z;\n| ).
+    ASSIGN lr_back->* TO <lt_back>.
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( <lt_back> ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `[{"c_2nd":"p;q","first_name":"x"},{"c_2nd":"z","first_name":"y"}]`
+      act = zabaputil_cl_util_context=>json_stringify( <lt_back> ) ).
+  ENDMETHOD.
+
+  METHOD csv_empty_input.
+    DATA(lr_back) = zabaputil_cl_util_context=>itab_get_itab_by_csv( `` ).
+    cl_abap_unit_assert=>assert_not_bound( lr_back ).
+  ENDMETHOD.
+
+  METHOD sql_like_escape.
+    DATA(lt_filter) = VALUE zabaputil_cl_util_context=>ty_t_filter_multi(
+      ( name = `F` t_range = VALUE #( ( sign = `I` option = `CP` low = `A_50%*` ) ) ) ).
+    DATA(lv_where) = zabaputil_cl_util_context=>filter_get_sql_where( lt_filter ).
+    DATA(lt_back) = zabaputil_cl_util_context=>filter_get_multi_by_sql_where( lv_where ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_back ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `F` act = lt_back[ 1 ]-name ).
+    cl_abap_unit_assert=>assert_equals( exp = lt_filter[ 1 ]-t_range act = lt_back[ 1 ]-t_range ).
+  ENDMETHOD.
+
+  METHOD sql_lowercase_keywords.
+    DATA(lt_filter) = zabaputil_cl_util_context=>filter_get_multi_by_sql_where(
+                        `a = '1' and b like 'X%' and c between '1' and '5'` ).
+    cl_abap_unit_assert=>assert_equals( exp = 3 act = lines( lt_filter ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `a` act = lt_filter[ 1 ]-name ).
+    cl_abap_unit_assert=>assert_equals( exp = `1` act = lt_filter[ 1 ]-t_range[ 1 ]-low ).
+    cl_abap_unit_assert=>assert_equals( exp = `b` act = lt_filter[ 2 ]-name ).
+    cl_abap_unit_assert=>assert_equals( exp = `CP` act = lt_filter[ 2 ]-t_range[ 1 ]-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `X*` act = lt_filter[ 2 ]-t_range[ 1 ]-low ).
+    cl_abap_unit_assert=>assert_equals( exp = `BT` act = lt_filter[ 3 ]-t_range[ 1 ]-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `5` act = lt_filter[ 3 ]-t_range[ 1 ]-high ).
+  ENDMETHOD.
+
+  METHOD sql_keyword_in_literal.
+    DATA(lt_filter) = zabaputil_cl_util_context=>filter_get_multi_by_sql_where( `TEXT = 'A LIKE B <> C'` ).
+    cl_abap_unit_assert=>assert_equals( exp = `TEXT` act = lt_filter[ 1 ]-name ).
+    cl_abap_unit_assert=>assert_equals( exp = `EQ` act = lt_filter[ 1 ]-t_range[ 1 ]-option ).
+    cl_abap_unit_assert=>assert_equals( exp = `A LIKE B <> C` act = lt_filter[ 1 ]-t_range[ 1 ]-low ).
+  ENDMETHOD.
+
+  METHOD sql_exclude_roundtrip.
+    DATA(lt_filter) = VALUE zabaputil_cl_util_context=>ty_t_filter_multi(
+      ( name    = `F`
+        t_range = VALUE #( ( sign = `I` option = `CP` low = `A*` )
+                           ( sign = `I` option = `EQ` low = `B` )
+                           ( sign = `E` option = `EQ` low = `AB` )
+                           ( sign = `E` option = `BT` low = `AC` high = `AD` ) ) )
+      ( name    = `G`
+        t_range = VALUE #( ( sign = `E` option = `EQ` low = `1` )
+                           ( sign = `E` option = `EQ` low = `2` ) ) ) ).
+    DATA(lv_where) = zabaputil_cl_util_context=>filter_get_sql_where( lt_filter ).
+    DATA(lt_back) = zabaputil_cl_util_context=>filter_get_multi_by_sql_where( lv_where ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_back ) ).
+    cl_abap_unit_assert=>assert_equals( exp = lt_filter[ 1 ]-t_range act = lt_back[ 1 ]-t_range ).
+    cl_abap_unit_assert=>assert_equals( exp = lt_filter[ 2 ]-t_range act = lt_back[ 2 ]-t_range ).
+  ENDMETHOD.
+
+  METHOD sql_groups_keep_parens.
+    DATA(lt_filter) = zabaputil_cl_util_context=>filter_get_multi_by_sql_where( `( A = '1' ) OR ( A = '2' )` ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_filter ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `A` act = lt_filter[ 1 ]-name ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_filter[ 1 ]-t_range ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `2` act = lt_filter[ 1 ]-t_range[ 2 ]-low ).
+  ENDMETHOD.
+
+  METHOD sql_tabname_with_keyword.
+    DATA(ls_sql) = zabaputil_cl_util_context=>filter_get_sql_by_sql_string( `SELECT FROM zmy_fields WHERE a = '1'` ).
+    cl_abap_unit_assert=>assert_equals( exp = `ZMY_FIELDS` act = ls_sql-tabname ).
+    ls_sql = zabaputil_cl_util_context=>filter_get_sql_by_sql_string( `select from zwhereused` ).
+    cl_abap_unit_assert=>assert_equals( exp = `ZWHEREUSED` act = ls_sql-tabname ).
   ENDMETHOD.
 
 ENDCLASS.
