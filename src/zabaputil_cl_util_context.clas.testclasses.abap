@@ -6281,6 +6281,7 @@ CLASS ltcl_fixes DEFINITION FINAL
     METHODS csv_reads_own_output     FOR TESTING.
     METHODS csv_reads_quoted_cells   FOR TESTING.
     METHODS csv_empty_input          FOR TESTING.
+    METHODS csv_byte_order_mark      FOR TESTING.
     METHODS sql_like_escape          FOR TESTING.
     METHODS sql_lowercase_keywords   FOR TESTING.
     METHODS sql_keyword_in_literal   FOR TESTING.
@@ -6503,6 +6504,15 @@ CLASS ltcl_fixes IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
       exp = `[{"c_2nd":"p;q","first_name":"x"},{"c_2nd":"z","first_name":"y"}]`
       act = zabaputil_cl_util_context=>json_stringify( <lt_back> ) ).
+  ENDMETHOD.
+
+  METHOD csv_byte_order_mark.
+    FIELD-SYMBOLS <lt_back> TYPE STANDARD TABLE.
+    DATA(lv_bom) = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `EFBBBF` ) ).
+    DATA(lr_back) = zabaputil_cl_util_context=>itab_get_itab_by_csv( |{ lv_bom }NAME;CITY\r\nx;y\r\n| ).
+    ASSIGN lr_back->* TO <lt_back>.
+    cl_abap_unit_assert=>assert_equals( exp = `[{"city":"y","name":"x"}]`
+                                        act = zabaputil_cl_util_context=>json_stringify( <lt_back> ) ).
   ENDMETHOD.
 
   METHOD csv_empty_input.
