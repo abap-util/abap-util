@@ -1625,10 +1625,14 @@ CLASS zabaputil_cl_util_context DEFINITION
     " ========== Spool & Forms ==========
 
     "! A spool request as PDF: SAPscript/Smart Forms (OTF), ABAP lists and
-    "! Adobe forms (ADS). Standard ABAP only.
+    "! Adobe forms (ADS). Standard ABAP only. Any spool number is read -
+    "! a caller that takes it from a user checks that the user may see it,
+    "! or passes owner_only to accept only the current user's requests
+    "! (TSP01-RQOWNER).
     CLASS-METHODS spool_get_pdf
       IMPORTING
         spool_id      TYPE i
+        owner_only    TYPE abap_bool DEFAULT abap_false
       RETURNING
         VALUE(result) TYPE xstring.
 
@@ -1732,7 +1736,10 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE ty_t_gos.
 
-    "! The content of a GOS attachment (doc_id from gos_list). Standard ABAP only.
+    "! The content of a GOS attachment (doc_id from gos_list). Standard ABAP
+    "! only. Any SAPoffice document is read, with no authorization check - a
+    "! caller that takes doc_id from a user checks that the user may see the
+    "! business object it belongs to.
     CLASS-METHODS gos_read
       IMPORTING
         doc_id        TYPE clike
@@ -18962,12 +18969,18 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     lv_spool = spool_id.
 
     TRY.
+        DATA lv_owner TYPE c LENGTH 12.
         DATA(lv_table) = `TSP01`.
-        SELECT SINGLE rqdoctype FROM (lv_table) WHERE rqident = @lv_spool INTO @lv_doctype.
+        SELECT SINGLE rqdoctype, rqowner FROM (lv_table) WHERE rqident = @lv_spool INTO (@lv_doctype, @lv_owner).
         IF sy-subrc <> 0.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
             EXPORTING
               val = |spool_get_pdf: spool request { lv_spool } not found|.
+        ENDIF.
+        IF owner_only = abap_true AND lv_owner <> sy-uname.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |spool_get_pdf: spool request { lv_spool } belongs to another user|.
         ENDIF.
 
         IF lv_doctype = `ADSP`.
@@ -19343,7 +19356,11 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       lv_ext = to_upper( substring( val = lv_file
                                     off = lv_dot + 1 ) ).
     ENDIF.
-    lv_doctype = lv_ext.
+    " the document type is three characters (SOOD-OBJ_TP): DOCX, XLSX and
+    " JPEG are stored as DOC, XLS and JPE - the full name, which the
+    " attachment opens by, is in &SO_FILENAME. A file without an extension
+    " was an empty type, which SO_DOCUMENT_INSERT_API1 rejects
+    lv_doctype = COND #( WHEN lv_ext IS INITIAL THEN `BIN` ELSE lv_ext ).
     DATA(lv_descr) = COND string( WHEN description IS NOT INITIAL THEN description
                                   WHEN lv_dot > 0 THEN substring( val = lv_file
                                                                   len = lv_dot )
