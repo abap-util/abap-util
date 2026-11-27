@@ -270,7 +270,7 @@ CLASS ltcl_chain IMPLEMENTATION.
     " consumers split the dump on these headers (abap2UI5's ErrorView.js
     " shows the error section and hides the rest behind Details) - the
     " spelling is part of the contract
-    DATA(lv_full) = zabaputil_cx_util_error=>get_text_full( NEW zabaputil_cx_util_error( val = `the_error` ) ).
+    DATA(lv_full) = zabaputil_cx_util_error=>get_text_full( NEW zabaputil_cx_util_error( `the_error` ) ).
     cl_abap_unit_assert=>assert_true( xsdbool( lv_full CS `--- error ---` ) ).
     cl_abap_unit_assert=>assert_true( xsdbool( lv_full CS `--- exception chain ---` ) ).
     cl_abap_unit_assert=>assert_true( xsdbool( lv_full CS `--- context ---` ) ).
@@ -285,7 +285,7 @@ CLASS ltcl_chain IMPLEMENTATION.
     " puts it in the body of a 500), so the context block names the system
     " and the release and stops there - client, host, user and language are
     " recon material with no place in a text a browser may show
-    DATA(lv_full) = zabaputil_cx_util_error=>get_text_full( NEW zabaputil_cx_util_error( val = `the_error` ) ).
+    DATA(lv_full) = zabaputil_cx_util_error=>get_text_full( NEW zabaputil_cx_util_error( `the_error` ) ).
 
     cl_abap_unit_assert=>assert_true( xsdbool( lv_full CS |release { sy-saprl }| ) ).
     cl_abap_unit_assert=>assert_true( xsdbool( lv_full CS CONV string( sy-sysid ) ) ).

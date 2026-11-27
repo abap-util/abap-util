@@ -14,6 +14,15 @@
     "errorNamespace": "."
   },
   "rules": {
+    // what the consumers' lints ask of a vendored class - on here, so that
+    // a method leaves this catalog in a form every consumer can take over
+    // unchanged (popups and table-content-loader run both as errors)
+    "omit_parameter_name": {
+      "exclude": ["/src/00/"]
+    },
+    "prefix_is_current_class": {
+      "exclude": ["/src/00/"]
+    },
     // statements with a successor that this repository no longer uses -
     // listed so they do not come back (abaplint 2.120.116+). src/00/ is
     // excluded: the ajson (00/01) and S-RTTI (00/02) mirrors are synced

@@ -6583,3 +6583,49 @@ CLASS ltcl_fixes IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+CLASS ltcl_file_encoding DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+    METHODS file_utf8         FOR TESTING.
+    METHODS file_windows_1252 FOR TESTING.
+    METHODS rap_cause_text    FOR TESTING.
+
+ENDCLASS.
+
+CLASS zabaputil_cl_util_context DEFINITION LOCAL FRIENDS ltcl_file_encoding.
+
+CLASS ltcl_file_encoding IMPLEMENTATION.
+
+  METHOD file_utf8.
+    " H + a-umlaut in UTF-8 - hex, as a literal umlaut breaks the 7-bit rule
+    DATA(lv_text) = zabaputil_cl_util_context=>conv_get_string_by_file( CONV xstring( `48C3A4` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = CONV xstring( `48C3A4` )
+        act = zabaputil_cl_util_context=>conv_get_xstring_by_string( lv_text ) ).
+  ENDMETHOD.
+
+  METHOD file_windows_1252.
+    " H + a-umlaut as Excel's plain "CSV" writes it on Windows: E4 alone is not UTF-8
+    DATA(lv_text) = zabaputil_cl_util_context=>conv_get_string_by_file( CONV xstring( `48E4` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = CONV xstring( `48C3A4` )
+        act = zabaputil_cl_util_context=>conv_get_xstring_by_string( lv_text ) ).
+  ENDMETHOD.
+
+  METHOD rap_cause_text.
+    " the base values of IF_ABAP_BEHV=>T_FAIL_CAUSE, not a running number
+    cl_abap_unit_assert=>assert_equals( exp = 404
+                                        act = zabaputil_cl_util_context=>msg_get_rap_cause_value( `not_found` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 4221
+                                        act = zabaputil_cl_util_context=>msg_get_rap_cause_value( `DISABLED` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = -1
+                                        act = zabaputil_cl_util_context=>msg_get_rap_cause_value( `SOMETHING_NEW` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `Entity not found`
+                                        act = zabaputil_cl_util_context=>msg_get_rap_fail_text( 404 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `Entity is locked`
+                                        act = zabaputil_cl_util_context=>msg_get_rap_fail_text( 423 ) ).
+  ENDMETHOD.
+
+ENDCLASS.

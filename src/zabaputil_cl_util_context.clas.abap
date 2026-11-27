@@ -813,7 +813,7 @@ CLASS zabaputil_cl_util_context DEFINITION
       IMPORTING
         val           TYPE any
       RETURNING
-        VALUE(result) TYPE zabaputil_cl_util_context=>ty_t_name_value.
+        VALUE(result) TYPE ty_t_name_value.
 
     CLASS-METHODS itab_filter_by_t_range
       IMPORTING
@@ -2316,7 +2316,8 @@ CLASS zabaputil_cl_util_context DEFINITION
       IMPORTING
         ir_data      TYPE REF TO data
         iv_tabname   TYPE string
-        is_transport TYPE ty_s_transport.
+        is_transport TYPE ty_s_transport
+        iv_commit    TYPE abap_bool DEFAULT abap_true.
 
     CLASS-METHODS bus_search_help_read
       CHANGING
@@ -2361,7 +2362,7 @@ CLASS zabaputil_cl_util_context DEFINITION
         subobject     TYPE clike
         id            TYPE clike
       RETURNING
-        VALUE(result) TYPE zabaputil_cl_util_context=>ty_s_msg.
+        VALUE(result) TYPE ty_s_msg.
 
     CLASS-METHODS bal_delete_before
       IMPORTING
@@ -2376,7 +2377,7 @@ CLASS zabaputil_cl_util_context DEFINITION
         id            TYPE clike
         msg_type      TYPE clike DEFAULT `E`
       RETURNING
-        VALUE(result) TYPE zabaputil_cl_util_context=>ty_t_msg.
+        VALUE(result) TYPE ty_t_msg.
 
     CLASS-METHODS bal_count
       IMPORTING
@@ -2392,21 +2393,21 @@ CLASS zabaputil_cl_util_context DEFINITION
         subobject     TYPE clike
         id            TYPE clike
       RETURNING
-        VALUE(result) TYPE zabaputil_cl_util_context=>ty_t_msg.
+        VALUE(result) TYPE ty_t_msg.
 
     CLASS-METHODS bal_create
       IMPORTING
         object    TYPE clike
         subobject TYPE clike
         id        TYPE clike
-        t_log     TYPE zabaputil_cl_util_context=>ty_t_msg.
+        t_log     TYPE ty_t_msg.
 
     CLASS-METHODS bal_update
       IMPORTING
         object    TYPE clike
         subobject TYPE clike
         id        TYPE clike
-        t_log     TYPE zabaputil_cl_util_context=>ty_t_msg.
+        t_log     TYPE ty_t_msg.
 
     CLASS-METHODS bal_delete
       IMPORTING
@@ -3204,6 +3205,15 @@ CLASS zabaputil_cl_util_context DEFINITION
         ev_type TYPE string
         ev_data TYPE string.
 
+    " An uploaded text file as a string: UTF-8, and Windows-1252 when the
+    " bytes are not valid UTF-8 - what Excel's plain "CSV" export writes on
+    " Windows. Raises when it is neither.
+    CLASS-METHODS conv_get_string_by_file
+      IMPORTING
+        val           TYPE xstring
+      RETURNING
+        VALUE(result) TYPE string.
+
   PROTECTED SECTION.
 
     CLASS-METHODS rtti_get_class_descr_on_cloud
@@ -3317,6 +3327,14 @@ CLASS zabaputil_cl_util_context DEFINITION
         cause         TYPE i
       RETURNING
         VALUE(result) TYPE string.
+
+    " The base value of an IF_ABAP_BEHV=>T_FAIL_CAUSE value, from its name;
+    " -1 for a name this release does not know.
+    CLASS-METHODS msg_get_rap_cause_value
+      IMPORTING
+        name          TYPE clike
+      RETURNING
+        VALUE(result) TYPE i.
 
     " What a rendered box stays inside. A data dump is a diagnostic, not a
     " report: a message box that carries 10.000 rows or follows a reference
@@ -3768,7 +3786,7 @@ CLASS zabaputil_cl_util_context DEFINITION
     CLASS-METHODS bal_cloud_add_items
       IMPORTING
         log   TYPE REF TO object
-        t_log TYPE zabaputil_cl_util_context=>ty_t_msg.
+        t_log TYPE ty_t_msg.
 
     CLASS-METHODS bal_cloud_build_filter
       IMPORTING
@@ -3781,7 +3799,7 @@ CLASS zabaputil_cl_util_context DEFINITION
     CLASS-METHODS bal_std_msg_add
       IMPORTING
         handle TYPE any
-        t_log  TYPE zabaputil_cl_util_context=>ty_t_msg.
+        t_log  TYPE ty_t_msg.
 
     CLASS-METHODS bal_std_load_handles
       IMPORTING
@@ -3810,7 +3828,7 @@ CLASS zabaputil_cl_util_context DEFINITION
       IMPORTING
         msg           TYPE any
       RETURNING
-        VALUE(result) TYPE zabaputil_cl_util_context=>ty_s_msg.
+        VALUE(result) TYPE ty_s_msg.
 
     CLASS-METHODS lock_call_function
       IMPORTING
@@ -3954,6 +3972,19 @@ CLASS zabaputil_cl_util_context DEFINITION
         val           TYPE string
       RETURNING
         VALUE(result) TYPE string.
+
+    " codepage: the IANA name CL_ABAP_CONV_CODEPAGE takes; encoding: the
+    " name or SAP code page number CL_ABAP_CONV_IN_CE takes. invalid is set
+    " when a converter ran and rejected the bytes; no converter at all
+    " raises UNSUPPORTED_CODEPAGE_API.
+    CLASS-METHODS conv_get_string_by_xstring_cp
+      IMPORTING
+        val      TYPE xstring
+        codepage TYPE string
+        encoding TYPE string
+      EXPORTING
+        result   TYPE string
+        invalid  TYPE abap_bool.
 
 ENDCLASS.
 
@@ -4284,7 +4315,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     CLEAR lr_filter->t_token_removed.
     CLEAR lr_filter->t_token_added.
 
-    DATA(lt_range) = zabaputil_cl_util_context=>filter_get_range_t_by_token_t( result[ name = name ]-t_token ).
+    DATA(lt_range) = filter_get_range_t_by_token_t( result[ name = name ]-t_token ).
     lr_filter->t_range = lt_range.
 
   ENDMETHOD.
@@ -4801,7 +4832,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     " guards against absolute names reused by other (local/anonymous) types
     lv_absolute_name = lo_struct->absolute_name.
     ASSIGN mt_attri_cache[ absolute_name = lv_absolute_name ] TO FIELD-SYMBOL(<ls_attri_cache>).
-    IF sy-subrc = 0 AND <ls_attri_cache>-o_struct = lo_struct.
+    IF <ls_attri_cache> IS ASSIGNED AND <ls_attri_cache>-o_struct = lo_struct.
       result = <ls_attri_cache>-t_attri.
       RETURN.
     ENDIF.
@@ -5029,7 +5060,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD time_get_date_by_stampl.
-    DATA(ls_sy) = zabaputil_cl_util_context=>context_get_sy( ).
+    DATA(ls_sy) = context_get_sy( ).
     CONVERT TIME STAMP val TIME ZONE ls_sy-zonlo INTO DATE result TIME DATA(lv_dummy).
   ENDMETHOD.
 
@@ -5042,7 +5073,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD time_get_time_by_stampl.
-    DATA(ls_sy) = zabaputil_cl_util_context=>context_get_sy( ).
+    DATA(ls_sy) = context_get_sy( ).
     CONVERT TIME STAMP val TIME ZONE ls_sy-zonlo INTO DATE DATA(lv_dummy) TIME result.
   ENDMETHOD.
 
@@ -6447,7 +6478,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD time_get_stampl_by_date_time.
 
-    DATA(ls_sy) = zabaputil_cl_util_context=>context_get_sy( ).
+    DATA(ls_sy) = context_get_sy( ).
     CONVERT DATE date TIME time INTO TIME STAMP result TIME ZONE ls_sy-zonlo.
 
   ENDMETHOD.
@@ -8985,7 +9016,6 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD msg_get_rap_row.
-
     CLEAR messages.
     is_row = abap_false.
 
@@ -9021,8 +9051,18 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         IF lv_meta_built = abap_false.
           lt_meta = msg_get_rap_meta( val ).
         ENDIF.
+        " %FAIL-CAUSE is the enumeration IF_ABAP_BEHV=>T_FAIL_CAUSE (base
+        " type i). An enumerated value does not convert to i - a plain MOVE
+        " is the runtime error UC_OBJECTS_NOT_CONVERTIBLE - so it is read by
+        " its name (a string template writes the name) and mapped to the
+        " base value. Type kind `k` is the enumeration (literal: the
+        " constant typekind_enum does not exist on 7.02).
         DATA lv_cause TYPE i.
-        lv_cause = <cause>.
+        IF cl_abap_typedescr=>describe_by_data( <cause> )->type_kind = `k`.
+          lv_cause = msg_get_rap_cause_value( |{ <cause> }| ).
+        ELSE.
+          lv_cause = <cause>.
+        ENDIF.
         DATA(lv_text) = msg_get_rap_fail_text( lv_cause ).
         IF entity_name IS NOT INITIAL.
           lv_text = |{ entity_name }: { lv_text }|.
@@ -9032,7 +9072,6 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                         t_meta = lt_meta ) INTO TABLE messages.
       ENDIF.
     ENDIF.
-
   ENDMETHOD.
 
   METHOD get_comp_str.
@@ -9231,21 +9270,19 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD msg_get_rap_fail_text.
-
+    " the base values of IF_ABAP_BEHV=>T_FAIL_CAUSE, read on an S/4HANA
+    " system (2026-11-13) - HTTP-like codes, not a running number
     result = SWITCH string( cause
-      WHEN 0  THEN `Operation failed`
-      WHEN 1  THEN `Entity not found`
-      WHEN 2  THEN `Entity is locked`
-      WHEN 3  THEN `Authorization failure`
-      WHEN 4 OR 5 THEN `Concurrent modification`
-      WHEN 6  THEN `Operation disabled`
-      WHEN 7  THEN `Operation forbidden`
-      WHEN 8  THEN `Semantic error`
-      WHEN 9  THEN `Determination failed`
-      WHEN 10 THEN `Permission denied`
-      WHEN 11 THEN `Validation failed`
+      WHEN 0    THEN `Operation failed`
+      WHEN 401  THEN `Authorization failure`
+      WHEN 404  THEN `Entity not found`
+      WHEN 409  THEN `Concurrent modification`
+      WHEN 423  THEN `Entity is locked`
+      WHEN 424  THEN `Dependent operation failed`
+      WHEN 501  THEN `Operation not implemented`
+      WHEN 4221 THEN `Operation disabled`
+      WHEN 4222 THEN `Entity is read-only`
       ELSE |Operation failed (cause code { cause })| ).
-
   ENDMETHOD.
 
   METHOD rtti_get_t_attri_on_prem.
@@ -9382,7 +9419,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDTRY.
 
 
-    DATA(lt_comp)  =  zabaputil_cl_util_context=>rtti_get_t_attri_by_any( tabname ).
+    DATA(lt_comp)  =  rtti_get_t_attri_by_any( tabname ).
     LOOP AT lt_comp REFERENCE INTO DATA(lr_comp).
 
       DATA(lv_check_key) = abap_false.
@@ -9445,7 +9482,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD rtti_get_t_dfies_by_table_name.
 
-    IF zabaputil_cl_util_context=>check_abap_cloud( ) IS NOT INITIAL.
+    IF check_abap_cloud( ) IS NOT INITIAL.
       result = rtti_get_t_attri_on_cloud( table_name ).
     ELSE.
       result = rtti_get_t_attri_on_prem( table_name ).
@@ -9463,7 +9500,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       lan = langu.
     ENDIF.
 
-    IF zabaputil_cl_util_context=>check_abap_cloud( ).
+    IF check_abap_cloud( ).
 
       ddtext = tabname.
 
@@ -9543,15 +9580,20 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         ASSIGN lr_t_shlp->* TO <shlp2>.
 
         lv_fm = `F4IF_EXPAND_SEARCHHELP`.
+        " shlp_top is typed SHLP_DESCR - pass the DDIC-typed result of
+        " F4IF_DETERMINE_SEARCHHELP, not the local rebuild ms_shlp: a
+        " function module called by name wants the exact type
         CALL FUNCTION lv_fm
           EXPORTING
-            shlp_top = ms_shlp
+            shlp_top = <shlp>
           IMPORTING
             shlp_tab = <shlp2>.
 
         FIELD-SYMBOLS <row2> TYPE any.
-        ASSIGN  <shlp2>[ 1 ] TO <row2>.
-        ms_shlp = CORRESPONDING #( <row2> ).
+        ASSIGN <shlp2>[ 1 ] TO <row2>.
+        IF sy-subrc = 0.
+          ms_shlp = CORRESPONDING #( <row2> ).
+        ENDIF.
       ENDIF.
     ENDIF.
 
@@ -9645,9 +9687,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       INSERT ls_comp INTO TABLE lt_comps.
     ENDIF.
 
-    DATA(strucdescr) = cl_abap_structdescr=>create( p_components = lt_comps ).
+    DATA(strucdescr) = cl_abap_structdescr=>create( lt_comps ).
 
-    DATA(tabdescr) = cl_abap_tabledescr=>create( p_line_type = strucdescr ).
+    DATA(tabdescr) = cl_abap_tabledescr=>create( strucdescr ).
 
     IF mt_data IS NOT BOUND.
       CREATE DATA mt_data TYPE HANDLE tabdescr.
@@ -9801,10 +9843,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         rv_tabkey = lv_tabkey.
         RETURN.
       ELSE.
-        lv_field_len = cl_abap_typedescr=>describe_by_data( <value> )->length / zabaputil_cl_util_context=>cv_char_util_charsize.
+        lv_field_len = cl_abap_typedescr=>describe_by_data( <value> )->length / cv_char_util_charsize.
       ENDIF.
 
-      lv_field_len = cl_abap_typedescr=>describe_by_data( <value> )->length / zabaputil_cl_util_context=>cv_char_util_charsize.
+      lv_field_len = cl_abap_typedescr=>describe_by_data( <value> )->length / cv_char_util_charsize.
       lv_tabkey+lv_tabkey_len(lv_field_len) = <value>.
       lv_tabkey_len = lv_tabkey_len + lv_field_len.
 
@@ -9824,8 +9866,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD bus_tr_add.
-
-    IF zabaputil_cl_util_context=>check_abap_cloud( ).
+    IF check_abap_cloud( ).
 
     ELSE.
 
@@ -9862,7 +9903,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           error_message = 1
           OTHERS        = 2.
       IF sy-subrc <> 0.
-        RAISE EXCEPTION TYPE zabaputil_cx_util_error.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |{ fb1 }: { sy-msgid } { sy-msgno } { sy-msgv1 } { sy-msgv2 } { sy-msgv3 } { sy-msgv4 }|.
       ENDIF.
 
       DATA(fb2) = 'TR_SORT_AND_COMPRESS_COMM'.
@@ -9873,17 +9916,17 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           error_message = 1
           OTHERS        = 2.
       IF sy-subrc <> 0.
-        RAISE EXCEPTION TYPE zabaputil_cx_util_error.
-      ELSE.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |{ fb2 }: { sy-msgid } { sy-msgno } { sy-msgv1 } { sy-msgv2 } { sy-msgv3 } { sy-msgv4 }|.
+      ELSEIF iv_commit = abap_true.
         COMMIT WORK AND WAIT.
       ENDIF.
 
     ENDIF.
-
   ENDMETHOD.
 
   METHOD _set_e071k.
-
     DATA t_e071k TYPE REF TO data.
     DATA s_e071k TYPE REF TO data.
 
@@ -9893,7 +9936,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     FIELD-SYMBOLS <tab>     TYPE STANDARD TABLE.
     FIELD-SYMBOLS <line>    TYPE any.
 
-    DATA(t_comp) = zabaputil_cl_util_context=>rtti_get_t_attri_by_table_name( 'E071K' ).
+    DATA(t_comp) = rtti_get_t_attri_by_table_name( 'E071K' ).
 
     TRY.
 
@@ -9908,10 +9951,18 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         ASSIGN t_e071k->* TO <t_e071k>.
         ASSIGN s_e071k->* TO <s_e071k>.
 
-      CATCH cx_root ##NO_HANDLER.
+      CATCH cx_root INTO DATA(x).
+        " without the E071K line type nothing below can be filled - say why
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val      = |E071K line type could not be built: { x->get_text( ) }|
+            previous = x.
     ENDTRY.
 
     DATA(dfies) = rtti_get_t_dfies_by_table_name( iv_tabname ).
+
+*   is_transport-transport = assign_value( component = 'TRKORR'
+*                                          structure = <s_e071k> ).                                         )
 
     ASSIGN COMPONENT 'TRKORR' OF STRUCTURE <s_e071k> TO <value>.
     IF <value> IS NOT ASSIGNED.
@@ -9978,7 +10029,6 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDLOOP.
 
     result = t_e071k.
-
   ENDMETHOD.
 
   METHOD _set_e071.
@@ -9990,7 +10040,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     FIELD-SYMBOLS <s_e071> TYPE any.
     FIELD-SYMBOLS <value>  TYPE any.
 
-    DATA(t_comp) = zabaputil_cl_util_context=>rtti_get_t_attri_by_table_name( 'E071' ).
+    DATA(t_comp) = rtti_get_t_attri_by_table_name( 'E071' ).
 
     TRY.
 
@@ -10063,7 +10113,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA(table_name) = 'E070'.
 
     TRY.
-        DATA(t_comp) = zabaputil_cl_util_context=>rtti_get_t_attri_by_table_name( table_name ).
+        DATA(t_comp) = rtti_get_t_attri_by_table_name( table_name ).
 
         DATA(new_struct_desc) = cl_abap_structdescr=>create( t_comp ).
 
@@ -10126,7 +10176,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD bus_tr_read.
 
-    IF zabaputil_cl_util_context=>check_abap_cloud( ).
+    IF check_abap_cloud( ).
 
 *          data(lo_current_user) = xco_cp=>sy->user( ).
 *
@@ -10176,7 +10226,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       DATA(table_name) = 'E07T'.
 
       TRY.
-          DATA(t_comp) = zabaputil_cl_util_context=>rtti_get_t_attri_by_table_name( table_name ).
+          DATA(t_comp) = rtti_get_t_attri_by_table_name( table_name ).
 
           DATA(new_struct_desc) = cl_abap_structdescr=>create( t_comp ).
 
@@ -10271,7 +10321,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD bal_search.
 
-    IF zabaputil_cl_util_context=>check_abap_cloud( ).
+    IF check_abap_cloud( ).
       " Cloud: use CL_BALI_LOG_FILTER + CL_BALI_LOG_DB
       DATA lo_filter TYPE REF TO object.
       DATA lo_db     TYPE REF TO object.
@@ -10463,7 +10513,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     DATA(lv_cutoff) = CONV d( sy-datum - days ).
 
-    IF zabaputil_cl_util_context=>check_abap_cloud( ).
+    IF check_abap_cloud( ).
       " Cloud: use CL_BALI_LOG_DB to delete via filter
       DATA lo_filter_c TYPE REF TO object.
       DATA lo_db_c     TYPE REF TO object.
@@ -10591,7 +10641,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD bal_read.
 
-    IF zabaputil_cl_util_context=>check_abap_cloud( ).
+    IF check_abap_cloud( ).
 
       " Load the persisted logs (incl. items) via the released filter API and map
       " each item back to the framework's z2ui5_cl_util=>ty_s_msg structure with full metadata.
@@ -10642,7 +10692,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                 CONTINUE.
               ENDIF.
 
-              DATA(ls_msg) = VALUE zabaputil_cl_util_context=>ty_s_msg( ).
+              DATA(ls_msg) = VALUE ty_s_msg( ).
 
               lv_text = ``.
               CALL METHOD ls_item-item->(`GET_MESSAGE_TEXT`)
@@ -10780,7 +10830,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD bal_create.
 
-    IF zabaputil_cl_util_context=>check_abap_cloud( ).
+    IF check_abap_cloud( ).
 
       " ABAP Cloud: released Business Application Log API (cl_bali_*).
       " All access is dynamic so this class still compiles on lower releases.
@@ -10895,7 +10945,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD bal_update.
 
-    IF zabaputil_cl_util_context=>check_abap_cloud( ).
+    IF check_abap_cloud( ).
 
       " Load the existing log and append items. If no log exists, create a new one.
       DATA lo_filter TYPE REF TO object.
@@ -11001,7 +11051,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD bal_delete.
 
-    IF zabaputil_cl_util_context=>check_abap_cloud( ).
+    IF check_abap_cloud( ).
 
       DATA lo_filter TYPE REF TO object.
       DATA lo_db     TYPE REF TO object.
@@ -11070,7 +11120,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD tr_get_objects.
 
-    IF zabaputil_cl_util_context=>check_abap_cloud( ).
+    IF check_abap_cloud( ).
       " Cloud: use XCO_CP_CTS
       TRY.
           DATA lo_transport TYPE REF TO object.
@@ -11169,7 +11219,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD tr_get_user_requests.
 
-    IF zabaputil_cl_util_context=>check_abap_cloud( ).
+    IF check_abap_cloud( ).
       " Cloud: use XCO_CP_CTS transport filter
       TRY.
           DATA(lv_xco) = `XCO_CP_CTS`.
@@ -11256,7 +11306,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         DATA(lv_where) = |AS4USER = '{ lv_user }' AND TRSTATUS IN ('D','L')|.
 
         " First read transports from E070
-        DATA(lt_comp) = zabaputil_cl_util_context=>rtti_get_t_attri_by_table_name( lv_tab1 ).
+        DATA(lt_comp) = rtti_get_t_attri_by_table_name( lv_tab1 ).
         DATA(lo_struct) = cl_abap_structdescr=>create( lt_comp ).
         DATA(lo_table) = cl_abap_tabledescr=>create( lo_struct ).
         CREATE DATA lr_data TYPE HANDLE lo_table.
@@ -11294,7 +11344,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD tr_get_description.
 
-    IF zabaputil_cl_util_context=>check_abap_cloud( ).
+    IF check_abap_cloud( ).
       " Cloud: use XCO_CP_CTS
       TRY.
           DATA lo_tr_d TYPE REF TO object.
@@ -11335,7 +11385,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD tr_is_released.
 
-    IF zabaputil_cl_util_context=>check_abap_cloud( ).
+    IF check_abap_cloud( ).
       " Cloud: use XCO_CP_CTS
       TRY.
           DATA lo_tr_r TYPE REF TO object.
@@ -11487,7 +11537,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     " Copying objects between requests relies on the classic transport
     " functions (TR_COPY_COMM) which are not released on ABAP Cloud.
-    IF zabaputil_cl_util_context=>check_abap_cloud( ).
+    IF check_abap_cloud( ).
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
         EXPORTING
           val = `tr_copy_objects is not supported on ABAP Cloud`.
@@ -11562,7 +11612,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD tr_import.
 
     " Importing transports via TMS (TMS_MGR_*) is not available on ABAP Cloud.
-    IF zabaputil_cl_util_context=>check_abap_cloud( ).
+    IF check_abap_cloud( ).
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
         EXPORTING
           val = `tr_import is not supported on ABAP Cloud`.
@@ -11643,7 +11693,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     " Reading the transport log (TR_READ_GLOBAL_INFO_OF_REQUEST) is not
     " available on ABAP Cloud.
-    IF zabaputil_cl_util_context=>check_abap_cloud( ).
+    IF check_abap_cloud( ).
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
         EXPORTING
           val = `tr_check_status is not supported on ABAP Cloud`.
@@ -12038,7 +12088,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           lv_arg = lv_arg && ls_param-value.
         ENDLOOP.
 
-        DATA(lv_name) = zabaputil_cl_util_context=>c_trim_upper( val ).
+        DATA(lv_name) = c_trim_upper( val ).
         lv_name = replace( val = lv_name sub = `ENQUEUE_` with = `` ).
 
         LOOP AT lt_locks INTO DATA(ls_lock)
@@ -12056,7 +12106,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD lock_get_dequeue_by_enqueue.
 
-    result = replace( val  = zabaputil_cl_util_context=>c_trim_upper( val )
+    result = replace( val  = c_trim_upper( val )
                       sub  = `ENQUEUE_`
                       with = `DEQUEUE_` ).
 
@@ -12083,7 +12133,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         ASSIGN lr_enq->* TO <lt_enq>.
 
         IF client IS INITIAL.
-          lv_client = zabaputil_cl_util_context=>context_get_sy( )-mandt.
+          lv_client = context_get_sy( )-mandt.
         ELSE.
           lv_client = client.
         ENDIF.
@@ -12326,7 +12376,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD mail_send.
 
-    IF zabaputil_cl_util_context=>check_abap_cloud( ).
+    IF check_abap_cloud( ).
       " Cloud: use CL_BCS_MAIL_MESSAGE (released cloud mail API)
       DATA lo_mail_c TYPE REF TO object.
       DATA lv_cls_c  TYPE string.
@@ -12339,7 +12389,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
           CALL METHOD lo_mail_c->(`SET_SENDER`)
             EXPORTING
-              iv_address = zabaputil_cl_util_context=>context_get_user_tech( ) && `@placeholder.local`.
+              iv_address = context_get_user_tech( ) && `@placeholder.local`.
 
           CALL METHOD lo_mail_c->(`ADD_RECIPIENT`)
             EXPORTING
@@ -12425,7 +12475,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CREATE DATA lr_line TYPE (`SOLI`).
         ASSIGN lr_line->* TO <line>.
 
-        DATA(lt_lines) = zabaputil_cl_util_context=>c_split( val = body sep = zabaputil_cl_util_context=>cv_char_util_newline ).
+        DATA(lt_lines) = c_split( val = body sep = cv_char_util_newline ).
         LOOP AT lt_lines INTO DATA(lv_body_line).
           ASSIGN COMPONENT `LINE` OF STRUCTURE <line> TO <field>.
           <field> = lv_body_line.
@@ -12462,7 +12512,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD job_submit_report.
 
-    IF zabaputil_cl_util_context=>check_abap_cloud( ).
+    IF check_abap_cloud( ).
       " Cloud: Application Jobs have a different architecture (job catalog + templates).
       " Direct report submission is not available. Raise informative exception.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -12558,7 +12608,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     lv_nr_sub = subobject.
 
     TRY.
-        IF zabaputil_cl_util_context=>check_abap_cloud( ).
+        IF check_abap_cloud( ).
           " Cloud: use CL_NUMBERRANGE_RUNTIME
           DATA(lv_cls) = `CL_NUMBERRANGE_RUNTIME`.
           CALL METHOD (lv_cls)=>(`NUMBER_GET`)
@@ -12599,7 +12649,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD changdoc_read.
 
-    IF zabaputil_cl_util_context=>check_abap_cloud( ).
+    IF check_abap_cloud( ).
       " Cloud: use released CDS view I_ChangeDocument
       TRY.
           DATA(lv_cds) = `I_CHANGEDOCUMENTITEM`.
@@ -12616,7 +12666,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           FIELD-SYMBOLS <cds_fld> TYPE any.
           DATA lr_cds_tab TYPE REF TO data.
 
-          DATA(lt_comp_c) = zabaputil_cl_util_context=>rtti_get_t_attri_by_table_name( lv_cds ).
+          DATA(lt_comp_c) = rtti_get_t_attri_by_table_name( lv_cds ).
           DATA(lo_struct_c) = cl_abap_structdescr=>create( lt_comp_c ).
           DATA(lo_table_c) = cl_abap_tabledescr=>create( lo_struct_c ).
           CREATE DATA lr_cds_tab TYPE HANDLE lo_table_c.
@@ -12861,9 +12911,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     LOOP AT it_source INTO DATA(lv_source).
       IF strlen( lv_source ) > 1.
-        result = result && lv_source+1 && zabaputil_cl_util_context=>cv_char_util_newline.
+        result = result && lv_source+1 && cv_char_util_newline.
       ELSE.
-        result = result && zabaputil_cl_util_context=>cv_char_util_newline.
+        result = result && cv_char_util_newline.
       ENDIF.
     ENDLOOP.
 
@@ -12893,7 +12943,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         ls_exception-value = 4.
         INSERT ls_exception INTO TABLE lt_exception.
 
-        lv_function = zabaputil_cl_util_context=>c_trim_upper( val ).
+        lv_function = c_trim_upper( val ).
         CALL FUNCTION lv_function
           PARAMETER-TABLE lt_param
           EXCEPTION-TABLE lt_exception.
@@ -12923,7 +12973,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD cal_is_workday.
 
     IF calendar_id IS NOT INITIAL.
-      zabaputil_cl_util_context=>x_raise( `cal_is_workday: factory calendar support is not yet implemented` ).
+      x_raise( `cal_is_workday: factory calendar support is not yet implemented` ).
     ENDIF.
 
     result = xsdbool( cal_is_weekend( date ) = abap_false ).
@@ -17834,6 +17884,149 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     IF strlen( result ) > 30.
       result = result(30).
     ENDIF.
+
+  ENDMETHOD.
+
+  METHOD msg_get_rap_cause_value.
+
+    " the name of an IF_ABAP_BEHV=>T_FAIL_CAUSE value to its base value;
+    " -1 for a name this release does not know, which the text keeps
+    " (the upper-case name in a variable first: the downport turns the
+    " SWITCH into a CASE, whose operand takes no built-in function on 7.02)
+    DATA lv_name TYPE string.
+    lv_name = to_upper( name ).
+    result = SWITCH i( lv_name
+      WHEN `UNSPECIFIC`      THEN 0
+      WHEN `UNAUTHORIZED`    THEN 401
+      WHEN `NOT_FOUND`       THEN 404
+      WHEN `CONFLICT`        THEN 409
+      WHEN `LOCKED`          THEN 423
+      WHEN `DEPENDENCY`      THEN 424
+      WHEN `NOT_IMPLEMENTED` THEN 501
+      WHEN `DISABLED`        THEN 4221
+      WHEN `READONLY`        THEN 4222
+      ELSE -1 ).
+
+  ENDMETHOD.
+
+  METHOD conv_get_string_by_file.
+
+    DATA lv_invalid TYPE abap_bool.
+
+    conv_get_string_by_xstring_cp( EXPORTING val      = val
+                                             codepage = `UTF-8`
+                                             encoding = `UTF-8`
+                                   IMPORTING result   = result
+                                             invalid  = lv_invalid ).
+    IF lv_invalid = abap_false.
+      RETURN.
+    ENDIF.
+
+    " Not valid UTF-8: Excel's plain "CSV" export on Windows writes
+    " Windows-1252 (SAP code page 1160), and an umlaut is then a single byte
+    " no UTF-8 decoder accepts. Only a conversion error gets here - a
+    " missing codepage API left conv_get_string_by_xstring_cp with its own
+    " UNSUPPORTED_CODEPAGE_API above
+    TRY.
+        conv_get_string_by_xstring_cp( EXPORTING val      = val
+                                                 codepage = `windows-1252`
+                                                 encoding = `1160`
+                                       IMPORTING result   = result
+                                                 invalid  = lv_invalid ).
+      CATCH zabaputil_cx_util_error.
+        " neither API knows Windows-1252 here
+        lv_invalid = abap_true.
+    ENDTRY.
+
+    IF lv_invalid = abap_true.
+      CLEAR result.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |UNSUPPORTED_ENCODING - the file is neither UTF-8 nor Windows-1252, | &&
+                |save it as "CSV UTF-8" and upload it again|.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD conv_get_string_by_xstring_cp.
+
+    DATA conv          TYPE REF TO object.
+    DATA conv_codepage TYPE c LENGTH 21.
+    DATA conv_in_class TYPE c LENGTH 18.
+    DATA lv_encoding   TYPE c LENGTH 20.
+    DATA lx_first      TYPE REF TO cx_root.
+
+    CLEAR result.
+    invalid = abap_false.
+
+    TRY.
+
+        conv_codepage = `CL_ABAP_CONV_CODEPAGE`.
+        CALL METHOD (conv_codepage)=>create_in
+          EXPORTING
+            codepage = codepage
+          RECEIVING
+            instance = conv.
+
+        CALL METHOD conv->(`IF_ABAP_CONV_IN~CONVERT`)
+          EXPORTING
+            source = val
+          RECEIVING
+            result = result.
+        RETURN.
+
+      CATCH cx_sy_conversion_codepage.
+        " the API is there and the bytes are not valid in this code page -
+        " the classic API would reject them too
+        CLEAR result.
+        invalid = abap_true.
+        RETURN.
+
+      CATCH cx_root INTO lx_first ##NO_HANDLER.
+        " deliberate: capturing the cause IS the handling - it is chained into
+        " UNSUPPORTED_CODEPAGE_API below if the classic API fails too. Falling
+        " through is the point; the modern class is absent on older releases,
+        " which is the whole reason both paths exist. A code page the modern
+        " class does not know (CX_PARAMETER_INVALID_RANGE) falls through too
+    ENDTRY.
+
+    " The classic API. Guarded by its own TRY since 2026-09: it used to be the
+    " BODY of the CATCH above, so when it failed too the dynamic-call
+    " exception left this method raw. On a release that has neither class -
+    " and in any runtime that is not an SAP system, where a dynamic
+    " CALL METHOD resolves nothing - that reached the caller as
+    " CX_SY_DYN_CALL_ILLEGAL_CLASS, which nothing here catches by name.
+    " The view builder is one of those callers and builds its
+    " control-character set through this method, so a missing codepage class
+    " took down every view render with an exception that named a kernel
+    " class rather than the framework.
+    TRY.
+
+        conv_in_class = `CL_ABAP_CONV_IN_CE`.
+        lv_encoding = encoding.
+        CALL METHOD (conv_in_class)=>create
+          EXPORTING
+            encoding = lv_encoding
+          RECEIVING
+            conv     = conv.
+
+        CALL METHOD conv->(`CONVERT`)
+          EXPORTING
+            input = val
+          IMPORTING
+            data  = result.
+
+      CATCH cx_sy_conversion_codepage.
+        CLEAR result.
+        invalid = abap_true.
+
+      CATCH cx_root.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val      = |UNSUPPORTED_CODEPAGE_API - neither CL_ABAP_CONV_CODEPAGE | &&
+                       |nor CL_ABAP_CONV_IN_CE could convert here|
+            previous = lx_first.
+    ENDTRY.
 
   ENDMETHOD.
 
