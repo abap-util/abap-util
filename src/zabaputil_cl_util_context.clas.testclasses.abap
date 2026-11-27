@@ -3105,6 +3105,7 @@ CLASS ltcl_escaping DEFINITION FINAL
     METHODS url_encode_unreserved         FOR TESTING.
     METHODS url_encode_special            FOR TESTING.
     METHODS url_encode_umlaut             FOR TESTING.
+    METHODS url_encode_emoji              FOR TESTING.
     METHODS url_decode_simple             FOR TESTING.
     METHODS url_decode_plus_as_space      FOR TESTING.
     METHODS url_roundtrip                 FOR TESTING.
@@ -3147,6 +3148,16 @@ CLASS ltcl_escaping IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
         act = zabaputil_cl_util_context=>url_encode( `ä` )
         exp = `%C3%A4` ).
+  ENDMETHOD.
+
+  METHOD url_encode_emoji.
+    " a character outside the BMP is two UTF-16 code units - encoded as one
+    " UTF-8 sequence, not as two broken halves. Built from its bytes: the
+    " source stays 7-bit
+    DATA(lv_emoji) = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `F09F9880` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>url_encode( |a{ lv_emoji }b| )
+        exp = `a%F0%9F%98%80b` ).
   ENDMETHOD.
 
   METHOD url_decode_simple.

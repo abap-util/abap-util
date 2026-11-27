@@ -13835,28 +13835,41 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     DATA(lv_val) = CONV string( val ).
     DATA(lv_len) = strlen( lv_val ).
-    DATA lv_i TYPE i.
+    DATA lv_i    TYPE i.
+    DATA lv_run  TYPE string.
+    DATA lv_j    TYPE i.
+    DATA lv_hex  TYPE c LENGTH 2.
 
-    WHILE lv_i < lv_len.
+    " the characters to encode are collected and converted to UTF-8 as one
+    " run: one at a time split a character outside the BMP (an emoji) into
+    " its two UTF-16 halves, and each half alone is no valid UTF-8
+    WHILE lv_i <= lv_len.
 
-      DATA(lv_char) = substring( val = lv_val
-                                 off = lv_i
-                                 len = 1 ).
+      IF lv_i < lv_len.
+        DATA(lv_char) = substring( val = lv_val
+                                   off = lv_i
+                                   len = 1 ).
+        IF lv_char = ` ` OR lv_char CN lc_unreserved.
+          lv_run = lv_run && lv_char.
+          lv_i = lv_i + 1.
+          CONTINUE.
+        ENDIF.
+      ENDIF.
 
-      IF lv_char <> ` ` AND lv_char CO lc_unreserved.
-        result = result && lv_char.
-      ELSE.
-        DATA(lv_x) = conv_get_xstring_by_string( lv_char ).
-        DATA lv_j TYPE i.
+      IF lv_run IS NOT INITIAL.
+        DATA(lv_x) = conv_get_xstring_by_string( lv_run ).
         lv_j = 0.
         WHILE lv_j < xstrlen( lv_x ).
-          DATA lv_hex TYPE c LENGTH 2.
           lv_hex = lv_x+lv_j(1).
           result = result && `%` && lv_hex.
           lv_j = lv_j + 1.
         ENDWHILE.
+        CLEAR lv_run.
       ENDIF.
 
+      IF lv_i < lv_len.
+        result = result && lv_char.
+      ENDIF.
       lv_i = lv_i + 1.
     ENDWHILE.
 
