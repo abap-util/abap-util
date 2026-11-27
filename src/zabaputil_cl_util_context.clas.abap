@@ -9992,7 +9992,6 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA lv_tabkey     TYPE c LENGTH 999.
     DATA lv_tabkey_len TYPE i.
     DATA lv_field_len  TYPE i.
-    DATA lv_offset     TYPE i.
 
     LOOP AT dfies INTO DATA(s_dfies) WHERE keyflag = abap_true.
 
@@ -10003,31 +10002,26 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CONTINUE.
       ENDIF.
 
-      lv_type = cl_abap_typedescr=>describe_by_data( <value> )->type_kind.
+      DATA(lo_value_type) = cl_abap_typedescr=>describe_by_data( <value> ).
+      lv_type = lo_value_type->type_kind.
 
       IF lv_type NA 'CDNT'.
         lv_tabkey+lv_tabkey_len = '*'.
         rv_tabkey = lv_tabkey.
         RETURN.
-      ELSE.
-        lv_field_len = cl_abap_typedescr=>describe_by_data( <value> )->length / cv_char_util_charsize.
       ENDIF.
 
-      lv_field_len = cl_abap_typedescr=>describe_by_data( <value> )->length / cv_char_util_charsize.
+      lv_field_len = lo_value_type->length / cv_char_util_charsize.
       lv_tabkey+lv_tabkey_len(lv_field_len) = <value>.
       lv_tabkey_len = lv_tabkey_len + lv_field_len.
 
     ENDLOOP.
 
+    " TABKEY is CHAR120: a longer key becomes generic at its last position.
+    " Cutting at the first `_` anywhere in the key put the `*` outside the
+    " 120 characters when that `_` came late, and the key was not generic
     IF lv_tabkey_len > 119.
-
-      IF lv_tabkey CS '_'.
-        lv_offset = sy-fdpos.
-        lv_tabkey+lv_offset = '*'.
-      ELSE.
-        lv_tabkey+119 = '*'.
-      ENDIF.
-
+      lv_tabkey+119 = '*'.
     ENDIF.
     rv_tabkey = lv_tabkey.
   ENDMETHOD.
