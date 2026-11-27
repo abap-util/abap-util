@@ -2744,7 +2744,7 @@ CLASS ltcl_bal_ops IMPLEMENTATION.
 ENDCLASS.
 
 
-CLASS ltcl_xco_call DEFINITION FINAL
+CLASS ltcl_dyn_call DEFINITION FINAL
   FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
 
   PRIVATE SECTION.
@@ -2753,9 +2753,9 @@ CLASS ltcl_xco_call DEFINITION FINAL
 
 ENDCLASS.
 
-CLASS zabaputil_cl_util_context DEFINITION LOCAL FRIENDS ltcl_xco_call.
+CLASS zabaputil_cl_util_context DEFINITION LOCAL FRIENDS ltcl_dyn_call.
 
-CLASS ltcl_xco_call IMPLEMENTATION.
+CLASS ltcl_dyn_call IMPLEMENTATION.
 
   METHOD interface_method.
     " the cloud branches of tr_* reach XCO this way: GET_NODE_TYPE is a
@@ -2764,7 +2764,7 @@ CLASS ltcl_xco_call IMPLEMENTATION.
     " parameter filled from arg
     FIELD-SYMBOLS <value> TYPE any.
     DATA(lo_json) = zabaputil_cl_ajson=>parse( `{"a":"x"}` ).
-    DATA(lr_value) = zabaputil_cl_util_context=>xco_call( obj  = lo_json
+    DATA(lr_value) = zabaputil_cl_util_context=>dyn_call( obj  = lo_json
                                                          name = `get_node_type`
                                                          arg  = `/a` ).
     ASSIGN lr_value->* TO <value>.
@@ -2774,7 +2774,7 @@ CLASS ltcl_xco_call IMPLEMENTATION.
 
   METHOD missing_member.
     TRY.
-        zabaputil_cl_util_context=>xco_call( obj  = zabaputil_cl_ajson=>create_empty( )
+        zabaputil_cl_util_context=>dyn_call( obj  = zabaputil_cl_ajson=>create_empty( )
                                              name = `NO_SUCH_MEMBER` ).
         cl_abap_unit_assert=>fail( ).
       CATCH zabaputil_cx_util_error ##NO_HANDLER.

@@ -2797,12 +2797,22 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE string.
 
+    "! Sends a mail to one recipient. result: the mail system accepted it;
+    "! a mail that cannot be built or handed over raises
+    "! zabaputil_cx_util_error. sender: the sender address - initial is the
+    "! current user on-premise and the configured default sender on ABAP
+    "! Cloud. with_commit: COMMIT WORK after sending on-premise (the
+    "! default, as before the parameter existed) - that commits the
+    "! caller's open work too; abap_false leaves it to the caller, and the
+    "! mail leaves with the caller's commit.
     CLASS-METHODS mail_send
       IMPORTING
-        !to      TYPE string
-        subject  TYPE string
-        body     TYPE string
-        html     TYPE abap_bool DEFAULT abap_false
+        !to           TYPE string
+        subject       TYPE string
+        body          TYPE string
+        html          TYPE abap_bool DEFAULT abap_false
+        sender        TYPE string OPTIONAL
+        with_commit   TYPE abap_bool DEFAULT abap_true
       RETURNING
         VALUE(result) TYPE abap_bool.
 
@@ -4078,35 +4088,41 @@ CLASS zabaputil_cl_util_context DEFINITION
     " raises (zabaputil_cx_util_error reads a uuid for its full report).
     CLASS-DATA gv_uuid_failed TYPE abap_bool.
 
-    " A member of an object reached dynamically, as XCO needs it: the
-    " method or attribute name, found on the class itself or on one of the
-    " interfaces it implements (IF_...~NAME) - a dynamic call by the bare
-    " name of an interface method only works where the class declares an
-    " alias. result: a reference to the RETURNING value of the method, or
-    " to the attribute. arg: the value of the method's one mandatory
-    " importing parameter, converted to its type (a table of object
-    " references is cast line by line). A member the object does not have
-    " raises zabaputil_cx_util_error.
-    CLASS-METHODS xco_call
+    " A member of an object - or, without obj, a static member of the class
+    " class_name - reached dynamically, as XCO and the cloud mail API need
+    " it: the method or attribute name, found on the class itself or on one
+    " of the interfaces it implements (IF_...~NAME) - a dynamic call by the
+    " bare name of an interface method only works where the class declares
+    " an alias. result: a reference to the RETURNING value of the method,
+    " or to the attribute. arg: the value of the method's first mandatory
+    " importing parameter not in t_param, converted to its type (a table of
+    " object references is cast line by line), so its name need not be
+    " known. t_param: further parameters, passed as they are. A member the
+    " object does not have raises zabaputil_cx_util_error.
+    CLASS-METHODS dyn_call
       IMPORTING
-        obj           TYPE REF TO object
+        obj           TYPE REF TO object OPTIONAL
+        class_name    TYPE clike OPTIONAL
         name          TYPE clike
         arg           TYPE any OPTIONAL
+        t_param       TYPE abap_parmbind_tab OPTIONAL
       RETURNING
         VALUE(result) TYPE REF TO data.
 
-    " xco_call for a member that is an object: the object
-    CLASS-METHODS xco_call_obj
+    " dyn_call for a member that is an object: the object
+    CLASS-METHODS dyn_call_obj
       IMPORTING
-        obj           TYPE REF TO object
+        obj           TYPE REF TO object OPTIONAL
+        class_name    TYPE clike OPTIONAL
         name          TYPE clike
         arg           TYPE any OPTIONAL
+        t_param       TYPE abap_parmbind_tab OPTIONAL
       RETURNING
         VALUE(result) TYPE REF TO object.
 
     " the object in a static attribute, `XCO_CP_CTS=>TRANSPORT` - an XCO
     " factory is an attribute, not a method
-    CLASS-METHODS xco_static
+    CLASS-METHODS dyn_static
       IMPORTING
         val           TYPE clike
       RETURNING
@@ -12015,7 +12031,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       FIELD-SYMBOLS <lo_object>  TYPE any.
       DATA lo_entry TYPE REF TO object.
       TRY.
-          DATA(lr_objects_c) = xco_call( obj  = xco_call_obj( obj  = xco_call_obj( obj  = xco_transport( trkorr )
+          DATA(lr_objects_c) = dyn_call( obj  = dyn_call_obj( obj  = dyn_call_obj( obj  = xco_transport( trkorr )
                                                                                   name = `OBJECTS` )
                                                              name = `ALL` )
                                          name = `GET` ).
@@ -12025,7 +12041,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             lo_entry ?= <lo_object>.
             DATA(ls_obj_c) = VALUE ty_s_tr_object( ).
             " the key of the entry: PGMID, OBJECT, OBJ_NAME as in E071
-            DATA(lr_key) = xco_call( obj  = lo_entry
+            DATA(lr_key) = dyn_call( obj  = lo_entry
                                      name = `GET_KEY` ).
             FIELD-SYMBOLS <key>  TYPE any.
             FIELD-SYMBOLS <kcmp> TYPE any.
@@ -12115,24 +12131,24 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           DATA lv_user_c TYPE c LENGTH 12.
           lv_user_c = COND #( WHEN user IS NOT INITIAL THEN user ELSE sy-uname ).
 
-          DATA(lo_tr_filter) = xco_static( `XCO_CP_TRANSPORT=>FILTER` ).
-          DATA(lo_constraint) = xco_call_obj( obj  = xco_static( `XCO_CP_ABAP_SQL=>CONSTRAINT` )
+          DATA(lo_tr_filter) = dyn_static( `XCO_CP_TRANSPORT=>FILTER` ).
+          DATA(lo_constraint) = dyn_call_obj( obj  = dyn_static( `XCO_CP_ABAP_SQL=>CONSTRAINT` )
                                               name = `EQUAL`
                                               arg  = lv_user_c ).
-          INSERT xco_call_obj( obj  = lo_tr_filter
+          INSERT dyn_call_obj( obj  = lo_tr_filter
                                name = `OWNER`
                                arg  = lo_constraint ) INTO TABLE lt_filter.
-          INSERT xco_call_obj( obj  = lo_tr_filter
+          INSERT dyn_call_obj( obj  = lo_tr_filter
                                name = `STATUS`
-                               arg  = xco_call_obj( obj  = xco_static( `XCO_CP_TRANSPORT=>STATUS` )
+                               arg  = dyn_call_obj( obj  = dyn_static( `XCO_CP_TRANSPORT=>STATUS` )
                                                     name = `MODIFIABLE` ) ) INTO TABLE lt_filter.
 
-          DATA(lo_query) = xco_call_obj( obj  = xco_static( `XCO_CP_CTS=>TRANSPORTS` )
+          DATA(lo_query) = dyn_call_obj( obj  = dyn_static( `XCO_CP_CTS=>TRANSPORTS` )
                                          name = `WHERE`
                                          arg  = lt_filter ).
-          DATA(lr_transports) = xco_call( obj  = lo_query
+          DATA(lr_transports) = dyn_call( obj  = lo_query
                                           name = `RESOLVE`
-                                          arg  = xco_call_obj( obj  = xco_static( `XCO_CP_TRANSPORT=>RESOLUTION` )
+                                          arg  = dyn_call_obj( obj  = dyn_static( `XCO_CP_TRANSPORT=>RESOLUTION` )
                                                                name = `REQUEST` ) ).
           ASSIGN lr_transports->* TO <lt_transports>.
 
@@ -12140,9 +12156,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             lo_tr ?= <lo_tr>.
             DATA(ls_req_c) = VALUE ty_s_tr_request( owner  = lv_user_c
                                                     status = `D` ).
-            ls_req_c-trkorr = xco_text( xco_call( obj  = lo_tr
+            ls_req_c-trkorr = xco_text( dyn_call( obj  = lo_tr
                                                   name = `VALUE` ) ).
-            DATA(lr_prop) = xco_call( obj  = xco_call_obj( obj  = lo_tr
+            DATA(lr_prop) = dyn_call( obj  = dyn_call_obj( obj  = lo_tr
                                                            name = `PROPERTIES` )
                                       name = `GET` ).
             ASSIGN lr_prop->* TO <prop>.
@@ -12150,7 +12166,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             IF sy-subrc = 0.
               ls_req_c-description = <pcomp>.
             ENDIF.
-            ls_req_c-type = xco_text( xco_call( obj  = lo_tr
+            ls_req_c-type = xco_text( dyn_call( obj  = lo_tr
                                                 name = `GET_TYPE` ) ).
             IF request_type IS NOT INITIAL AND ls_req_c-type <> request_type.
               CONTINUE.
@@ -12260,7 +12276,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       FIELD-SYMBOLS <prop_d>  TYPE any.
       FIELD-SYMBOLS <pcomp_d> TYPE any.
       TRY.
-          DATA(lr_prop_d) = xco_call( obj  = xco_call_obj( obj  = xco_transport( trkorr )
+          DATA(lr_prop_d) = dyn_call( obj  = dyn_call_obj( obj  = xco_transport( trkorr )
                                                            name = `PROPERTIES` )
                                       name = `GET` ).
           ASSIGN lr_prop_d->* TO <prop_d>.
@@ -12300,9 +12316,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       " XCO_CP_TRANSPORT=>STATUS->RELEASED. A failure raises - it read as
       " "not released"
       TRY.
-          DATA(lo_status_r) = xco_call_obj( obj  = xco_transport( trkorr )
+          DATA(lo_status_r) = dyn_call_obj( obj  = xco_transport( trkorr )
                                             name = `GET_STATUS` ).
-          DATA(lo_released) = xco_call_obj( obj  = xco_static( `XCO_CP_TRANSPORT=>STATUS` )
+          DATA(lo_released) = dyn_call_obj( obj  = dyn_static( `XCO_CP_TRANSPORT=>STATUS` )
                                             name = `RELEASED` ).
           result = xsdbool( lo_status_r = lo_released ).
           IF result = abap_false.
@@ -12670,7 +12686,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD xco_call.
+  METHOD dyn_call.
 
     DATA lo_class  TYPE REF TO cl_abap_objectdescr.
     DATA lo_owner  TYPE REF TO cl_abap_objectdescr.
@@ -12689,7 +12705,12 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     FIELD-SYMBOLS <line>      TYPE any.
 
     DATA(lv_name) = to_upper( name ).
-    lo_class ?= cl_abap_typedescr=>describe_by_object_ref( obj ).
+    DATA(lv_class_name) = to_upper( CONV string( class_name ) ).
+    IF obj IS BOUND.
+      lo_class ?= cl_abap_typedescr=>describe_by_object_ref( obj ).
+    ELSE.
+      lo_class ?= cl_abap_typedescr=>describe_by_name( lv_class_name ).
+    ENDIF.
     lo_owner = lo_class.
 
     ASSIGN lo_class->methods[ name = lv_name ] TO <ls_method>.
@@ -12708,8 +12729,13 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     IF lv_member IS INITIAL.
       " no method - an attribute (XCO: `transport->objects->all`)
-      ASSIGN obj->(lv_name) TO <attr>.
-      IF sy-subrc <> 0.
+      IF obj IS BOUND.
+        ASSIGN obj->(lv_name) TO <attr>.
+      ELSE.
+        DATA(lv_static) = |{ lv_class_name }=>{ lv_name }|.
+        ASSIGN (lv_static) TO <attr>.
+      ENDIF.
+      IF sy-subrc <> 0 AND obj IS BOUND.
         LOOP AT lo_class->interfaces INTO ls_intf.
           DATA(lv_attr) = |{ ls_intf-name }~{ lv_name }|.
           ASSIGN obj->(lv_attr) TO <attr>.
@@ -12727,7 +12753,12 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       RETURN.
     ENDIF.
 
+    lt_param = t_param.
     LOOP AT <ls_method>-parameters ASSIGNING <ls_param>.
+
+      IF line_exists( lt_param[ name = <ls_param>-name ] ).
+        CONTINUE.
+      ENDIF.
 
       IF <ls_param>-parm_kind = cl_abap_objectdescr=>returning.
         lo_type = lo_owner->get_method_parameter_type( p_method_name    = <ls_method>-name
@@ -12775,22 +12806,31 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     ENDLOOP.
 
-    CALL METHOD obj->(lv_member)
-      PARAMETER-TABLE lt_param.
+    IF obj IS BOUND.
+      CALL METHOD obj->(lv_member)
+        PARAMETER-TABLE lt_param.
+    ELSE.
+      CALL METHOD (lv_class_name)=>(lv_member)
+        PARAMETER-TABLE lt_param.
+    ENDIF.
 
   ENDMETHOD.
 
-  METHOD xco_call_obj.
+  METHOD dyn_call_obj.
 
     FIELD-SYMBOLS <obj> TYPE any.
 
     IF arg IS SUPPLIED.
-      DATA(lr_value) = xco_call( obj  = obj
-                                 name = name
-                                 arg  = arg ).
+      DATA(lr_value) = dyn_call( obj        = obj
+                                 class_name = class_name
+                                 name       = name
+                                 arg        = arg
+                                 t_param    = t_param ).
     ELSE.
-      lr_value = xco_call( obj  = obj
-                           name = name ).
+      lr_value = dyn_call( obj        = obj
+                           class_name = class_name
+                           name       = name
+                           t_param    = t_param ).
     ENDIF.
     IF lr_value IS NOT BOUND.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -12802,7 +12842,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD xco_static.
+  METHOD dyn_static.
 
     FIELD-SYMBOLS <obj> TYPE any.
 
@@ -12821,7 +12861,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA lv_trkorr TYPE c LENGTH 20.
 
     lv_trkorr = trkorr.
-    result = xco_call_obj( obj  = xco_static( `XCO_CP_CTS=>TRANSPORT` )
+    result = dyn_call_obj( obj  = dyn_static( `XCO_CP_CTS=>TRANSPORT` )
                            name = `FOR`
                            arg  = lv_trkorr ).
 
@@ -12847,10 +12887,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       RETURN.
     ENDIF.
     TRY.
-        result = xco_text( xco_call( obj  = lo_obj
+        result = xco_text( dyn_call( obj  = lo_obj
                                      name = `VALUE` ) ).
       CATCH zabaputil_cx_util_error.
-        result = xco_text( xco_call( obj  = lo_obj
+        result = xco_text( dyn_call( obj  = lo_obj
                                      name = `NAME` ) ).
     ENDTRY.
 
@@ -13592,47 +13632,68 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD mail_send.
 
+    DATA(lv_content_type) = COND string( WHEN html = abap_true THEN `text/html` ELSE `text/plain` ).
+
     IF check_abap_cloud( ).
-      " Cloud: use CL_BCS_MAIL_MESSAGE (released cloud mail API)
-      DATA lo_mail_c TYPE REF TO object.
-      DATA lv_cls_c  TYPE string.
+      " Cloud: CL_BCS_MAIL_MESSAGE - the body is a CL_BCS_MAIL_TEXTPART, and
+      " SEND reports per recipient in ET_STATUS (it has no RETURNING value)
+      DATA lo_mail_c   TYPE REF TO object.
+      DATA lr_status_c TYPE REF TO data.
+      FIELD-SYMBOLS <lt_status_c> TYPE ANY TABLE.
+      FIELD-SYMBOLS <ls_status_c> TYPE any.
+      FIELD-SYMBOLS <lv_status_c> TYPE any.
 
       TRY.
-          lv_cls_c = `CL_BCS_MAIL_MESSAGE`.
-          CALL METHOD (lv_cls_c)=>(`CREATE_INSTANCE`)
-            RECEIVING
-              result = lo_mail_c.
+          lo_mail_c = dyn_call_obj( class_name = `CL_BCS_MAIL_MESSAGE`
+                                    name       = `CREATE_INSTANCE` ).
 
-          CALL METHOD lo_mail_c->(`SET_SENDER`)
-            EXPORTING
-              iv_address = context_get_user_tech( ) && `@placeholder.local`.
-
-          CALL METHOD lo_mail_c->(`ADD_RECIPIENT`)
-            EXPORTING
-              iv_address = to.
-
-          CALL METHOD lo_mail_c->(`SET_SUBJECT`)
-            EXPORTING
-              iv_subject = subject.
-
-          IF html = abap_true.
-            CALL METHOD lo_mail_c->(`SET_MAIN`)
-              EXPORTING
-                iv_content_type = `text/html`
-                iv_content_text = body.
-          ELSE.
-            CALL METHOD lo_mail_c->(`SET_MAIN`)
-              EXPORTING
-                iv_content_type = `text/plain`
-                iv_content_text = body.
+          " without a sender the mail configuration sets it - a made-up
+          " address was rejected
+          IF sender IS NOT INITIAL.
+            dyn_call( obj  = lo_mail_c
+                      name = `SET_SENDER`
+                      arg  = sender ).
           ENDIF.
+          dyn_call( obj  = lo_mail_c
+                    name = `ADD_RECIPIENT`
+                    arg  = to ).
+          dyn_call( obj  = lo_mail_c
+                    name = `SET_SUBJECT`
+                    arg  = subject ).
 
+          DATA(lo_part_c) = dyn_call_obj(
+                                class_name = `CL_BCS_MAIL_TEXTPART`
+                                name       = `CREATE_INSTANCE`
+                                arg        = body
+                                t_param    = VALUE #( ( name  = `IV_CONTENT_TYPE`
+                                                        kind  = cl_abap_objectdescr=>exporting
+                                                        value = REF #( lv_content_type ) ) ) ).
+          dyn_call( obj  = lo_mail_c
+                    name = `SET_MAIN`
+                    arg  = lo_part_c ).
+
+          DATA(lo_descr_c) = CAST cl_abap_objectdescr( cl_abap_typedescr=>describe_by_object_ref( lo_mail_c ) ).
+          DATA(lo_status_type_c) = lo_descr_c->get_method_parameter_type( p_method_name    = `SEND`
+                                                                         p_parameter_name = `ET_STATUS` ).
+          CREATE DATA lr_status_c TYPE HANDLE lo_status_type_c.
+          ASSIGN lr_status_c->* TO <lt_status_c>.
           CALL METHOD lo_mail_c->(`SEND`)
-            RECEIVING
-              result = result.
+            IMPORTING
+              et_status = <lt_status_c>.
 
-        CATCH cx_root.
-          result = abap_false.
+          " sent unless a recipient came back with an error
+          result = abap_true.
+          LOOP AT <lt_status_c> ASSIGNING <ls_status_c>.
+            ASSIGN COMPONENT `STATUS` OF STRUCTURE <ls_status_c> TO <lv_status_c>.
+            IF sy-subrc = 0 AND <lv_status_c> = `E`.
+              result = abap_false.
+            ENDIF.
+          ENDLOOP.
+
+        CATCH cx_root INTO DATA(lx_mail_c).
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = lx_mail_c.
       ENDTRY.
       RETURN.
     ENDIF.
@@ -13653,7 +13714,6 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     FIELD-SYMBOLS <field> TYPE any.
 
     lv_subject = subject.
-    lv_address = to.
     lv_type    = COND #( WHEN html = abap_true THEN `HTM` ELSE `RAW` ).
 
     TRY.
@@ -13664,17 +13724,28 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             result = lo_mail.
 
         " Sender
-        lv_class = `CL_SAPUSER_BCS`.
-        CALL METHOD (lv_class)=>(`CREATE`)
-          EXPORTING
-            i_user = sy-uname
-          RECEIVING
-            result = lo_sender.
+        IF sender IS INITIAL.
+          lv_class = `CL_SAPUSER_BCS`.
+          CALL METHOD (lv_class)=>(`CREATE`)
+            EXPORTING
+              i_user = sy-uname
+            RECEIVING
+              result = lo_sender.
+        ELSE.
+          lv_address = sender.
+          lv_class = `CL_CAM_ADDRESS_BCS`.
+          CALL METHOD (lv_class)=>(`CREATE_INTERNET_ADDRESS`)
+            EXPORTING
+              i_address_string = lv_address
+            RECEIVING
+              result           = lo_sender.
+        ENDIF.
         CALL METHOD lo_mail->(`SET_SENDER`)
           EXPORTING
             i_sender = lo_sender.
 
         " Recipient
+        lv_address = to.
         lv_class = `CL_CAM_ADDRESS_BCS`.
         CALL METHOD (lv_class)=>(`CREATE_INTERNET_ADDRESS`)
           EXPORTING
@@ -13685,17 +13756,31 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           EXPORTING
             i_recipient = lo_recipient.
 
-        " Build body text table
+        " the body as SOLI lines (CHAR255). HTML is one text: cut into
+        " pieces of 255 with its line breaks kept as characters - one line
+        " per row cut every longer line, and an HTML body is mostly one
+        " line. Plain text keeps one row per line, a longer line goes on in
+        " the next row instead of being cut off
         CREATE DATA lr_body TYPE (`BCSY_TEXT`).
         ASSIGN lr_body->* TO <body>.
         CREATE DATA lr_line TYPE (`SOLI`).
         ASSIGN lr_line->* TO <line>.
+        ASSIGN COMPONENT `LINE` OF STRUCTURE <line> TO <field>.
 
-        DATA(lt_lines) = c_split( val = body sep = cv_char_util_newline ).
+        DATA(lt_lines) = COND string_table( WHEN html = abap_true
+                                            THEN VALUE #( ( body ) )
+                                            ELSE c_split( val = body
+                                                          sep = cv_char_util_newline ) ).
         LOOP AT lt_lines INTO DATA(lv_body_line).
-          ASSIGN COMPONENT `LINE` OF STRUCTURE <line> TO <field>.
-          <field> = lv_body_line.
-          INSERT <line> INTO TABLE <body>.
+          DO.
+            <field> = lv_body_line.
+            INSERT <line> INTO TABLE <body>.
+            IF strlen( lv_body_line ) <= 255.
+              EXIT.
+            ENDIF.
+            lv_body_line = substring( val = lv_body_line
+                                      off = 255 ).
+          ENDDO.
         ENDLOOP.
 
         " Create document
@@ -13711,6 +13796,18 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CALL METHOD lo_mail->(`SET_DOCUMENT`)
           EXPORTING
             i_document = lo_doc.
+
+        " the document subject is CHAR50 - a longer one goes on the mail
+        " itself, where the release has the method
+        IF strlen( subject ) > 50.
+          TRY.
+              CALL METHOD lo_mail->(`SET_MESSAGE_SUBJECT`)
+                EXPORTING
+                  ip_subject = subject.
+            CATCH cx_sy_dyn_call_error ##NO_HANDLER.
+          ENDTRY.
+        ENDIF.
+
         CALL METHOD lo_mail->(`SET_SEND_IMMEDIATELY`)
           EXPORTING
             i_send_immediately = abap_true.
@@ -13718,10 +13815,14 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CALL METHOD lo_mail->(`SEND`)
           RECEIVING
             result = result.
-        COMMIT WORK AND WAIT.
+        IF with_commit = abap_true.
+          COMMIT WORK AND WAIT.
+        ENDIF.
 
-      CATCH cx_root.
-        result = abap_false.
+      CATCH cx_root INTO DATA(lx_mail).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = lx_mail.
     ENDTRY.
 
   ENDMETHOD.
