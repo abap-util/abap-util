@@ -4802,9 +4802,22 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
       DATA(lv_name) = csv_get_column_name( val   = lr_col->*
                                            index = lv_tabix ).
-      " a name the header carries twice
+      " a name the header carries twice - and the fallback name may be
+      " taken too (`A;COL3;A`), which made the structure creation below
+      " raise CX_SY_STRUCT_COMP_NAME out of the method
       IF line_exists( lt_names[ table_line = lv_name ] ).
         lv_name = |COL{ lv_tabix }|.
+        " DO with an EXIT, not WHILE line_exists( ): the 7.02 downport
+        " evaluates a WHILE condition with a table expression once, in
+        " front of the loop, and the loop never ended
+        DATA(lv_suffix) = 1.
+        DO.
+          IF NOT line_exists( lt_names[ table_line = lv_name ] ).
+            EXIT.
+          ENDIF.
+          lv_suffix = lv_suffix + 1.
+          lv_name = |COL{ lv_tabix }_{ lv_suffix }|.
+        ENDDO.
       ENDIF.
       INSERT lv_name INTO TABLE lt_names.
 

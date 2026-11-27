@@ -6966,6 +6966,7 @@ CLASS ltcl_fixes DEFINITION FINAL
     METHODS csv_reads_quoted_cells   FOR TESTING.
     METHODS csv_empty_input          FOR TESTING.
     METHODS csv_byte_order_mark      FOR TESTING.
+    METHODS csv_fallback_name_taken  FOR TESTING.
     METHODS sql_like_escape          FOR TESTING.
     METHODS sql_like_cp_escape       FOR TESTING.
     METHODS sql_lowercase_keywords   FOR TESTING.
@@ -7199,6 +7200,18 @@ CLASS ltcl_fixes IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
       exp = `[{"c_2nd":"p;q","first_name":"x"},{"c_2nd":"z","first_name":"y"}]`
       act = zabaputil_cl_util_context=>json_stringify( <lt_back> ) ).
+  ENDMETHOD.
+
+  METHOD csv_fallback_name_taken.
+    " the name a repeated column falls back to is in the header already
+    FIELD-SYMBOLS <back> TYPE STANDARD TABLE.
+    DATA(lr_back) = zabaputil_cl_util_context=>itab_get_itab_by_csv( |A;COL3;A\nx;y;z| ).
+    ASSIGN lr_back->* TO <back>.
+    ASSIGN <back>[ 1 ] TO FIELD-SYMBOL(<row>).
+    ASSIGN COMPONENT `COL3_2` OF STRUCTURE <row> TO FIELD-SYMBOL(<field>).
+    cl_abap_unit_assert=>assert_subrc( exp = 0 ).
+    cl_abap_unit_assert=>assert_equals( exp = `z`
+                                        act = <field> ).
   ENDMETHOD.
 
   METHOD csv_byte_order_mark.
