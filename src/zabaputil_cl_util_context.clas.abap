@@ -2851,10 +2851,17 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result)   TYPE ty_s_job.
 
+    "! The next number of a number range object. subobject: the number
+    "! range INTERVAL (NR_RANGE_NR) - the name is kept for the callers that
+    "! pass it. nr_subobject and toyear: the subobject and the year of an
+    "! object that depends on them (a company code, a fiscal year), passed
+    "! on as SUBOBJECT and TOYEAR.
     CLASS-METHODS numrange_get_next
       IMPORTING
         object        TYPE clike
         subobject     TYPE clike DEFAULT `01`
+        nr_subobject  TYPE clike OPTIONAL
+        toyear        TYPE clike OPTIONAL
       RETURNING
         VALUE(result) TYPE string.
 
@@ -14013,33 +14020,57 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     DATA lv_object  TYPE c LENGTH 10.
     DATA lv_nr_sub  TYPE c LENGTH 2.
+    DATA lv_sub     TYPE c LENGTH 6.
+    DATA lv_toyear  TYPE n LENGTH 4.
     DATA lv_number  TYPE c LENGTH 20.
 
     lv_object = object.
     lv_nr_sub = subobject.
+    lv_sub    = nr_subobject.
+    lv_toyear = toyear.
 
     TRY.
         IF check_abap_cloud( ).
           " Cloud: use CL_NUMBERRANGE_RUNTIME
           DATA(lv_cls) = `CL_NUMBERRANGE_RUNTIME`.
+          DATA(lt_param_c) = VALUE abap_parmbind_tab(
+              ( name = `NR_RANGE_NR` kind = cl_abap_objectdescr=>exporting value = REF #( lv_nr_sub ) )
+              ( name = `OBJECT`      kind = cl_abap_objectdescr=>exporting value = REF #( lv_object ) )
+              ( name = `NUMBER`      kind = cl_abap_objectdescr=>importing value = REF #( lv_number ) ) ).
+          IF lv_sub IS NOT INITIAL.
+            INSERT VALUE #( name  = `SUBOBJECT`
+                            kind  = cl_abap_objectdescr=>exporting
+                            value = REF #( lv_sub ) ) INTO TABLE lt_param_c.
+          ENDIF.
+          IF lv_toyear IS NOT INITIAL.
+            INSERT VALUE #( name  = `TOYEAR`
+                            kind  = cl_abap_objectdescr=>exporting
+                            value = REF #( lv_toyear ) ) INTO TABLE lt_param_c.
+          ENDIF.
           CALL METHOD (lv_cls)=>(`NUMBER_GET`)
-            EXPORTING
-              nr_range_nr = lv_nr_sub
-              object      = lv_object
-            IMPORTING
-              number      = lv_number.
+            PARAMETER-TABLE lt_param_c.
         ELSE.
           " Standard: use NUMBER_GET_NEXT FM
           DATA(lv_fm) = `NUMBER_GET_NEXT`.
+          DATA(lt_param) = VALUE abap_func_parmbind_tab(
+              ( name = `NR_RANGE_NR` kind = abap_func_exporting value = REF #( lv_nr_sub ) )
+              ( name = `OBJECT`      kind = abap_func_exporting value = REF #( lv_object ) )
+              ( name = `NUMBER`      kind = abap_func_importing value = REF #( lv_number ) ) ).
+          IF lv_sub IS NOT INITIAL.
+            INSERT VALUE #( name  = `SUBOBJECT`
+                            kind  = abap_func_exporting
+                            value = REF #( lv_sub ) ) INTO TABLE lt_param.
+          ENDIF.
+          IF lv_toyear IS NOT INITIAL.
+            INSERT VALUE #( name  = `TOYEAR`
+                            kind  = abap_func_exporting
+                            value = REF #( lv_toyear ) ) INTO TABLE lt_param.
+          ENDIF.
+          DATA(lt_exception) = VALUE abap_func_excpbind_tab( ( name = `ERROR_MESSAGE` value = 2 )
+                                                             ( name = `OTHERS`        value = 1 ) ).
           CALL FUNCTION lv_fm
-            EXPORTING
-              nr_range_nr = lv_nr_sub
-              object      = lv_object
-            IMPORTING
-              number      = lv_number
-            EXCEPTIONS
-              error_message = 1
-              OTHERS        = 1.
+            PARAMETER-TABLE lt_param
+            EXCEPTION-TABLE lt_exception.
           IF sy-subrc <> 0.
             RAISE EXCEPTION TYPE zabaputil_cx_util_error
               EXPORTING
