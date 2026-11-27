@@ -1222,6 +1222,83 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE abap_bool.
 
+    " ========== Barcodes (own formats) ==========
+
+    TYPES:
+      "! one field of a barcode format that is not GS1 - a label of one's own
+      "! or of a supplier. Which components count depends on the method:
+      "! barcode_split_separator reads the fields in their order,
+      "! barcode_split_position by pos and len, barcode_split_prefix by prefix
+      BEGIN OF ty_s_barcode_field,
+        "! name of the field in the result
+        name     TYPE string,
+        "! what the field starts with (barcode_split_prefix)
+        prefix   TYPE string,
+        "! first character of the field, counted from 1 (barcode_split_position)
+        pos      TYPE i,
+        "! number of characters. barcode_split_position: 0 = to the end;
+        "! the other two: the most the field may hold, 0 = any number
+        len      TYPE i,
+        "! the field may be missing or empty
+        optional TYPE abap_bool,
+      END OF ty_s_barcode_field.
+    TYPES ty_t_barcode_field TYPE STANDARD TABLE OF ty_s_barcode_field WITH EMPTY KEY.
+
+    TYPES:
+      "! one field of a split barcode
+      BEGIN OF ty_s_barcode_value,
+        name  TYPE string,
+        value TYPE string,
+      END OF ty_s_barcode_value.
+    TYPES ty_t_barcode_value TYPE STANDARD TABLE OF ty_s_barcode_value WITH EMPTY KEY.
+
+    "! Splits a barcode whose fields follow each other with a separator
+    "! between them: `4711|LOT42|12` with the fields material, batch and
+    "! quantity. The n-th part is the n-th field. A trailing CR/LF of a
+    "! scanner in keyboard mode is dropped.
+    "! Raises zabaputil_cx_util_error for more parts than fields, a missing
+    "! field that is not optional and a value longer than len.
+    "! @parameter result | one row per field of t_field that has a value
+    CLASS-METHODS barcode_split_separator
+      IMPORTING
+        val           TYPE clike
+        separator     TYPE clike
+        t_field       TYPE ty_t_barcode_field
+      RETURNING
+        VALUE(result) TYPE ty_t_barcode_value.
+
+    "! Splits a barcode of fixed layout: every field has its place, given by
+    "! pos (from 1) and len (0 = to the end). Blanks around a value - the
+    "! padding of a fixed layout - are dropped.
+    "! Raises zabaputil_cx_util_error for a field without pos and for a field
+    "! that is not optional and lies beyond the end of the barcode or is
+    "! empty.
+    "! @parameter result | one row per field of t_field that has a value
+    CLASS-METHODS barcode_split_position
+      IMPORTING
+        val           TYPE clike
+        t_field       TYPE ty_t_barcode_field
+      RETURNING
+        VALUE(result) TYPE ty_t_barcode_value.
+
+    "! Splits a barcode whose fields say what they are by a prefix: `P4711`
+    "! is a material, `Q12` a quantity. One scan may hold one field or
+    "! several with a separator between them - the group separator GS
+    "! (ASCII 29) unless another one is named. The longest matching prefix
+    "! wins, so `1T` is not read as `1`.
+    "! Raises zabaputil_cx_util_error for a part that starts with no known
+    "! prefix, a field that comes twice, a missing field that is not
+    "! optional and a value longer than len.
+    "! @parameter separator | separator a scanner sends instead of GS
+    "! @parameter result    | one row per field found, in the order of t_field
+    CLASS-METHODS barcode_split_prefix
+      IMPORTING
+        val           TYPE clike
+        t_field       TYPE ty_t_barcode_field
+        separator     TYPE clike OPTIONAL
+      RETURNING
+        VALUE(result) TYPE ty_t_barcode_value.
+
     " ========== Binary tables ==========
 
     "! The bytes of a binary table (SOLIX, BAPICONTEN, W3MIME, TLINE holding
@@ -3589,6 +3666,24 @@ CLASS zabaputil_cl_util_context DEFINITION
         value         TYPE any OPTIONAL
       RETURNING
         VALUE(result) TYPE REF TO data.
+
+    " barcode_split_*: the scan as a string without the CR/LF a scanner in
+    " keyboard mode ends it with
+    CLASS-METHODS barcode_split_get_scan
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    " barcode_split_*: raises for a value that is missing though the field is
+    " not optional or that is longer than the field allows; adds the others
+    CLASS-METHODS barcode_split_add_value
+      IMPORTING
+        field  TYPE ty_s_barcode_field
+        value  TYPE string
+        found  TYPE abap_bool
+      CHANGING
+        result TYPE ty_t_barcode_value.
 
     CLASS-METHODS barcode_gs1_get_rules
       RETURNING
@@ -15697,6 +15792,177 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         result = ls_gs1-value.
         RETURN.
       ENDIF.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD barcode_split_get_scan.
+
+    result = replace( val  = CONV string( val )
+                      sub  = cv_char_util_cr_lf
+                      with = ``
+                      occ  = 0 ).
+    result = replace( val  = result
+                      sub  = cv_char_util_newline
+                      with = ``
+                      occ  = 0 ).
+
+  ENDMETHOD.
+
+  METHOD barcode_split_add_value.
+
+    IF found = abap_false OR value IS INITIAL.
+      IF field-optional = abap_false.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |Barcode: field { field-name } is missing|.
+      ENDIF.
+      RETURN.
+    ENDIF.
+
+    IF field-len > 0 AND strlen( value ) > field-len.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |Barcode: field { field-name } allows at most { field-len } characters, got { strlen( value ) }|.
+    ENDIF.
+
+    INSERT VALUE #( name  = field-name
+                    value = value ) INTO TABLE result.
+
+  ENDMETHOD.
+
+  METHOD barcode_split_separator.
+
+    DATA lv_value TYPE string.
+
+    DATA(lv_sep) = CONV string( separator ).
+    IF lv_sep IS INITIAL.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = `Barcode: no separator given`.
+    ENDIF.
+
+    DATA(lt_part) = c_split( val = barcode_split_get_scan( val )
+                             sep = lv_sep ).
+    IF lines( lt_part ) > lines( t_field ).
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |Barcode: { lines( lt_part ) } parts, but only { lines( t_field ) } fields|.
+    ENDIF.
+
+    LOOP AT t_field INTO DATA(ls_field).
+      DATA(lv_tabix) = sy-tabix.
+      CLEAR lv_value.
+      DATA(lv_found) = abap_false.
+      IF lv_tabix <= lines( lt_part ).
+        lv_value = lt_part[ lv_tabix ].
+        lv_found = abap_true.
+      ENDIF.
+      barcode_split_add_value( EXPORTING field  = ls_field
+                                         value  = lv_value
+                                         found  = lv_found
+                               CHANGING  result = result ).
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD barcode_split_position.
+
+    DATA lv_value TYPE string.
+
+    DATA(lv_val) = barcode_split_get_scan( val ).
+    DATA(lv_len) = strlen( lv_val ).
+
+    LOOP AT t_field INTO DATA(ls_field).
+      IF ls_field-pos < 1 OR ls_field-len < 0.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |Barcode: field { ls_field-name } needs a position from 1 on|.
+      ENDIF.
+
+      CLEAR lv_value.
+      DATA(lv_found) = abap_false.
+      DATA(lv_off) = ls_field-pos - 1.
+      IF lv_off < lv_len.
+        lv_found = abap_true.
+        DATA(lv_take) = lv_len - lv_off.
+        IF ls_field-len > 0 AND ls_field-len < lv_take.
+          lv_take = ls_field-len.
+        ENDIF.
+        " the padding of a fixed layout is no part of the value
+        lv_value = c_trim( substring( val = lv_val
+                                      off = lv_off
+                                      len = lv_take ) ).
+      ENDIF.
+
+      " len is where the field ends here, not a limit to check a value against
+      DATA(ls_check) = ls_field.
+      ls_check-len = 0.
+      barcode_split_add_value( EXPORTING field  = ls_check
+                                         value  = lv_value
+                                         found  = lv_found
+                               CHANGING  result = result ).
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD barcode_split_prefix.
+
+    DATA lt_found TYPE ty_t_barcode_value.
+
+    DATA(lv_sep) = CONV string( separator ).
+    IF lv_sep IS INITIAL.
+      lv_sep = conv_get_string_by_xstring( CONV xstring( `1D` ) ).
+    ENDIF.
+
+    LOOP AT c_split( val = barcode_split_get_scan( val )
+                     sep = lv_sep ) INTO DATA(lv_part).
+      IF lv_part IS INITIAL.
+        CONTINUE.
+      ENDIF.
+
+      " the longest prefix that fits: `1T` must not be read as `1`
+      DATA(ls_hit) = VALUE ty_s_barcode_field( ).
+      DATA(lv_hit) = abap_false.
+      LOOP AT t_field INTO DATA(ls_field) WHERE prefix IS NOT INITIAL.
+        DATA(lv_plen) = strlen( ls_field-prefix ).
+        IF strlen( lv_part ) < lv_plen OR substring( val = lv_part
+                                                     len = lv_plen ) <> ls_field-prefix.
+          CONTINUE.
+        ENDIF.
+        IF lv_hit = abap_false OR lv_plen > strlen( ls_hit-prefix ).
+          ls_hit = ls_field.
+          lv_hit = abap_true.
+        ENDIF.
+      ENDLOOP.
+      IF lv_hit = abap_false.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |Barcode: no field starts like { c_truncate( val = lv_part
+                                                               max = 20 ) }|.
+      ENDIF.
+
+      IF line_exists( lt_found[ name = ls_hit-name ] ).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |Barcode: field { ls_hit-name } comes twice|.
+      ENDIF.
+      INSERT VALUE #( name  = ls_hit-name
+                      value = substring( val = lv_part
+                                         off = strlen( ls_hit-prefix ) ) ) INTO TABLE lt_found.
+    ENDLOOP.
+
+    LOOP AT t_field INTO ls_field WHERE prefix IS NOT INITIAL.
+      DATA(lv_value) = ``.
+      DATA(lv_found) = abap_false.
+      IF line_exists( lt_found[ name = ls_field-name ] ).
+        lv_value = lt_found[ name = ls_field-name ]-value.
+        lv_found = abap_true.
+      ENDIF.
+      barcode_split_add_value( EXPORTING field  = ls_field
+                                         value  = lv_value
+                                         found  = lv_found
+                               CHANGING  result = result ).
     ENDLOOP.
 
   ENDMETHOD.
