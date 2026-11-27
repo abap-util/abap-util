@@ -7775,10 +7775,14 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       <key>-idx = lv_tabix.
     ENDLOOP.
 
+    " the row index as the last key, in both directions: rows with equal
+    " keys keep their order (a stable sort) - without it they came back in
+    " any order, jumped on every re-sort and a sort by a second column did
+    " not keep the order of the first
     IF descending = abap_true.
-      SORT lt_key BY key_num DESCENDING key_str DESCENDING.
+      SORT lt_key BY key_num DESCENDING key_str DESCENDING idx ASCENDING.
     ELSE.
-      SORT lt_key BY key_num ASCENDING key_str ASCENDING.
+      SORT lt_key BY key_num ASCENDING key_str ASCENDING idx ASCENDING.
     ENDIF.
 
     DATA lr_copy TYPE REF TO data.

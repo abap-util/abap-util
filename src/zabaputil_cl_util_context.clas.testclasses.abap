@@ -1501,6 +1501,7 @@ CLASS ltcl_itab_ops DEFINITION FINAL
 
     METHODS sort_by_ascending              FOR TESTING.
     METHODS sort_by_descending             FOR TESTING.
+    METHODS sort_by_stable                 FOR TESTING.
 
     METHODS slice_basic                    FOR TESTING.
     METHODS slice_from_only                FOR TESTING.
@@ -1540,6 +1541,26 @@ CLASS ltcl_itab_ops IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( exp = `A` act = lt_tab[ 1 ]-name ).
     cl_abap_unit_assert=>assert_equals( exp = `B` act = lt_tab[ 2 ]-name ).
     cl_abap_unit_assert=>assert_equals( exp = `C` act = lt_tab[ 3 ]-name ).
+  ENDMETHOD.
+
+  METHOD sort_by_stable.
+    " rows with the same key keep their order, in both directions
+    TYPES: BEGIN OF ty, name TYPE string, value TYPE i, END OF ty.
+    DATA lt_tab TYPE STANDARD TABLE OF ty WITH EMPTY KEY.
+    lt_tab = VALUE #( ( name = `b1` value = 2 ) ( name = `a1` value = 1 ) ( name = `b2` value = 2 )
+                      ( name = `a2` value = 1 ) ( name = `b3` value = 2 ) ).
+
+    zabaputil_cl_util_context=>itab_sort_by( EXPORTING fieldname = `VALUE` CHANGING tab = lt_tab ).
+    cl_abap_unit_assert=>assert_equals( exp = `a1 a2 b1 b2 b3`
+                                        act = concat_lines_of( table = VALUE string_table( FOR r IN lt_tab ( r-name ) )
+                                                               sep   = ` ` ) ).
+
+    zabaputil_cl_util_context=>itab_sort_by( EXPORTING fieldname  = `VALUE`
+                                                       descending = abap_true
+                                             CHANGING  tab        = lt_tab ).
+    cl_abap_unit_assert=>assert_equals( exp = `b1 b2 b3 a1 a2`
+                                        act = concat_lines_of( table = VALUE string_table( FOR r IN lt_tab ( r-name ) )
+                                                               sep   = ` ` ) ).
   ENDMETHOD.
 
   METHOD sort_by_descending.
