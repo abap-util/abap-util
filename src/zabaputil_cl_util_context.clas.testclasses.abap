@@ -2853,7 +2853,7 @@ CLASS ltcl_rtti_ext IMPLEMENTATION.
     IF check_dfies_available( ) = abap_false.
       RETURN.
     ENDIF.
-    DATA(lt_result) = zabaputil_cl_util_context=>rtti_get_t_dfies_by_table_name( `Z2UI5_T_01` ).
+    DATA(lt_result) = zabaputil_cl_util_context=>rtti_get_t_dfies_by_table_name( `ZABAPUTIL_T_91` ).
     cl_abap_unit_assert=>assert_not_initial( lt_result ).
   ENDMETHOD.
 
@@ -2861,7 +2861,7 @@ CLASS ltcl_rtti_ext IMPLEMENTATION.
     IF check_dfies_available( ) = abap_false.
       RETURN.
     ENDIF.
-    DATA(lt_result) = zabaputil_cl_util_context=>rtti_get_t_dfies_by_table_name( `Z2UI5_T_01` ).
+    DATA(lt_result) = zabaputil_cl_util_context=>rtti_get_t_dfies_by_table_name( `ZABAPUTIL_T_91` ).
     DATA(lv_found) = abap_false.
     LOOP AT lt_result INTO DATA(ls_dfies).
       IF ls_dfies-fieldname = `ID`.
@@ -2957,7 +2957,7 @@ CLASS ltcl_rtti_ext IMPLEMENTATION.
     IF check_dfies_available( ) = abap_false.
       RETURN.
     ENDIF.
-    DATA(lv_result) = zabaputil_cl_util_context=>rtti_get_table_desrc( `Z2UI5_T_01` ).
+    DATA(lv_result) = zabaputil_cl_util_context=>rtti_get_table_desrc( `ZABAPUTIL_T_91` ).
     cl_abap_unit_assert=>assert_not_initial( lv_result ).
   ENDMETHOD.
 
@@ -4258,11 +4258,11 @@ CLASS ltcl_data_box IMPLEMENTATION.
   METHOD exception_renders_its_text.
     " an exception carries its own text, and that text is the whole story -
     " its attributes are the placeholders already substituted into it
-    DATA(lx) = NEW zabaputil_cx_error( val = `the_failure` ).
+    DATA(lx) = NEW zabaputil_cx_util_error( val = `the_failure` ).
 
     DATA(ls_box) = zabaputil_cl_util_context=>ui5_data_box_format( lx ).
     cl_abap_unit_assert=>assert_char_cp( act = ls_box-text
-                                         exp = `Object ZABAPUTIL_CX_ERROR*` ).
+                                         exp = `Object ZABAPUTIL_CX_UTIL_ERROR*` ).
     cl_abap_unit_assert=>assert_char_cp( act = ls_box-details
                                          exp = `*the_failure*` ).
     cl_abap_unit_assert=>assert_false( xsdbool( ls_box-details CS `<strong>MS_ERROR` ) ).
