@@ -2443,7 +2443,11 @@ CLASS zabaputil_cl_util_context DEFINITION
         is_transport TYPE ty_s_transport
         iv_commit    TYPE abap_bool DEFAULT abap_true.
 
+    "! iv_max_rows - at most this many rows (F4IF_SELECT_VALUES-MAXRECORDS);
+    "! 0 reads all of them, as before the parameter existed
     CLASS-METHODS bus_search_help_read
+      IMPORTING
+        iv_max_rows    TYPE i DEFAULT 0
       CHANGING
         ms_shlp        TYPE ty_shlp_descr
         mv_fname       TYPE string
@@ -9850,7 +9854,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           no_help_for_field = 2
           inconsistent_help = 3
           error_message     = 4
-          OTHERS            = 4.
+          OTHERS            = 5.
       IF sy-subrc <> 0.
         RAISE EXCEPTION TYPE zabaputil_cx_util_error
           EXPORTING
@@ -9954,6 +9958,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     CALL FUNCTION lv_fm
       EXPORTING
         shlp           = <shlp>
+        maxrecords     = iv_max_rows
         sort           = space
         call_shlp_exit = abap_true
       TABLES
