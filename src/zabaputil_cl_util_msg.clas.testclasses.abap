@@ -307,7 +307,7 @@ CLASS ltcl_unit_test_msg_mapper IMPLEMENTATION.
     DATA lo_str         TYPE REF TO cl_abap_elemdescr.
 
     TRY.
-        lo_c1  = cl_abap_elemdescr=>get_c( p_length = 1 ).
+        lo_c1  = cl_abap_elemdescr=>get_c( 1 ).
         lo_str = cl_abap_elemdescr=>get_string( ).
 
         lo_key_struct = cl_abap_structdescr=>create(
