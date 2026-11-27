@@ -865,11 +865,34 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO data.
 
+    "! The content of a data URI (data:[mime][;base64],payload) - see
+    "! conv_get_file_by_data_uri. A bare base64 payload without the
+    "! `data:...,` prefix is decoded as base64.
     CLASS-METHODS conv_get_xstring_by_data_uri
       IMPORTING
         val           TYPE clike
       RETURNING
         VALUE(result) TYPE xstring.
+
+    TYPES:
+      BEGIN OF ty_s_data_uri,
+        mime_type TYPE string,
+        content   TYPE xstring,
+      END OF ty_s_data_uri.
+
+    "! A data URI (RFC 2397, data:[mime][;charset=...][;base64],payload) as
+    "! MIME type and content: the payload base64-decoded when the header
+    "! says `;base64`, otherwise percent-decoded to its bytes (text between
+    "! the escapes as UTF-8). The MIME type is lower case; when the URI
+    "! names none, or only application/octet-stream, it is taken from
+    "! file_name (file_get_mimetype) if one is given. A bare base64 payload
+    "! without the `data:...,` prefix is decoded as base64.
+    CLASS-METHODS conv_get_file_by_data_uri
+      IMPORTING
+        val           TYPE clike
+        file_name     TYPE clike OPTIONAL
+      RETURNING
+        VALUE(result) TYPE ty_s_data_uri.
 
     CLASS-METHODS rtti_tab_get_relative_name
       IMPORTING
@@ -3094,6 +3117,15 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE string.
 
+    "! The file name of a path as a browser or an upload hands it over:
+    "! what follows the last `/` or `\` (`C:\fakepath\report.xlsx` gives
+    "! `report.xlsx`), the value itself when it has neither.
+    CLASS-METHODS file_get_name_by_path
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
     CLASS-METHODS lang_sap_to_iso
       IMPORTING
         val           TYPE clike
@@ -4251,6 +4283,14 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE string.
 
+    " the bytes of a percent-encoded text (a data URI payload): an escape is
+    " its byte, the text between escapes its UTF-8 bytes; `+` is a plus
+    CLASS-METHODS conv_get_xstring_by_percent
+      IMPORTING
+        val           TYPE string
+      RETURNING
+        VALUE(result) TYPE xstring.
+
     " a run of percent escapes of url_decode as text: the bytes as UTF-8,
     " or the escapes as they were written (raw) when they are no UTF-8
     CLASS-METHODS url_decode_bytes
@@ -4402,18 +4442,96 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD conv_get_xstring_by_data_uri.
 
-    DATA lv_metadata TYPE string ##NEEDED.
-    DATA lv_base64   TYPE string.
+    result = conv_get_file_by_data_uri( val )-content.
 
-    IF val CS `,`.
-      SPLIT val AT `,` INTO lv_metadata lv_base64.
-    ELSE.
+  ENDMETHOD.
+
+  METHOD conv_get_file_by_data_uri.
+
+    DATA lv_header TYPE string.
+    DATA lv_data   TYPE string.
+
+    DATA(lv_val) = CONV string( val ).
+    IF lv_val NS `,`.
       " a bare base64 payload, without the `data:...;base64,` prefix - the
       " SPLIT put the whole value into the metadata half and the payload
       " decoded to an empty xstring without a word
-      lv_base64 = val.
+      result-content = conv_decode_x_base64( lv_val ).
+      RETURN.
     ENDIF.
-    result = conv_decode_x_base64( lv_base64 ).
+    SPLIT lv_val AT `,` INTO lv_header lv_data.
+
+    " data:[<mime type>][;charset=...][;base64] - the payload used to be
+    " base64-decoded whatever the header said, so a percent-encoded one
+    " (`data:text/plain,a%20b`) came out as garbage
+    DATA(lv_base64) = abap_true.
+    IF strlen( lv_header ) >= 5 AND to_lower( lv_header(5) ) = `data:`.
+      lv_base64 = abap_false.
+      SPLIT substring( val = lv_header
+                       off = 5 ) AT `;` INTO TABLE DATA(lt_part).
+      LOOP AT lt_part REFERENCE INTO DATA(lr_part).
+        DATA(lv_part) = to_lower( c_trim( lr_part->* ) ).
+        IF sy-tabix = 1.
+          result-mime_type = lv_part.
+        ELSEIF lv_part = `base64`.
+          lv_base64 = abap_true.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+
+    IF lv_base64 = abap_true.
+      result-content = conv_decode_x_base64( lv_data ).
+    ELSE.
+      result-content = conv_get_xstring_by_percent( lv_data ).
+    ENDIF.
+
+    IF ( result-mime_type IS INITIAL OR result-mime_type = `application/octet-stream` )
+        AND file_name IS NOT INITIAL.
+      result-mime_type = file_get_mimetype( file_name ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD conv_get_xstring_by_percent.
+
+    " the bytes as hex digits, converted in one step at the end - a byte
+    " string has no expression that appends to it (see url_decode)
+    DATA lv_hex TYPE string.
+    DATA lv_run TYPE string.
+    DATA lv_x   TYPE x LENGTH 1.
+
+    DATA(lv_len) = strlen( val ).
+    DATA(lv_pos) = 0.
+    WHILE lv_pos < lv_len.
+      DATA(lv_char) = substring( val = val
+                                 off = lv_pos
+                                 len = 1 ).
+      DATA(lv_code) = ``.
+      IF lv_char = `%` AND lv_pos + 2 < lv_len.
+        lv_code = to_upper( substring( val = val
+                                       off = lv_pos + 1
+                                       len = 2 ) ).
+      ENDIF.
+      IF lv_code IS NOT INITIAL AND lv_code CO `0123456789ABCDEF`.
+        IF lv_run IS NOT INITIAL.
+          DATA(lv_run_x) = conv_get_xstring_by_string( lv_run ).
+          lv_hex = |{ lv_hex }{ lv_run_x }|.
+          CLEAR lv_run.
+        ENDIF.
+        lv_x = lv_code.
+        lv_hex = |{ lv_hex }{ lv_x }|.
+        lv_pos = lv_pos + 3.
+        CONTINUE.
+      ENDIF.
+      lv_run = lv_run && lv_char.
+      lv_pos = lv_pos + 1.
+    ENDWHILE.
+    IF lv_run IS NOT INITIAL.
+      lv_run_x = conv_get_xstring_by_string( lv_run ).
+      lv_hex = |{ lv_hex }{ lv_run_x }|.
+    ENDIF.
+
+    result = lv_hex.
 
   ENDMETHOD.
 
@@ -14816,6 +14934,24 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDIF.
 
     result = lv_rounded * lv_sign / lv_factor.
+
+  ENDMETHOD.
+
+  METHOD file_get_name_by_path.
+
+    " a browser hands over `C:\fakepath\name` on Windows, a path with `/`
+    " elsewhere - both separators end a folder
+    result = replace( val  = CONV string( val )
+                      sub  = `\`
+                      with = `/`
+                      occ  = 0 ).
+    DATA(lv_slash) = find( val = result
+                           sub = `/`
+                           occ = -1 ).
+    IF lv_slash >= 0.
+      result = substring( val = result
+                          off = lv_slash + 1 ).
+    ENDIF.
 
   ENDMETHOD.
 

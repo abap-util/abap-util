@@ -6997,6 +6997,10 @@ CLASS ltcl_fixes DEFINITION FINAL
     METHODS language_codes           FOR TESTING.
     METHODS json_control_chars       FOR TESTING.
     METHODS url_decode_invalid_hex   FOR TESTING.
+    METHODS data_uri_base64          FOR TESTING.
+    METHODS data_uri_percent         FOR TESTING.
+    METHODS data_uri_mime_by_name    FOR TESTING.
+    METHODS file_name_by_path        FOR TESTING.
     METHODS csv_quotes_special_cells FOR TESTING.
     METHODS csv_reads_own_output     FOR TESTING.
     METHODS csv_reads_quoted_cells   FOR TESTING.
@@ -7189,6 +7193,57 @@ CLASS ltcl_fixes IMPLEMENTATION.
                                         act = zabaputil_cl_util_context=>c_escape_json( |say "hi"\n| ) ).
     cl_abap_unit_assert=>assert_equals( exp = `plain`
                                         act = zabaputil_cl_util_context=>c_escape_json( `plain` ) ).
+  ENDMETHOD.
+
+  METHOD data_uri_base64.
+    " `;base64` in the header, or no header at all: base64
+    cl_abap_unit_assert=>assert_equals(
+        exp = CONV xstring( `414243` )
+        act = zabaputil_cl_util_context=>conv_get_xstring_by_data_uri( `data:text/plain;charset=utf-8;base64,QUJD` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = CONV xstring( `414243` )
+        act = zabaputil_cl_util_context=>conv_get_xstring_by_data_uri( `QUJD` ) ).
+    DATA(ls_file) = zabaputil_cl_util_context=>conv_get_file_by_data_uri( `data:Image/PNG;base64,QUJD` ).
+    cl_abap_unit_assert=>assert_equals( exp = `image/png`
+                                        act = ls_file-mime_type ).
+  ENDMETHOD.
+
+  METHOD data_uri_percent.
+    " no `;base64`: the payload is percent-encoded - it was base64-decoded
+    " all the same and came out as garbage. `+` stays a plus
+    cl_abap_unit_assert=>assert_equals(
+        exp = CONV xstring( `4120422B43FF` )
+        act = zabaputil_cl_util_context=>conv_get_xstring_by_data_uri( `data:text/plain,A%20B+C%ff` ) ).
+    DATA(ls_file) = zabaputil_cl_util_context=>conv_get_file_by_data_uri( `data:,x` ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV xstring( `78` )
+                                        act = ls_file-content ).
+    cl_abap_unit_assert=>assert_initial( ls_file-mime_type ).
+  ENDMETHOD.
+
+  METHOD data_uri_mime_by_name.
+    " no MIME type, or only octet-stream, in the URI: the file name decides
+    DATA(ls_file) = zabaputil_cl_util_context=>conv_get_file_by_data_uri(
+                        val       = `data:application/octet-stream;base64,QUJD`
+                        file_name = `notes.txt` ).
+    cl_abap_unit_assert=>assert_equals( exp = `text/plain`
+                                        act = ls_file-mime_type ).
+    ls_file = zabaputil_cl_util_context=>conv_get_file_by_data_uri( val       = `data:image/png;base64,QUJD`
+                                                                    file_name = `notes.txt` ).
+    cl_abap_unit_assert=>assert_equals( exp = `image/png`
+                                        act = ls_file-mime_type ).
+  ENDMETHOD.
+
+  METHOD file_name_by_path.
+    cl_abap_unit_assert=>assert_equals(
+        exp = `report.xlsx`
+        act = zabaputil_cl_util_context=>file_get_name_by_path( `C:\fakepath\report.xlsx` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = `b.txt`
+        act = zabaputil_cl_util_context=>file_get_name_by_path( `/home/a\b.txt` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = `plain.csv`
+        act = zabaputil_cl_util_context=>file_get_name_by_path( `plain.csv` ) ).
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>file_get_name_by_path( `dir/` ) ).
   ENDMETHOD.
 
   METHOD url_decode_invalid_hex.
