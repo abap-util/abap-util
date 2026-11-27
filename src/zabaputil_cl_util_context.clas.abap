@@ -9670,6 +9670,61 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
       DELETE result INDEX 1.
 
+    ELSE.
+
+      " Standard ABAP and 7.02: SYSTEM_CALLSTACK - the result was empty
+      " there, which read like a call from nowhere
+      DATA lr_stack TYPE REF TO data.
+      FIELD-SYMBOLS <lt_stack> TYPE ANY TABLE.
+      FIELD-SYMBOLS <ls_stack> TYPE any.
+      FIELD-SYMBOLS <lv_comp>  TYPE any.
+      TRY.
+          CREATE DATA lr_stack TYPE (`ABAP_CALLSTACK`).
+          ASSIGN lr_stack->* TO <lt_stack>.
+          DATA(lv_fm) = `SYSTEM_CALLSTACK`.
+          CALL FUNCTION lv_fm
+            IMPORTING
+              callstack     = <lt_stack>
+            EXCEPTIONS
+              error_message = 2
+              OTHERS        = 1.
+          IF sy-subrc <> 0.
+            RAISE EXCEPTION TYPE zabaputil_cx_util_error
+              EXPORTING
+                val = |SYSTEM_CALLSTACK failed (sy-subrc { sy-subrc })|.
+          ENDIF.
+          LOOP AT <lt_stack> ASSIGNING <ls_stack>.
+            DATA(ls_frame) = VALUE ty_s_stack( ).
+            ASSIGN COMPONENT `MAINPROGRAM` OF STRUCTURE <ls_stack> TO <lv_comp>.
+            IF sy-subrc = 0.
+              " ZCL_X=====...CP: the class of a class pool
+              SPLIT CONV string( <lv_comp> ) AT `=` INTO ls_frame-class DATA(lv_rest).
+            ENDIF.
+            ASSIGN COMPONENT `INCLUDE` OF STRUCTURE <ls_stack> TO <lv_comp>.
+            IF sy-subrc = 0.
+              ls_frame-include = <lv_comp>.
+            ENDIF.
+            ASSIGN COMPONENT `EVENT` OF STRUCTURE <ls_stack> TO <lv_comp>.
+            IF sy-subrc = 0.
+              ls_frame-method = <lv_comp>.
+            ENDIF.
+            ASSIGN COMPONENT `LINE` OF STRUCTURE <ls_stack> TO <lv_comp>.
+            IF sy-subrc = 0.
+              ls_frame-line = |{ <lv_comp> }|.
+            ENDIF.
+            INSERT ls_frame INTO TABLE result.
+          ENDLOOP.
+        CATCH zabaputil_cx_util_error INTO DATA(lx_stack).
+          RAISE EXCEPTION lx_stack.
+        CATCH cx_root INTO DATA(lx_root).
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = lx_root.
+      ENDTRY.
+
+      " this method itself, as on ABAP Cloud
+      DELETE result INDEX 1.
+
     ENDIF.
 
   ENDMETHOD.
