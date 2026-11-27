@@ -11,6 +11,7 @@ CLASS ltcl_unit_test DEFINITION FINAL
     METHODS test_chain_texts     FOR TESTING RAISING cx_static_check.
     METHODS test_raise_struct_val   FOR TESTING RAISING cx_static_check.
     METHODS test_raise_printable_val FOR TESTING RAISING cx_static_check.
+    METHODS test_raise_msg_struct_val FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 
@@ -100,6 +101,30 @@ CLASS ltcl_unit_test IMPLEMENTATION.
         cl_abap_unit_assert=>assert_bound( lx ).
         cl_abap_unit_assert=>assert_initial( lx->ms_error-text ).
         cl_abap_unit_assert=>assert_not_initial( lx->get_text( ) ).
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD test_raise_msg_struct_val.
+
+    " a message structure (BAPIRET2, sy) handed over as val keeps its text
+    TYPES: BEGIN OF ty_s_ret,
+             type    TYPE c LENGTH 1,
+             id      TYPE c LENGTH 20,
+             number  TYPE n LENGTH 3,
+             message TYPE c LENGTH 220,
+           END OF ty_s_ret.
+    DATA(ls_ret) = VALUE ty_s_ret( type    = `E`
+                                   id      = `ZTEST`
+                                   number  = `001`
+                                   message = `Material 4711 not found` ).
+
+    TRY.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING val = ls_ret.
+      CATCH zabaputil_cx_util_error INTO DATA(lx).
+        cl_abap_unit_assert=>assert_equals( exp = `Material 4711 not found`
+                                            act = lx->get_text( ) ).
     ENDTRY.
 
   ENDMETHOD.

@@ -10,6 +10,13 @@ CLASS zabaputil_cl_util_xml DEFINITION
 
     METHODS constructor.
 
+    " One node below this one. Its attributes are p, then a = v; an
+    " attribute name set twice (in p, by a, or by a later p( )) keeps the
+    " last value - XML allows each name once per element. Attributes are
+    " written in the order of their names, not in the order they were set,
+    " and one with an empty value is left out. The value `X` (abap_true) is
+    " written as `true`: the builder targets UI5 XML views, where a flag is
+    " a boolean - a literal `X` cannot be written through it
     METHODS __
       IMPORTING
         n             TYPE clike
@@ -103,6 +110,14 @@ CLASS zabaputil_cl_util_xml DEFINITION
 
   PRIVATE SECTION.
 
+    " sets an attribute: a name that is there already gets the new value
+    " instead of a second entry - two of them made the element invalid XML,
+    " and the XMLView parser refused the whole view
+    METHODS prop_set
+      IMPORTING
+        n TYPE clike
+        v TYPE clike.
+
 ENDCLASS.
 
 
@@ -126,9 +141,13 @@ CLASS zabaputil_cl_util_xml IMPLEMENTATION.
     DATA(lo_child) = NEW zabaputil_cl_util_xml( ).
     lo_child->mv_name   = n.
     lo_child->mv_ns     = ns.
-    lo_child->mt_prop   = p.
+    LOOP AT p REFERENCE INTO DATA(lr_prop).
+      lo_child->prop_set( n = lr_prop->n
+                          v = lr_prop->v ).
+    ENDLOOP.
     IF a IS NOT INITIAL.
-      INSERT VALUE #( n = a v = v ) INTO TABLE lo_child->mt_prop.
+      lo_child->prop_set( n = a
+                          v = v ).
     ENDIF.
     lo_child->mo_parent = me.
     lo_child->mo_root   = mo_root.
@@ -179,8 +198,17 @@ CLASS zabaputil_cl_util_xml IMPLEMENTATION.
 
   METHOD p.
 
-    INSERT VALUE #( n = n v = v ) INTO TABLE mt_prop.
+    prop_set( n = n
+              v = v ).
     result = me.
+
+  ENDMETHOD.
+
+  METHOD prop_set.
+
+    DELETE mt_prop WHERE n = n.
+    INSERT VALUE #( n = n
+                    v = v ) INTO TABLE mt_prop.
 
   ENDMETHOD.
 

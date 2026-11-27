@@ -66,6 +66,10 @@ abap-util (master catalog, this repo)             Downstream projects (vendored 
    - `conv_string_to_number`: with both separators the last one is the decimal separator, one kind several times is a thousands separator, a single separator is the decimal one (`1,000` is 1).
    - A CP row without `*` keeps rendering as the `*low*` token (`filter_get_token_t_by_range_t`), as the test `token_pattern_roundtrip` records - the round trip of such a row is a contains pattern.
    - The BAL methods raise `zabaputil_cx_util_error` when a log cannot be written, deleted or read; "no log matches" stays an empty result.
+   - `conv_get_xstring_by_data_uri` reads the header: base64 only with `;base64` (or without any `data:...,` prefix), a percent-encoded payload otherwise (`conv_get_file_by_data_uri`). A consumer copy that base64-decodes every payload is outdated, not ahead.
+   - A new row of `zabaputil_cl_util_db` gets an id derived from its handles (SHA-256 via `hash_string`), so two parallel saves of the same handles cannot insert two rows; a random UUID is only the fallback without a digest class. A consumer copy that always draws a UUID is outdated.
+   - `itab_distinct`, `itab_group_sum_by` and `itab_count_by` write a value through a string template (`-5`, never `5-`), and `itab_sort_by` is stable (the row index is the last sort key).
+   - A `WHILE` whose condition holds a table expression (`line_exists( ... )`) is written as `DO` with an `EXIT`: the 7.02 downport evaluates such a condition once in front of the loop, and the loop never ends.
 
    **Extract methods with their pragmas.** A naive `METHOD <name>.` extractor silently skips `METHOD constructor ##ADT_SUPPRESS_GENERATION.` and every other declaration carrying a pragma or a pseudo-comment — the method then appears in neither the missing list nor the changed list, and a defect in it survives every sync run that has ever been made. The 2026-09 sync found two real changes hiding in exactly that method. Match the pragmas, and sanity-check the extracted method count against `grep -c '^  METHOD'` on both sides.
 5. **Multi-environment compatibility is non-negotiable:** every method must work on NW 7.02, Standard ABAP, and ABAP Cloud, because any consumer may run on any of these targets. Environment-specific behavior is branched via `check_abap_cloud( )` and dynamic calls so the code compiles everywhere.
@@ -122,7 +126,17 @@ node .github/scripts/sync-check.mjs --consumer ../business-api --report   # list
 
 A consumer describes its copies in `.github/abap-util.json`: the master commit they were taken from, the rename (copy name → master name) and, per copy, the master file, whether it is trimmed, and the differences that are decided (`settled`) or have no master (`own`), each with its reason. The method list is not written down - it is read from the copy. The script compares bodies and declarations after the rename, without comments and layout, and extracts methods with their pragmas (the two traps described above). It reports `changed`, `copy-only` (sync it back) and, for a copy that is not trimmed, `missing`.
 
-Run it at the manifest's commit to see what the consumer changed since the copy was taken, and at `main` to see what a refresh would bring. It is the first step of every sync run; the decision what to merge stays with the reader. business-api carries a manifest and runs the check in its CI; abap2UI5 and popups are compared the same way with a manifest of their own.
+Run it at the manifest's commit to see what the consumer changed since the copy was taken, and at `main` to see what a refresh would bring. It is the first step of every sync run; the decision what to merge stays with the reader.
+
+The consumers with a manifest - each sync run goes through all of them:
+
+| Consumer | Check in its CI |
+| --- | --- |
+| business-api | yes (`test.yaml`, job `sync`) |
+| abap2UI5, popups, range-filter, table-content-loader | no - run it here at sync time |
+| layout-management, lock-manager, se16n, sql-console, table-maintenance | no - run it here at sync time (manifests added 2026-11) |
+
+A consumer that vendors a class of this catalog without a manifest is compared by hand until it gets one; add it to the table when it does.
 
 ## Rules for AI Assistants
 

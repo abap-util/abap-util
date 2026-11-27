@@ -1501,6 +1501,7 @@ CLASS ltcl_itab_ops DEFINITION FINAL
 
     METHODS sort_by_ascending              FOR TESTING.
     METHODS sort_by_descending             FOR TESTING.
+    METHODS sort_by_stable                 FOR TESTING.
 
     METHODS slice_basic                    FOR TESTING.
     METHODS slice_from_only                FOR TESTING.
@@ -1524,6 +1525,7 @@ CLASS ltcl_itab_ops DEFINITION FINAL
     METHODS csv_roundtrip                  FOR TESTING.
 
     METHODS csv_deep_column                FOR TESTING.
+    METHODS csv_include_columns            FOR TESTING.
 
     METHODS json_roundtrip                 FOR TESTING.
 
@@ -1539,6 +1541,26 @@ CLASS ltcl_itab_ops IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( exp = `A` act = lt_tab[ 1 ]-name ).
     cl_abap_unit_assert=>assert_equals( exp = `B` act = lt_tab[ 2 ]-name ).
     cl_abap_unit_assert=>assert_equals( exp = `C` act = lt_tab[ 3 ]-name ).
+  ENDMETHOD.
+
+  METHOD sort_by_stable.
+    " rows with the same key keep their order, in both directions
+    TYPES: BEGIN OF ty, name TYPE string, value TYPE i, END OF ty.
+    DATA lt_tab TYPE STANDARD TABLE OF ty WITH EMPTY KEY.
+    lt_tab = VALUE #( ( name = `b1` value = 2 ) ( name = `a1` value = 1 ) ( name = `b2` value = 2 )
+                      ( name = `a2` value = 1 ) ( name = `b3` value = 2 ) ).
+
+    zabaputil_cl_util_context=>itab_sort_by( EXPORTING fieldname = `VALUE` CHANGING tab = lt_tab ).
+    cl_abap_unit_assert=>assert_equals( exp = `a1 a2 b1 b2 b3`
+                                        act = concat_lines_of( table = VALUE string_table( FOR r IN lt_tab ( r-name ) )
+                                                               sep   = ` ` ) ).
+
+    zabaputil_cl_util_context=>itab_sort_by( EXPORTING fieldname  = `VALUE`
+                                                       descending = abap_true
+                                             CHANGING  tab        = lt_tab ).
+    cl_abap_unit_assert=>assert_equals( exp = `b1 b2 b3 a1 a2`
+                                        act = concat_lines_of( table = VALUE string_table( FOR r IN lt_tab ( r-name ) )
+                                                               sep   = ` ` ) ).
   ENDMETHOD.
 
   METHOD sort_by_descending.
@@ -1727,6 +1749,35 @@ CLASS ltcl_itab_ops IMPLEMENTATION.
 
     DATA(lv_csv) = zabaputil_cl_util_context=>itab_get_csv_by_itab( lt_tab ).
     cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>c_contains( val = lv_csv sub = `A;;B` ) ).
+  ENDMETHOD.
+
+  METHOD csv_include_columns.
+    " an include is one nameless component of get_components( ) - the header
+    " lost its fields while the rows wrote them, so every column behind it
+    " shifted, also on the way back in
+    TYPES: BEGIN OF ty_inc, b TYPE string, c TYPE string, END OF ty_inc.
+    TYPES BEGIN OF ty.
+    TYPES a TYPE string.
+    INCLUDE TYPE ty_inc.
+    TYPES d TYPE string.
+    TYPES END OF ty.
+    DATA lt_tab TYPE STANDARD TABLE OF ty WITH EMPTY KEY.
+    FIELD-SYMBOLS <back> TYPE STANDARD TABLE.
+    lt_tab = VALUE #( ( a = `1` b = `2` c = `3` d = `4` ) ).
+
+    DATA(lv_csv) = zabaputil_cl_util_context=>itab_get_csv_by_itab( lt_tab ).
+    cl_abap_unit_assert=>assert_equals( exp = |A;B;C;D\r\n1;2;3;4|
+                                        act = lv_csv ).
+
+    DATA(lr_back) = zabaputil_cl_util_context=>itab_get_itab_by_csv( lv_csv ).
+    ASSIGN lr_back->* TO <back>.
+    ASSIGN <back>[ 1 ] TO FIELD-SYMBOL(<row>).
+    ASSIGN COMPONENT `C` OF STRUCTURE <row> TO FIELD-SYMBOL(<c>).
+    cl_abap_unit_assert=>assert_equals( exp = `3`
+                                        act = <c> ).
+    ASSIGN COMPONENT `D` OF STRUCTURE <row> TO FIELD-SYMBOL(<d>).
+    cl_abap_unit_assert=>assert_equals( exp = `4`
+                                        act = <d> ).
   ENDMETHOD.
 
   METHOD json_roundtrip.
@@ -2318,6 +2369,7 @@ CLASS ltcl_edge_cases DEFINITION FINAL
 
     " conv_string_to_date edge cases
     METHODS date_short_input               FOR TESTING.
+    METHODS date_single_digit_parts        FOR TESTING.
 
     " check_is_email edge cases
     METHODS email_with_plus                FOR TESTING.
@@ -2496,6 +2548,26 @@ CLASS ltcl_edge_cases IMPLEMENTATION.
     DATA(lv_result) = zabaputil_cl_util_context=>conv_string_to_date( val    = `24`
                                                                       format = `YYYY-MM-DD` ).
     cl_abap_unit_assert=>assert_initial( lv_result ).
+  ENDMETHOD.
+
+  METHOD date_single_digit_parts.
+    " a day or a month written with one digit is read by its part, not
+    " digit by digit - `5.3.2024` was an initial date, with a time behind
+    " it the year 2410
+    cl_abap_unit_assert=>assert_equals( exp = CONV d( `20240305` )
+                                        act = zabaputil_cl_util_context=>conv_string_to_date( val    = `5.3.2024`
+                                                                                              format = `DD.MM.YYYY` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV d( `20240305` )
+                                        act = zabaputil_cl_util_context=>conv_string_to_date( val    = `5.3.2024 10:30`
+                                                                                              format = `DD.MM.YYYY` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV d( `20240105` )
+                                        act = zabaputil_cl_util_context=>conv_string_to_date( `2024-1-5` ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_is_date_valid( `2024-1-5` ) ).
+    " a part longer than the format allows, or a year that is too short
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>conv_string_to_date( val    = `15.003.2024`
+                                                                                         format = `DD.MM.YYYY` ) ).
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>conv_string_to_date( val    = `5.3.24`
+                                                                                         format = `DD.MM.YYYY` ) ).
   ENDMETHOD.
 
   METHOD email_with_plus.
@@ -3041,6 +3113,7 @@ CLASS ltcl_xlsx_ops DEFINITION FINAL
   PRIVATE SECTION.
 
     METHODS xlsx_by_itab_basic             FOR TESTING.
+    METHODS xlsx_by_itab_elementary        FOR TESTING.
     METHODS itab_by_xlsx_empty             FOR TESTING.
 
 ENDCLASS.
@@ -3048,15 +3121,50 @@ ENDCLASS.
 CLASS ltcl_xlsx_ops IMPLEMENTATION.
 
   METHOD xlsx_by_itab_basic.
-    TYPES: BEGIN OF ty_row, col1 TYPE string, col2 TYPE string, END OF ty_row.
+    TYPES: BEGIN OF ty_row,
+             text   TYPE string,
+             num    TYPE i,
+             amount TYPE p LENGTH 8 DECIMALS 2,
+             date   TYPE d,
+             numc   TYPE n LENGTH 4,
+             sub    TYPE string_table,
+           END OF ty_row.
     DATA lt_tab TYPE STANDARD TABLE OF ty_row WITH EMPTY KEY.
-    lt_tab = VALUE #( ( col1 = `A` col2 = `B` ) ).
-    " not implemented - it says so instead of returning nothing
-    TRY.
-        DATA(lv_result) = zabaputil_cl_util_context=>conv_get_xlsx_by_itab( lt_tab ) ##NEEDED.
-        cl_abap_unit_assert=>fail( `not implemented - must raise` ).
-      CATCH zabaputil_cx_util_error ##NO_HANDLER.
-    ENDTRY.
+    lt_tab = VALUE #( ( text = `  a&b<c` num = -5 amount = `-12.5` date = `20240315` numc = `0042` )
+                      ( text = |x{ cl_abap_char_utilities=>form_feed }y| ) ).
+
+    DATA(lt_files) = zabaputil_cl_util_context=>zip_unpack( zabaputil_cl_util_context=>conv_get_xlsx_by_itab( lt_tab ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 5
+                                        act = lines( lt_files ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( line_exists( lt_files[ name = `[Content_Types].xml` ] ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( line_exists( lt_files[ name = `xl/workbook.xml` ] ) ) ).
+
+    DATA(lv_sheet) = zabaputil_cl_util_context=>conv_get_string_by_xstring(
+                         lt_files[ name = `xl/worksheets/sheet1.xml` ]-content ).
+    " a number as value, leading blanks kept, & and < escaped, the form
+    " feed XML forbids dropped, a NUMC as text, a date in ISO form, a table
+    " column and an initial date empty
+    DATA(lv_text) = `<c t="inlineStr"><is><t xml:space="preserve">`.
+    DATA(lv_end) = `</t></is></c>`.
+    DATA(lv_exp) = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+                && `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`
+                && |<row>{ lv_text }TEXT{ lv_end }{ lv_text }NUM{ lv_end }{ lv_text }AMOUNT{ lv_end }|
+                && |{ lv_text }DATE{ lv_end }{ lv_text }NUMC{ lv_end }{ lv_text }SUB{ lv_end }</row>|
+                && |<row>{ lv_text }  a&amp;b&lt;c{ lv_end }<c><v>-5</v></c><c><v>-12.50</v></c>|
+                && |{ lv_text }2024-03-15{ lv_end }{ lv_text }0042{ lv_end }<c/></row>|
+                && |<row>{ lv_text }xy{ lv_end }<c><v>0</v></c><c><v>0.00</v></c><c/>{ lv_text }0000{ lv_end }<c/></row>|
+                && `</sheetData></worksheet>`.
+    cl_abap_unit_assert=>assert_equals( exp = lv_exp
+                                        act = lv_sheet ).
+  ENDMETHOD.
+
+  METHOD xlsx_by_itab_elementary.
+    " a table without components is one column
+    DATA(lt_files) = zabaputil_cl_util_context=>zip_unpack(
+                         zabaputil_cl_util_context=>conv_get_xlsx_by_itab( VALUE string_table( ( `a` ) ) ) ).
+    DATA(lv_sheet) = zabaputil_cl_util_context=>conv_get_string_by_xstring(
+                         lt_files[ name = `xl/worksheets/sheet1.xml` ]-content ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<row><c t="inlineStr"><is><t xml:space="preserve">a</t></is></c></row>` ) ).
   ENDMETHOD.
 
   METHOD itab_by_xlsx_empty.
@@ -3305,6 +3413,7 @@ CLASS ltcl_itab_aggregations DEFINITION FINAL
     METHODS sum_by_unknown_field          FOR TESTING.
     METHODS distinct                      FOR TESTING.
     METHODS group_sum_by                  FOR TESTING.
+    METHODS group_negative_numbers        FOR TESTING.
 
 ENDCLASS.
 
@@ -3343,6 +3452,38 @@ CLASS ltcl_itab_aggregations IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
         act = lt_distinct[ 2 ]
         exp = `AA` ).
+  ENDMETHOD.
+
+  METHOD group_negative_numbers.
+    " a negative number is written `-5` by distinct, group_sum_by and
+    " count_by alike - a plain move wrote `5-`
+    TYPES: BEGIN OF ty, grp TYPE i, val TYPE i, END OF ty.
+    DATA lt_tab TYPE STANDARD TABLE OF ty WITH EMPTY KEY.
+    lt_tab = VALUE #( ( grp = -5 val = 1 ) ( grp = 3 val = 2 ) ( grp = -5 val = 4 ) ).
+
+    DATA(lt_distinct) = zabaputil_cl_util_context=>itab_distinct( tab       = lt_tab
+                                                                  fieldname = `GRP` ).
+    cl_abap_unit_assert=>assert_equals( exp = VALUE string_table( ( `-5` ) ( `3` ) )
+                                        act = lt_distinct ).
+
+    DATA(lt_sums) = zabaputil_cl_util_context=>itab_group_sum_by( tab      = lt_tab
+                                                                  group_by = `GRP`
+                                                                  sum_by   = `VAL` ).
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = lines( lt_sums ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `-5`
+                                        act = lt_sums[ 1 ]-n ).
+    cl_abap_unit_assert=>assert_equals( exp = `5`
+                                        act = lt_sums[ 1 ]-v ).
+
+    DATA(lt_count) = zabaputil_cl_util_context=>itab_count_by( tab       = lt_tab
+                                                               fieldname = `GRP` ).
+    cl_abap_unit_assert=>assert_equals( exp = `-5`
+                                        act = lt_count[ 1 ]-n ).
+    cl_abap_unit_assert=>assert_equals( exp = `2`
+                                        act = lt_count[ 1 ]-v ).
+    cl_abap_unit_assert=>assert_equals( exp = `3`
+                                        act = lt_count[ 2 ]-n ).
   ENDMETHOD.
 
   METHOD group_sum_by.
@@ -6856,11 +6997,18 @@ CLASS ltcl_fixes DEFINITION FINAL
     METHODS language_codes           FOR TESTING.
     METHODS json_control_chars       FOR TESTING.
     METHODS url_decode_invalid_hex   FOR TESTING.
+    METHODS data_uri_base64          FOR TESTING.
+    METHODS data_uri_percent         FOR TESTING.
+    METHODS data_uri_mime_by_name    FOR TESTING.
+    METHODS file_name_by_path        FOR TESTING.
+    METHODS xml_unescape             FOR TESTING.
     METHODS csv_quotes_special_cells FOR TESTING.
     METHODS csv_reads_own_output     FOR TESTING.
     METHODS csv_reads_quoted_cells   FOR TESTING.
+    METHODS csv_quote_edge_cases     FOR TESTING.
     METHODS csv_empty_input          FOR TESTING.
     METHODS csv_byte_order_mark      FOR TESTING.
+    METHODS csv_fallback_name_taken  FOR TESTING.
     METHODS sql_like_escape          FOR TESTING.
     METHODS sql_like_cp_escape       FOR TESTING.
     METHODS sql_lowercase_keywords   FOR TESTING.
@@ -7039,10 +7187,86 @@ CLASS ltcl_fixes IMPLEMENTATION.
     DATA(lv_ctrl) = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `411F42` ) ).
     cl_abap_unit_assert=>assert_equals( exp = `A\u001FB`
                                         act = zabaputil_cl_util_context=>c_escape_json( lv_ctrl ) ).
+    DATA(lv_nul) = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `410042` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `A\u0000B`
+                                        act = zabaputil_cl_util_context=>c_escape_json( lv_nul ) ).
     cl_abap_unit_assert=>assert_equals( exp = `say \"hi\"\n`
                                         act = zabaputil_cl_util_context=>c_escape_json( |say "hi"\n| ) ).
     cl_abap_unit_assert=>assert_equals( exp = `plain`
                                         act = zabaputil_cl_util_context=>c_escape_json( `plain` ) ).
+  ENDMETHOD.
+
+  METHOD data_uri_base64.
+    " `;base64` in the header, or no header at all: base64
+    cl_abap_unit_assert=>assert_equals(
+        exp = CONV xstring( `414243` )
+        act = zabaputil_cl_util_context=>conv_get_xstring_by_data_uri( `data:text/plain;charset=utf-8;base64,QUJD` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = CONV xstring( `414243` )
+        act = zabaputil_cl_util_context=>conv_get_xstring_by_data_uri( `QUJD` ) ).
+    DATA(ls_file) = zabaputil_cl_util_context=>conv_get_file_by_data_uri( `data:Image/PNG;base64,QUJD` ).
+    cl_abap_unit_assert=>assert_equals( exp = `image/png`
+                                        act = ls_file-mime_type ).
+  ENDMETHOD.
+
+  METHOD data_uri_percent.
+    " no `;base64`: the payload is percent-encoded - it was base64-decoded
+    " all the same and came out as garbage. `+` stays a plus
+    cl_abap_unit_assert=>assert_equals(
+        exp = CONV xstring( `4120422B43FF` )
+        act = zabaputil_cl_util_context=>conv_get_xstring_by_data_uri( `data:text/plain,A%20B+C%ff` ) ).
+    DATA(ls_file) = zabaputil_cl_util_context=>conv_get_file_by_data_uri( `data:,x` ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV xstring( `78` )
+                                        act = ls_file-content ).
+    cl_abap_unit_assert=>assert_initial( ls_file-mime_type ).
+  ENDMETHOD.
+
+  METHOD data_uri_mime_by_name.
+    " no MIME type, or only octet-stream, in the URI: the file name decides
+    DATA(ls_file) = zabaputil_cl_util_context=>conv_get_file_by_data_uri(
+                        val       = `data:application/octet-stream;base64,QUJD`
+                        file_name = `notes.txt` ).
+    cl_abap_unit_assert=>assert_equals( exp = `text/plain`
+                                        act = ls_file-mime_type ).
+    ls_file = zabaputil_cl_util_context=>conv_get_file_by_data_uri( val       = `data:image/png;base64,QUJD`
+                                                                    file_name = `notes.txt` ).
+    cl_abap_unit_assert=>assert_equals( exp = `image/png`
+                                        act = ls_file-mime_type ).
+  ENDMETHOD.
+
+  METHOD xml_unescape.
+    cl_abap_unit_assert=>assert_equals(
+        exp = `<a href="x">'&'</a>`
+        act = zabaputil_cl_util_context=>c_unescape_xml( `&lt;a href=&quot;x&quot;&gt;&apos;&amp;&apos;&lt;/a&gt;` ) ).
+    " an escaped reference stays a reference
+    cl_abap_unit_assert=>assert_equals( exp = `&lt;`
+                                        act = zabaputil_cl_util_context=>c_unescape_xml( `&amp;lt;` ) ).
+    " character references, decimal and hex, as c_escape_xml writes them
+    cl_abap_unit_assert=>assert_equals( exp = |a\nb\tc\rd A|
+                                        act = zabaputil_cl_util_context=>c_unescape_xml( `a&#xA;b&#9;c&#xD;d&#32;&#x41;` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `C3A9E282AC` ) )
+        act = zabaputil_cl_util_context=>c_unescape_xml( `&#xE9;&#8364;` ) ).
+    " what is no reference, or names no character XML allows, stays
+    cl_abap_unit_assert=>assert_equals( exp = `a & b &unknown; &lt &#0; &#xZZ; &#;`
+                                        act = zabaputil_cl_util_context=>c_unescape_xml( `a & b &unknown; &lt &#0; &#xZZ; &#;` ) ).
+    " the round trip of c_escape_xml
+    cl_abap_unit_assert=>assert_equals(
+        exp = |x < "y" & z\nnext|
+        act = zabaputil_cl_util_context=>c_unescape_xml( zabaputil_cl_util_context=>c_escape_xml( |x < "y" & z\nnext| ) ) ).
+  ENDMETHOD.
+
+  METHOD file_name_by_path.
+    cl_abap_unit_assert=>assert_equals(
+        exp = `report.xlsx`
+        act = zabaputil_cl_util_context=>file_get_name_by_path( `C:\fakepath\report.xlsx` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = `b.txt`
+        act = zabaputil_cl_util_context=>file_get_name_by_path( `/home/a\b.txt` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = `plain.csv`
+        act = zabaputil_cl_util_context=>file_get_name_by_path( `plain.csv` ) ).
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>file_get_name_by_path( `dir/` ) ).
   ENDMETHOD.
 
   METHOD url_decode_invalid_hex.
@@ -7052,6 +7276,13 @@ CLASS ltcl_fixes IMPLEMENTATION.
                                         act = zabaputil_cl_util_context=>url_decode( `a%20b` ) ).
     cl_abap_unit_assert=>assert_equals( exp = `100%`
                                         act = zabaputil_cl_util_context=>url_decode( `100%` ) ).
+    " escapes that are no UTF-8 stay as they were written
+    cl_abap_unit_assert=>assert_equals( exp = `a%FFb`
+                                        act = zabaputil_cl_util_context=>url_decode( `a%FFb` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `a%C3`
+                                        act = zabaputil_cl_util_context=>url_decode( `a%C3` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `a b%e9`
+                                        act = zabaputil_cl_util_context=>url_decode( `a%20b%e9` ) ).
   ENDMETHOD.
 
   METHOD csv_quotes_special_cells.
@@ -7084,6 +7315,30 @@ CLASS ltcl_fixes IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
       exp = `[{"c_2nd":"p;q","first_name":"x"},{"c_2nd":"z","first_name":"y"}]`
       act = zabaputil_cl_util_context=>json_stringify( <lt_back> ) ).
+  ENDMETHOD.
+
+  METHOD csv_quote_edge_cases.
+    FIELD-SYMBOLS <lt_back> TYPE STANDARD TABLE.
+    " CR alone ends a row; text behind a closing quote belongs to the cell;
+    " a quote inside a cell is text; an empty quoted cell; a quote that is
+    " never closed runs to the end of the text
+    DATA(lr_back) = zabaputil_cl_util_context=>itab_get_itab_by_csv( |H1;H2\r"a""b"x;c"d\r"";\n"open;end| ).
+    ASSIGN lr_back->* TO <lt_back>.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `[{"h1":"a\"bx","h2":"c\"d"},{"h1":"","h2":""},{"h1":"open;end","h2":""}]`
+      act = zabaputil_cl_util_context=>json_stringify( <lt_back> ) ).
+  ENDMETHOD.
+
+  METHOD csv_fallback_name_taken.
+    " the name a repeated column falls back to is in the header already
+    FIELD-SYMBOLS <back> TYPE STANDARD TABLE.
+    DATA(lr_back) = zabaputil_cl_util_context=>itab_get_itab_by_csv( |A;COL3;A\nx;y;z| ).
+    ASSIGN lr_back->* TO <back>.
+    ASSIGN <back>[ 1 ] TO FIELD-SYMBOL(<row>).
+    ASSIGN COMPONENT `COL3_2` OF STRUCTURE <row> TO FIELD-SYMBOL(<field>).
+    cl_abap_unit_assert=>assert_subrc( exp = 0 ).
+    cl_abap_unit_assert=>assert_equals( exp = `z`
+                                        act = <field> ).
   ENDMETHOD.
 
   METHOD csv_byte_order_mark.

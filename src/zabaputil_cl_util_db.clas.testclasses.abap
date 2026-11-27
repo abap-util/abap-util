@@ -15,6 +15,8 @@ CLASS ltcl_test DEFINITION FINAL
     METHODS test_load_multi_by_handle FOR TESTING RAISING cx_static_check.
     METHODS test_delete_by_handle     FOR TESTING RAISING cx_static_check.
     METHODS test_load_by_id_not_found FOR TESTING RAISING cx_static_check.
+    METHODS test_load_broken_data     FOR TESTING RAISING cx_static_check.
+    METHODS test_id_by_handle         FOR TESTING RAISING cx_static_check.
 
 ENDCLASS.
 
@@ -157,6 +159,56 @@ CLASS ltcl_test IMPLEMENTATION.
         cl_abap_unit_assert=>fail( `NO_EXCEPTION_FOR_UNKNOWN_ID` ).
       CATCH zabaputil_cx_util_error ##NO_HANDLER.
     ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD test_load_broken_data.
+
+    " a stored document the transformation cannot read raises this
+    " repository's exception, not CX_SY_NO_HANDLER. The transpiled runtime
+    " reads a document that is no asXML without complaint, so there the
+    " call returns - what is asserted is that nothing else escapes
+    DATA ls_loaded TYPE ty_s_data.
+    DATA(ls_db) = VALUE zabaputil_t_91( id   = `BROKEN_DATA`
+                                        data = `<a/>` ).
+    MODIFY zabaputil_t_91 FROM @ls_db.
+
+    TRY.
+        zabaputil_cl_util_db=>load_by_id( EXPORTING id     = `BROKEN_DATA`
+                                          IMPORTING result = ls_loaded ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+      CATCH cx_root INTO DATA(lx_other).
+        cl_abap_unit_assert=>fail( lx_other->get_text( ) ).
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD test_id_by_handle.
+
+    " the id of a new row follows from its handles, so a second save that
+    " ran in parallel updates the first row instead of adding a twin
+    DATA(lv_id_first) = zabaputil_cl_util_db=>save( uname        = `TESTUSER`
+                                                    handle       = `HANDLE_ID`
+                                                    data         = VALUE ty_s_data( name = `first` )
+                                                    check_commit = abap_false ).
+    zabaputil_cl_util_db=>delete_by_handle( uname        = `TESTUSER`
+                                            handle       = `HANDLE_ID`
+                                            check_commit = abap_false ).
+    DATA(lv_id_again) = zabaputil_cl_util_db=>save( uname        = `TESTUSER`
+                                                    handle       = `HANDLE_ID`
+                                                    data         = VALUE ty_s_data( name = `again` )
+                                                    check_commit = abap_false ).
+    cl_abap_unit_assert=>assert_equals( exp = lv_id_first
+                                        act = lv_id_again ).
+
+    " other handles, another id
+    DATA(lv_id_other) = zabaputil_cl_util_db=>save( uname        = `TESTUSER`
+                                                    handle       = `HANDLE_I`
+                                                    handle2      = `D`
+                                                    data         = VALUE ty_s_data( name = `other` )
+                                                    check_commit = abap_false ).
+    cl_abap_unit_assert=>assert_differs( exp = lv_id_first
+                                         act = lv_id_other ).
 
   ENDMETHOD.
 

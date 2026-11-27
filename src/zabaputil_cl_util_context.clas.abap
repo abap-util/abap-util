@@ -865,11 +865,34 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO data.
 
+    "! The content of a data URI (data:[mime][;base64],payload) - see
+    "! conv_get_file_by_data_uri. A bare base64 payload without the
+    "! `data:...,` prefix is decoded as base64.
     CLASS-METHODS conv_get_xstring_by_data_uri
       IMPORTING
         val           TYPE clike
       RETURNING
         VALUE(result) TYPE xstring.
+
+    TYPES:
+      BEGIN OF ty_s_data_uri,
+        mime_type TYPE string,
+        content   TYPE xstring,
+      END OF ty_s_data_uri.
+
+    "! A data URI (RFC 2397, data:[mime][;charset=...][;base64],payload) as
+    "! MIME type and content: the payload base64-decoded when the header
+    "! says `;base64`, otherwise percent-decoded to its bytes (text between
+    "! the escapes as UTF-8). The MIME type is lower case; when the URI
+    "! names none, or only application/octet-stream, it is taken from
+    "! file_name (file_get_mimetype) if one is given. A bare base64 payload
+    "! without the `data:...,` prefix is decoded as base64.
+    CLASS-METHODS conv_get_file_by_data_uri
+      IMPORTING
+        val           TYPE clike
+        file_name     TYPE clike OPTIONAL
+      RETURNING
+        VALUE(result) TYPE ty_s_data_uri.
 
     CLASS-METHODS rtti_tab_get_relative_name
       IMPORTING
@@ -2854,6 +2877,12 @@ CLASS zabaputil_cl_util_context DEFINITION
       END OF ty_s_zip_file.
     TYPES ty_t_zip_file TYPE STANDARD TABLE OF ty_s_zip_file WITH EMPTY KEY.
 
+    "! An Excel workbook (Office Open XML) of one sheet: a header row with
+    "! the component names, then one row per line of val. A number is a
+    "! number cell; a date (YYYY-MM-DD), a time (HH:MM:SS) and everything
+    "! else are text; a table, a structure or a reference stays empty. No
+    "! abap2xlsx, no XCO - CL_ABAP_ZIP only, so it runs on every release
+    "! down to 7.02 and on ABAP Cloud
     CLASS-METHODS conv_get_xlsx_by_itab
       IMPORTING
         val           TYPE ANY TABLE
@@ -2923,6 +2952,19 @@ CLASS zabaputil_cl_util_context DEFINITION
     "! characters XML 1.0 forbids outright dropped. Degrades when the
     "! codepage API is missing - see the method.
     CLASS-METHODS c_escape_xml
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! The text of an XML text node or attribute value with its references
+    "! resolved: the five named entities (&lt; &gt; &amp; &quot; &apos;)
+    "! and every character reference, decimal (&#10;) or hex (&#xA;) - the
+    "! counterpart of c_escape_xml. One pass from left to right, so an
+    "! escaped reference stays what it was (`&amp;lt;` is `&lt;`). A
+    "! reference it does not know, or one that names no character XML
+    "! allows, stays as it is written.
+    CLASS-METHODS c_unescape_xml
       IMPORTING
         val           TYPE clike
       RETURNING
@@ -3083,6 +3125,15 @@ CLASS zabaputil_cl_util_context DEFINITION
         VALUE(result) TYPE decfloat34.
 
     CLASS-METHODS file_get_mimetype
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! The file name of a path as a browser or an upload hands it over:
+    "! what follows the last `/` or `\` (`C:\fakepath\report.xlsx` gives
+    "! `report.xlsx`), the value itself when it has neither.
+    CLASS-METHODS file_get_name_by_path
       IMPORTING
         val           TYPE clike
       RETURNING
@@ -4220,6 +4271,56 @@ CLASS zabaputil_cl_util_context DEFINITION
         result   TYPE string
         invalid  TYPE abap_bool.
 
+    " the text half of itab_filter_check_field: abap_true when text holds
+    " search - upper case already when ignore_case is set
+    CLASS-METHODS itab_filter_check_text
+      IMPORTING
+        !text         TYPE string
+        search        TYPE string
+        ignore_case   TYPE abap_bool
+      RETURNING
+        VALUE(result) TYPE abap_bool.
+
+    " the kind of an XLSX column (conv_get_xlsx_by_itab): N number, D date,
+    " T time, S text, empty for a type without text
+    CLASS-METHODS xlsx_get_column_kind
+      IMPORTING
+        !type         TYPE REF TO cl_abap_datadescr
+      RETURNING
+        VALUE(result) TYPE string.
+
+    " one inline-text cell of the sheet, `<c/>` for an empty text
+    CLASS-METHODS xlsx_get_text_cell
+      IMPORTING
+        val           TYPE string
+      RETURNING
+        VALUE(result) TYPE string.
+
+    " the bytes of a percent-encoded text (a data URI payload): an escape is
+    " its byte, the text between escapes its UTF-8 bytes; `+` is a plus
+    CLASS-METHODS conv_get_xstring_by_percent
+      IMPORTING
+        val           TYPE string
+      RETURNING
+        VALUE(result) TYPE xstring.
+
+    " the character one reference of c_unescape_xml stands for - name is
+    " what stands between `&` and `;` - empty when it names none
+    CLASS-METHODS c_unescape_xml_reference
+      IMPORTING
+        name          TYPE string
+      RETURNING
+        VALUE(result) TYPE string.
+
+    " a run of percent escapes of url_decode as text: the bytes as UTF-8,
+    " or the escapes as they were written (raw) when they are no UTF-8
+    CLASS-METHODS url_decode_bytes
+      IMPORTING
+        hex           TYPE string
+        raw           TYPE string
+      RETURNING
+        VALUE(result) TYPE string.
+
 ENDCLASS.
 
 CLASS zabaputil_cl_util_context IMPLEMENTATION.
@@ -4362,18 +4463,96 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD conv_get_xstring_by_data_uri.
 
-    DATA lv_metadata TYPE string ##NEEDED.
-    DATA lv_base64   TYPE string.
+    result = conv_get_file_by_data_uri( val )-content.
 
-    IF val CS `,`.
-      SPLIT val AT `,` INTO lv_metadata lv_base64.
-    ELSE.
+  ENDMETHOD.
+
+  METHOD conv_get_file_by_data_uri.
+
+    DATA lv_header TYPE string.
+    DATA lv_data   TYPE string.
+
+    DATA(lv_val) = CONV string( val ).
+    IF lv_val NS `,`.
       " a bare base64 payload, without the `data:...;base64,` prefix - the
       " SPLIT put the whole value into the metadata half and the payload
       " decoded to an empty xstring without a word
-      lv_base64 = val.
+      result-content = conv_decode_x_base64( lv_val ).
+      RETURN.
     ENDIF.
-    result = conv_decode_x_base64( lv_base64 ).
+    SPLIT lv_val AT `,` INTO lv_header lv_data.
+
+    " data:[<mime type>][;charset=...][;base64] - the payload used to be
+    " base64-decoded whatever the header said, so a percent-encoded one
+    " (`data:text/plain,a%20b`) came out as garbage
+    DATA(lv_base64) = abap_true.
+    IF strlen( lv_header ) >= 5 AND to_lower( lv_header(5) ) = `data:`.
+      lv_base64 = abap_false.
+      SPLIT substring( val = lv_header
+                       off = 5 ) AT `;` INTO TABLE DATA(lt_part).
+      LOOP AT lt_part REFERENCE INTO DATA(lr_part).
+        DATA(lv_part) = to_lower( c_trim( lr_part->* ) ).
+        IF sy-tabix = 1.
+          result-mime_type = lv_part.
+        ELSEIF lv_part = `base64`.
+          lv_base64 = abap_true.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+
+    IF lv_base64 = abap_true.
+      result-content = conv_decode_x_base64( lv_data ).
+    ELSE.
+      result-content = conv_get_xstring_by_percent( lv_data ).
+    ENDIF.
+
+    IF ( result-mime_type IS INITIAL OR result-mime_type = `application/octet-stream` )
+        AND file_name IS NOT INITIAL.
+      result-mime_type = file_get_mimetype( file_name ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD conv_get_xstring_by_percent.
+
+    " the bytes as hex digits, converted in one step at the end - a byte
+    " string has no expression that appends to it (see url_decode)
+    DATA lv_hex TYPE string.
+    DATA lv_run TYPE string.
+    DATA lv_x   TYPE x LENGTH 1.
+
+    DATA(lv_len) = strlen( val ).
+    DATA(lv_pos) = 0.
+    WHILE lv_pos < lv_len.
+      DATA(lv_char) = substring( val = val
+                                 off = lv_pos
+                                 len = 1 ).
+      DATA(lv_code) = ``.
+      IF lv_char = `%` AND lv_pos + 2 < lv_len.
+        lv_code = to_upper( substring( val = val
+                                       off = lv_pos + 1
+                                       len = 2 ) ).
+      ENDIF.
+      IF lv_code IS NOT INITIAL AND lv_code CO `0123456789ABCDEF`.
+        IF lv_run IS NOT INITIAL.
+          DATA(lv_run_x) = conv_get_xstring_by_string( lv_run ).
+          lv_hex = |{ lv_hex }{ lv_run_x }|.
+          CLEAR lv_run.
+        ENDIF.
+        lv_x = lv_code.
+        lv_hex = |{ lv_hex }{ lv_x }|.
+        lv_pos = lv_pos + 3.
+        CONTINUE.
+      ENDIF.
+      lv_run = lv_run && lv_char.
+      lv_pos = lv_pos + 1.
+    ENDWHILE.
+    IF lv_run IS NOT INITIAL.
+      lv_run_x = conv_get_xstring_by_string( lv_run ).
+      lv_hex = |{ lv_hex }{ lv_run_x }|.
+    ENDIF.
+
+    result = lv_hex.
 
   ENDMETHOD.
 
@@ -4656,6 +4835,13 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     " uses find( ) for a genuinely case-sensitive match (JS: plain includes()).
     FIELD-SYMBOLS <row>   TYPE any.
     FIELD-SYMBOLS <field> TYPE any.
+    FIELD-SYMBOLS <kept>  TYPE STANDARD TABLE.
+    " the components that hold text: by position without a field list, by
+    " name with one
+    DATA lt_index TYPE STANDARD TABLE OF i WITH EMPTY KEY.
+    DATA lt_name  TYPE string_table.
+    DATA lv_whole_row TYPE abap_bool.
+    DATA lr_kept TYPE REF TO data.
 
     DATA(lv_search) = COND string( WHEN ignore_case = abap_true
                                    THEN to_upper( val )
@@ -4668,93 +4854,129 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     IF lv_search IS INITIAL.
       RETURN.
     ENDIF.
-    DATA(lv_field_count) = lines( fields ).
+
+    " Which component holds text is a property of the line type: decided
+    " once, on the first row, instead of describing every cell of every
+    " row - this runs on every search keystroke over the whole table. A
+    " table, a deep structure or a reference cannot go into a string
+    " template - such a component holds no text to match
+    ASSIGN tab[ 1 ] TO <row>.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    IF fields IS INITIAL.
+      DATA(lv_index) = 1.
+      DO.
+        ASSIGN COMPONENT lv_index OF STRUCTURE <row> TO <field>.
+        IF sy-subrc <> 0.
+          EXIT.
+        ENDIF.
+        IF rtti_check_printable( <field> ) = abap_true.
+          INSERT lv_index INTO TABLE lt_index.
+        ENDIF.
+        lv_index = lv_index + 1.
+      ENDDO.
+      " elementary line type (e.g. string_table) has no components -
+      " match against the whole line instead of deleting every row
+      IF lv_index = 1.
+        lv_whole_row = rtti_check_printable( <row> ).
+      ENDIF.
+    ELSE.
+      LOOP AT fields REFERENCE INTO DATA(lr_field).
+        ASSIGN COMPONENT lr_field->* OF STRUCTURE <row> TO <field>.
+        IF sy-subrc = 0 AND rtti_check_printable( <field> ) = abap_true.
+          INSERT lr_field->* INTO TABLE lt_name.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+
+    " the matching rows go into a copy - a DELETE ... INDEX per dropped row
+    " shifted the rest of the table every time
+    CREATE DATA lr_kept LIKE tab.
+    ASSIGN lr_kept->* TO <kept>.
 
     LOOP AT tab ASSIGNING <row>.
 
-      DATA(lv_tabix) = sy-tabix.
       DATA(lv_check_found) = abap_false.
-      DATA(lv_index) = 1.
-      DO.
-        IF fields IS INITIAL.
-          ASSIGN COMPONENT lv_index OF STRUCTURE <row> TO <field>.
-          IF sy-subrc <> 0.
-            IF lv_index = 1.
-              " elementary line type (e.g. string_table) has no components -
-              " match against the whole line instead of deleting every row
-              ASSIGN <row> TO <field>.
-            ELSE.
-              EXIT.
-            ENDIF.
-          ENDIF.
-        ELSE.
-          IF lv_index > lv_field_count.
-            EXIT.
-          ENDIF.
-          DATA(lv_name) = fields[ lv_index ].
-          ASSIGN COMPONENT lv_name OF STRUCTURE <row> TO <field>.
-          IF sy-subrc <> 0.
-            lv_index = lv_index + 1.
-            CONTINUE.
-          ENDIF.
-        ENDIF.
-
-        IF itab_filter_check_field( field       = <field>
-                                    search      = lv_search
-                                    ignore_case = ignore_case ) = abap_true.
+      IF lv_whole_row = abap_true.
+        lv_check_found = itab_filter_check_text( text        = |{ <row> }|
+                                                 search      = lv_search
+                                                 ignore_case = ignore_case ).
+      ENDIF.
+      LOOP AT lt_index REFERENCE INTO DATA(lr_index).
+        ASSIGN COMPONENT lr_index->* OF STRUCTURE <row> TO <field>.
+        IF itab_filter_check_text( text        = |{ <field> }|
+                                   search      = lv_search
+                                   ignore_case = ignore_case ) = abap_true.
           lv_check_found = abap_true.
           EXIT.
         ENDIF.
+      ENDLOOP.
+      LOOP AT lt_name REFERENCE INTO DATA(lr_name).
+        ASSIGN COMPONENT lr_name->* OF STRUCTURE <row> TO <field>.
+        IF itab_filter_check_text( text        = |{ <field> }|
+                                   search      = lv_search
+                                   ignore_case = ignore_case ) = abap_true.
+          lv_check_found = abap_true.
+          EXIT.
+        ENDIF.
+      ENDLOOP.
 
-        lv_index = lv_index + 1.
-      ENDDO.
-
-      IF lv_check_found = abap_false.
-        DELETE tab INDEX lv_tabix.
+      IF lv_check_found = abap_true.
+        INSERT <row> INTO TABLE <kept>.
       ENDIF.
 
     ENDLOOP.
 
+    IF lines( <kept> ) <> lines( tab ).
+      tab = <kept>.
+    ENDIF.
+
   ENDMETHOD.
 
   METHOD itab_get_csv_by_itab.
-    FIELD-SYMBOLS <tab> TYPE table.
+    FIELD-SYMBOLS <tab>   TYPE table.
+    FIELD-SYMBOLS <row>   TYPE any.
+    FIELD-SYMBOLS <field> TYPE any.
     DATA lt_lines TYPE string_table.
     DATA lt_cells TYPE string_table.
+    " the component per column, empty for a column without text
+    DATA lt_names TYPE string_table.
 
     ASSIGN val TO <tab>.
     DATA(tab) = CAST cl_abap_tabledescr( cl_abap_typedescr=>describe_by_data( <tab> ) ).
 
     DATA(struc) = CAST cl_abap_structdescr( tab->get_table_line_type( ) ).
 
-    LOOP AT struc->get_components( ) REFERENCE INTO DATA(lr_comp).
+    " the included view, not get_components( ): an include (a DDIC
+    " table's .INCLUDE, an append, INCLUDE TYPE) is ONE nameless component
+    " there, so the header had an empty cell where the rows had one cell
+    " per field of the include, and every column behind it shifted. The
+    " kind is a property of the line type - decided here once per column,
+    " not described again for every cell. A table, a structure or a
+    " reference has no text - in a string template it is a runtime error,
+    " so its cell stays empty
+    LOOP AT struc->get_included_view( ) REFERENCE INTO DATA(lr_comp).
       INSERT csv_escape_cell( lr_comp->name ) INTO TABLE lt_cells.
+      INSERT COND string( WHEN lr_comp->type->kind = cl_abap_typedescr=>kind_elem
+                          THEN lr_comp->name ) INTO TABLE lt_names.
     ENDLOOP.
     INSERT concat_lines_of( table = lt_cells
                             sep   = `;` ) INTO TABLE lt_lines.
 
-    DATA lr_row TYPE REF TO data.
-    LOOP AT <tab> REFERENCE INTO lr_row.
+    LOOP AT <tab> ASSIGNING <row>.
 
       CLEAR lt_cells.
-      DATA(lv_index) = 1.
-      DO.
-        ASSIGN lr_row->* TO FIELD-SYMBOL(<row>).
-        ASSIGN COMPONENT lv_index OF STRUCTURE <row> TO FIELD-SYMBOL(<field>).
-        IF sy-subrc <> 0.
-          EXIT.
-        ENDIF.
-        lv_index = lv_index + 1.
-        " a table, a structure or a reference has no text - in a string
-        " template it is a runtime error, so its cell stays empty
-        IF cl_abap_typedescr=>describe_by_data( <field> )->kind <> cl_abap_typedescr=>kind_elem.
+      LOOP AT lt_names REFERENCE INTO DATA(lr_name).
+        IF lr_name->* IS INITIAL.
           INSERT `` INTO TABLE lt_cells.
           CONTINUE.
         ENDIF.
+        ASSIGN COMPONENT lr_name->* OF STRUCTURE <row> TO <field>.
         " the value as it is - a separator, a quote or a line break inside
         " it is quoted, not replaced
         INSERT csv_escape_cell( |{ <field> }| ) INTO TABLE lt_cells.
-      ENDDO.
+      ENDLOOP.
       INSERT concat_lines_of( table = lt_cells
                               sep   = `;` ) INTO TABLE lt_lines.
     ENDLOOP.
@@ -4788,9 +5010,22 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
       DATA(lv_name) = csv_get_column_name( val   = lr_col->*
                                            index = lv_tabix ).
-      " a name the header carries twice
+      " a name the header carries twice - and the fallback name may be
+      " taken too (`A;COL3;A`), which made the structure creation below
+      " raise CX_SY_STRUCT_COMP_NAME out of the method
       IF line_exists( lt_names[ table_line = lv_name ] ).
         lv_name = |COL{ lv_tabix }|.
+        " DO with an EXIT, not WHILE line_exists( ): the 7.02 downport
+        " evaluates a WHILE condition with a table expression once, in
+        " front of the loop, and the loop never ended
+        DATA(lv_suffix) = 1.
+        DO.
+          IF NOT line_exists( lt_names[ table_line = lv_name ] ).
+            EXIT.
+          ENDIF.
+          lv_suffix = lv_suffix + 1.
+          lv_name = |COL{ lv_tabix }_{ lv_suffix }|.
+        ENDDO.
       ENDIF.
       INSERT lv_name INTO TABLE lt_names.
 
@@ -5481,9 +5716,19 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    CALL TRANSFORMATION id
-         SOURCE XML xml
-         RESULT data = any.
+    " a broken document, or one written for a type that has changed since,
+    " raises a static transformation error - out of a method without RAISING
+    " it reached the caller as CX_SY_NO_HANDLER, which no CATCH of this
+    " repository's one exception class sees
+    TRY.
+        CALL TRANSFORMATION id
+             SOURCE XML xml
+             RESULT data = any.
+      CATCH cx_transformation_error INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING val      = `XML_PARSE_ERROR - the XML does not fit the target`
+                    previous = x.
+    ENDTRY.
 
   ENDMETHOD.
 
@@ -6714,38 +6959,101 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD conv_string_to_date.
 
+    DATA lt_val_groups TYPE string_table.
+    DATA lt_fmt_groups TYPE string_table.
+    DATA lv_group      TYPE string.
+    DATA lv_index      TYPE i.
+
     DATA(lv_val) = CONV string( val ).
     DATA(lv_fmt) = CONV string( format ).
 
+    " the digits of the value, all of them and in their runs
     DATA(lv_clean) = ``.
     DATA(lv_i) = 0.
     WHILE lv_i < strlen( lv_val ).
       DATA(lv_c) = lv_val+lv_i(1).
       IF lv_c >= `0` AND lv_c <= `9`.
         lv_clean = lv_clean && lv_c.
+        lv_group = lv_group && lv_c.
+      ELSEIF lv_group IS NOT INITIAL.
+        INSERT lv_group INTO TABLE lt_val_groups.
+        CLEAR lv_group.
       ENDIF.
       lv_i = lv_i + 1.
     ENDWHILE.
+    IF lv_group IS NOT INITIAL.
+      INSERT lv_group INTO TABLE lt_val_groups.
+      CLEAR lv_group.
+    ENDIF.
 
+    " the letters of the format, all of them and in runs of one letter
     DATA(lv_fmt_clean) = ``.
     lv_i = 0.
     WHILE lv_i < strlen( lv_fmt ).
       lv_c = lv_fmt+lv_i(1).
       IF lv_c = `Y` OR lv_c = `M` OR lv_c = `D`.
         lv_fmt_clean = lv_fmt_clean && lv_c.
+        IF lv_group IS NOT INITIAL AND lv_group(1) <> lv_c.
+          INSERT lv_group INTO TABLE lt_fmt_groups.
+          CLEAR lv_group.
+        ENDIF.
+        lv_group = lv_group && lv_c.
+      ELSEIF lv_group IS NOT INITIAL.
+        INSERT lv_group INTO TABLE lt_fmt_groups.
+        CLEAR lv_group.
       ENDIF.
       lv_i = lv_i + 1.
     ENDWHILE.
+    IF lv_group IS NOT INITIAL.
+      INSERT lv_group INTO TABLE lt_fmt_groups.
+    ENDIF.
+
+    DATA(lv_year)  = ``.
+    DATA(lv_month) = ``.
+    DATA(lv_day)   = ``.
+
+    " a value written with separators is read by its parts, in the order
+    " the format names them: `5.3.2024` is the 5th of March, and a time
+    " behind the date (`5.3.2024 10:30`) is left out. Read digit by digit,
+    " the first value came out as an initial date and the second as the
+    " year 2410. A day or a month may have one digit, a year its full
+    " length; a part longer than the format allows is no date
+    IF lines( lt_val_groups ) > 1 AND lines( lt_val_groups ) >= lines( lt_fmt_groups ).
+      LOOP AT lt_fmt_groups REFERENCE INTO DATA(lr_fmt).
+        lv_index = lv_index + 1.
+        lv_group = lt_val_groups[ lv_index ].
+        DATA(lv_len) = strlen( lr_fmt->* ).
+        IF strlen( lv_group ) > lv_len OR ( lr_fmt->*(1) = `Y` AND strlen( lv_group ) < lv_len ).
+          RETURN.
+        ENDIF.
+        WHILE strlen( lv_group ) < lv_len.
+          lv_group = `0` && lv_group.
+        ENDWHILE.
+        " a letter the format names twice (`DD.MM.YYYY HH:MM`) counts once
+        CASE lr_fmt->*(1).
+          WHEN `Y`.
+            IF lv_year IS INITIAL.
+              lv_year = lv_group.
+            ENDIF.
+          WHEN `M`.
+            IF lv_month IS INITIAL.
+              lv_month = lv_group.
+            ENDIF.
+          WHEN `D`.
+            IF lv_day IS INITIAL.
+              lv_day = lv_group.
+            ENDIF.
+        ENDCASE.
+      ENDLOOP.
+      result = lv_year && lv_month && lv_day.
+      RETURN.
+    ENDIF.
 
     " fewer digits than the format asks for: no date, instead of reading
     " behind the end of the value
     IF strlen( lv_clean ) < strlen( lv_fmt_clean ).
       RETURN.
     ENDIF.
-
-    DATA(lv_year)  = ``.
-    DATA(lv_month) = ``.
-    DATA(lv_day)   = ``.
 
     DATA(lv_pos) = 0.
     lv_i = 0.
@@ -7688,10 +7996,14 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       <key>-idx = lv_tabix.
     ENDLOOP.
 
+    " the row index as the last key, in both directions: rows with equal
+    " keys keep their order (a stable sort) - without it they came back in
+    " any order, jumped on every re-sort and a sort by a second column did
+    " not keep the order of the first
     IF descending = abap_true.
-      SORT lt_key BY key_num DESCENDING key_str DESCENDING.
+      SORT lt_key BY key_num DESCENDING key_str DESCENDING idx ASCENDING.
     ELSE.
-      SORT lt_key BY key_num ASCENDING key_str ASCENDING.
+      SORT lt_key BY key_num ASCENDING key_str ASCENDING idx ASCENDING.
     ENDIF.
 
     DATA lr_copy TYPE REF TO data.
@@ -7761,8 +8073,20 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD itab_count_by.
 
+    TYPES:
+      BEGIN OF ty_s_count,
+        n     TYPE string,
+        count TYPE i,
+      END OF ty_s_count.
+
     FIELD-SYMBOLS <row>   TYPE any.
     FIELD-SYMBOLS <field> TYPE any.
+    FIELD-SYMBOLS <count> TYPE ty_s_count.
+    " counted in a hashed table as integers - a key read on result scanned
+    " every value for every row, and converted the count from text and back
+    DATA lt_count TYPE HASHED TABLE OF ty_s_count WITH UNIQUE KEY n.
+    " the values in the order they first came, which is the order of result
+    DATA lt_order TYPE string_table.
 
     LOOP AT tab ASSIGNING <row>.
       ASSIGN COMPONENT fieldname OF STRUCTURE <row> TO <field>.
@@ -7770,13 +8094,19 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CONTINUE.
       ENDIF.
       DATA(lv_val) = |{ <field> }|.
-      ASSIGN result[ n = lv_val ] TO FIELD-SYMBOL(<entry>).
+      ASSIGN lt_count[ n = lv_val ] TO <count>.
       IF sy-subrc = 0.
-        DATA(lv_count) = CONV i( <entry>-v ) + 1.
-        <entry>-v = |{ lv_count }|.
+        <count>-count = <count>-count + 1.
       ELSE.
-        INSERT VALUE #( n = lv_val v = `1` ) INTO TABLE result.
+        INSERT VALUE #( n     = lv_val
+                        count = 1 ) INTO TABLE lt_count.
+        INSERT lv_val INTO TABLE lt_order.
       ENDIF.
+    ENDLOOP.
+
+    LOOP AT lt_order REFERENCE INTO DATA(lr_val).
+      INSERT VALUE #( n = lr_val->*
+                      v = |{ lt_count[ n = lr_val->* ]-count }| ) INTO TABLE result.
     ENDLOOP.
 
   ENDMETHOD.
@@ -13381,20 +13711,144 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD conv_get_xlsx_by_itab.
 
-*    DATA(write_access) = xco_cp_xlsx=>document->empty( )->write_access( ).
-*    DATA(worksheet) = write_access->get_workbook( )->worksheet->at_position( 1 ).
-*    DATA(selection_pattern) = xco_cp_xlsx_selection=>pattern_builder->simple_from_to( )->get_pattern( ).
-*    worksheet->select( selection_pattern
-*               )->row_stream(
-*               )->operation->write_from( REF #( val )
-*               )->execute( ).
-*    result = write_access->get_file_content( ).
+    " One worksheet as XML, zipped with the four parts a workbook needs
+    " (zip_pack: CL_ABAP_ZIP, released on ABAP Cloud and there on every
+    " release down to 7.02). Ported from abap-cloud-gui's ALV export, with
+    " its escaping: c_escape_xml drops the control characters XML 1.0
+    " forbids - a legacy text carries them, and Excel "repairs" a workbook
+    " with one - and xml:space keeps leading and trailing blanks
+    CONSTANTS lc_xml      TYPE string VALUE `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`.
+    CONSTANTS lc_main     TYPE string VALUE `http://schemas.openxmlformats.org/spreadsheetml/2006/main`.
+    CONSTANTS lc_rel      TYPE string VALUE `http://schemas.openxmlformats.org/officeDocument/2006/relationships`.
+    CONSTANTS lc_pkg_rel  TYPE string VALUE `http://schemas.openxmlformats.org/package/2006/relationships`.
+    CONSTANTS lc_ct       TYPE string VALUE `application/vnd.openxmlformats-officedocument.spreadsheetml`.
+    TYPES:
+      BEGIN OF ty_s_col,
+        name TYPE string,
+        kind TYPE string,
+      END OF ty_s_col.
+    DATA lt_col  TYPE STANDARD TABLE OF ty_s_col WITH EMPTY KEY.
+    DATA lt_xml  TYPE string_table.
+    DATA lt_cell TYPE string_table.
+    DATA lv_date TYPE d.
+    DATA lv_time TYPE t.
+    DATA lv_text TYPE string.
+    FIELD-SYMBOLS <row>  TYPE any.
+    FIELD-SYMBOLS <cell> TYPE any.
 
-    " not implemented: the result was silently empty, which reads like
-    " a success - the XCO version above is the template
-    RAISE EXCEPTION TYPE zabaputil_cx_util_error
-      EXPORTING
-        val = `CONV_GET_XLSX_BY_ITAB is not implemented`.
+    " the columns, decided once from the line type: the included view, so
+    " that an include gives its fields, not one nameless column
+    DATA(lo_table) = CAST cl_abap_tabledescr( cl_abap_typedescr=>describe_by_data( val ) ).
+    DATA(lo_line) = lo_table->get_table_line_type( ).
+    DATA(lv_elementary) = xsdbool( lo_line->kind <> cl_abap_typedescr=>kind_struct ).
+    IF lv_elementary = abap_true.
+      INSERT VALUE #( name = `TABLE_LINE`
+                      kind = xlsx_get_column_kind( lo_line ) ) INTO TABLE lt_col.
+    ELSE.
+      DATA(lt_comp) = CAST cl_abap_structdescr( lo_line )->get_included_view( ).
+      LOOP AT lt_comp REFERENCE INTO DATA(lr_comp).
+        INSERT VALUE #( name = lr_comp->name
+                        kind = xlsx_get_column_kind( lr_comp->type ) ) INTO TABLE lt_col.
+      ENDLOOP.
+    ENDIF.
+
+    INSERT |{ lc_xml }<worksheet xmlns="{ lc_main }"><sheetData>| INTO TABLE lt_xml.
+    LOOP AT lt_col REFERENCE INTO DATA(lr_col).
+      INSERT xlsx_get_text_cell( lr_col->name ) INTO TABLE lt_cell.
+    ENDLOOP.
+    INSERT |<row>{ concat_lines_of( lt_cell ) }</row>| INTO TABLE lt_xml.
+
+    LOOP AT val ASSIGNING <row>.
+      CLEAR lt_cell.
+      LOOP AT lt_col REFERENCE INTO lr_col.
+        IF lr_col->kind IS INITIAL.
+          INSERT `<c/>` INTO TABLE lt_cell.
+          CONTINUE.
+        ENDIF.
+        IF lv_elementary = abap_true.
+          ASSIGN <row> TO <cell>.
+        ELSE.
+          ASSIGN COMPONENT lr_col->name OF STRUCTURE <row> TO <cell>.
+        ENDIF.
+        CASE lr_col->kind.
+          WHEN `N`.
+            " a string template writes the sign in front and a period
+            " as decimal separator, without thousands separators - the
+            " number format of the file, whatever the user's settings
+            INSERT |<c><v>{ <cell> }</v></c>| INTO TABLE lt_cell.
+          WHEN `D`.
+            lv_date = <cell>.
+            CLEAR lv_text.
+            IF lv_date IS NOT INITIAL.
+              lv_text = |{ lv_date(4) }-{ lv_date+4(2) }-{ lv_date+6(2) }|.
+            ENDIF.
+            INSERT xlsx_get_text_cell( lv_text ) INTO TABLE lt_cell.
+          WHEN `T`.
+            lv_time = <cell>.
+            INSERT xlsx_get_text_cell( |{ lv_time(2) }:{ lv_time+2(2) }:{ lv_time+4(2) }| ) INTO TABLE lt_cell.
+          WHEN OTHERS.
+            INSERT xlsx_get_text_cell( |{ <cell> }| ) INTO TABLE lt_cell.
+        ENDCASE.
+      ENDLOOP.
+      INSERT |<row>{ concat_lines_of( lt_cell ) }</row>| INTO TABLE lt_xml.
+    ENDLOOP.
+    INSERT `</sheetData></worksheet>` INTO TABLE lt_xml.
+
+    DATA(lt_files) = VALUE ty_t_zip_file(
+        ( name    = `[Content_Types].xml`
+          content = conv_get_xstring_by_string(
+                        |{ lc_xml }<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">|
+                     && |<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>|
+                     && |<Default Extension="xml" ContentType="application/xml"/>|
+                     && |<Override PartName="/xl/workbook.xml" ContentType="{ lc_ct }.sheet.main+xml"/>|
+                     && |<Override PartName="/xl/worksheets/sheet1.xml" ContentType="{ lc_ct }.worksheet+xml"/>|
+                     && |</Types>| ) )
+        ( name    = `_rels/.rels`
+          content = conv_get_xstring_by_string(
+                        |{ lc_xml }<Relationships xmlns="{ lc_pkg_rel }">|
+                     && |<Relationship Id="rId1" Type="{ lc_rel }/officeDocument" Target="xl/workbook.xml"/>|
+                     && |</Relationships>| ) )
+        ( name    = `xl/workbook.xml`
+          content = conv_get_xstring_by_string(
+                        |{ lc_xml }<workbook xmlns="{ lc_main }" xmlns:r="{ lc_rel }">|
+                     && |<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>| ) )
+        ( name    = `xl/_rels/workbook.xml.rels`
+          content = conv_get_xstring_by_string(
+                        |{ lc_xml }<Relationships xmlns="{ lc_pkg_rel }">|
+                     && |<Relationship Id="rId1" Type="{ lc_rel }/worksheet" Target="worksheets/sheet1.xml"/>|
+                     && |</Relationships>| ) )
+        ( name    = `xl/worksheets/sheet1.xml`
+          content = conv_get_xstring_by_string( concat_lines_of( lt_xml ) ) ) ).
+
+    result = zip_pack( lt_files ).
+
+  ENDMETHOD.
+
+  METHOD xlsx_get_column_kind.
+
+    IF type->kind <> cl_abap_typedescr=>kind_elem.
+      RETURN.
+    ENDIF.
+    IF type->type_kind = cl_abap_typedescr=>typekind_date.
+      result = `D`.
+    ELSEIF type->type_kind = cl_abap_typedescr=>typekind_time.
+      result = `T`.
+    ELSEIF rtti_check_typekind_number( type->type_kind ) = abap_true.
+      result = `N`.
+    ELSE.
+      " a NUMC is text - its leading zeros are the point of it
+      result = `S`.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD xlsx_get_text_cell.
+
+    IF val IS INITIAL.
+      result = `<c/>`.
+      RETURN.
+    ENDIF.
+    result = |<c t="inlineStr"><is><t xml:space="preserve">{ c_escape_xml( val ) }</t></is></c>|.
 
   ENDMETHOD.
 
@@ -13496,7 +13950,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD c_escape_json.
-    CONSTANTS lc_ctrl_hex TYPE string VALUE `01020304050607080B0C0E0F101112131415161718191A1B1C1D1E1F`.
+    " U+0000 included - RFC 8259 asks for every character below U+0020, and
+    " a raw NUL out of a binary-to-text conversion made JSON.parse refuse
+    " the whole document
+    CONSTANTS lc_ctrl_hex TYPE string VALUE `0001020304050607080B0C0E0F101112131415161718191A1B1C1D1E1F`.
 
     IF gv_json_specials IS INITIAL.
       TRY.
@@ -13596,6 +14053,140 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                       sub  = |\r|
                       with = `\r`
                       occ  = 0 ).
+
+  ENDMETHOD.
+
+  METHOD c_unescape_xml.
+
+    DATA lv_pos TYPE i.
+
+    DATA(lv_val) = CONV string( val ).
+    IF lv_val NS `&`.
+      result = lv_val.
+      RETURN.
+    ENDIF.
+
+    DATA(lv_len) = strlen( lv_val ).
+    WHILE lv_pos < lv_len.
+      DATA(lv_amp) = find( val = lv_val
+                           sub = `&`
+                           off = lv_pos ).
+      IF lv_amp < 0.
+        result = result && substring( val = lv_val
+                                      off = lv_pos ).
+        RETURN.
+      ENDIF.
+      result = result && substring( val = lv_val
+                                    off = lv_pos
+                                    len = lv_amp - lv_pos ).
+
+      " a reference is short: `&#x10FFFF;` is the longest one there is
+      DATA(lv_semi) = find( val = lv_val
+                            sub = `;`
+                            off = lv_amp ).
+      DATA(lv_char) = ``.
+      IF lv_semi > lv_amp + 1 AND lv_semi - lv_amp <= 10.
+        lv_char = c_unescape_xml_reference( substring( val = lv_val
+                                                       off = lv_amp + 1
+                                                       len = lv_semi - lv_amp - 1 ) ).
+      ENDIF.
+      IF lv_char IS INITIAL.
+        result = result && `&`.
+        lv_pos = lv_amp + 1.
+      ELSE.
+        result = result && lv_char.
+        lv_pos = lv_semi + 1.
+      ENDIF.
+    ENDWHILE.
+
+  ENDMETHOD.
+
+  METHOD c_unescape_xml_reference.
+
+    DATA lv_code   TYPE i.
+    DATA lv_digits TYPE string.
+    DATA lv_hex    TYPE string.
+    DATA lv_byte   TYPE i.
+    DATA lv_x      TYPE x LENGTH 1.
+    DATA lt_byte   TYPE STANDARD TABLE OF i WITH EMPTY KEY.
+
+    CASE name.
+      WHEN `lt`.
+        result = `<`.
+        RETURN.
+      WHEN `gt`.
+        result = `>`.
+        RETURN.
+      WHEN `amp`.
+        result = `&`.
+        RETURN.
+      WHEN `quot`.
+        result = `"`.
+        RETURN.
+      WHEN `apos`.
+        result = `'`.
+        RETURN.
+    ENDCASE.
+
+    IF strlen( name ) < 2 OR name(1) <> `#`.
+      RETURN.
+    ENDIF.
+    IF name+1(1) = `x` OR name+1(1) = `X`.
+      lv_digits = to_upper( substring( val = name
+                                       off = 2 ) ).
+      IF lv_digits IS INITIAL OR lv_digits CN `0123456789ABCDEF` OR strlen( lv_digits ) > 6.
+        RETURN.
+      ENDIF.
+      DATA(lv_i) = 0.
+      WHILE lv_i < strlen( lv_digits ).
+        lv_code = lv_code * 16 + find( val = `0123456789ABCDEF`
+                                       sub = lv_digits+lv_i(1) ).
+        lv_i = lv_i + 1.
+      ENDWHILE.
+    ELSE.
+      lv_digits = substring( val = name
+                             off = 1 ).
+      IF lv_digits CN `0123456789` OR strlen( lv_digits ) > 7.
+        RETURN.
+      ENDIF.
+      lv_code = lv_digits.
+    ENDIF.
+
+    " what XML 1.0 allows: tab, LF, CR, from U+0020 on - no surrogate
+    " halves, no U+FFFE and U+FFFF, nothing above U+10FFFF
+    IF lv_code < 32 AND lv_code <> 9 AND lv_code <> 10 AND lv_code <> 13.
+      RETURN.
+    ENDIF.
+    IF ( lv_code >= 55296 AND lv_code <= 57343 ) OR lv_code = 65534 OR lv_code = 65535 OR lv_code > 1114111.
+      RETURN.
+    ENDIF.
+
+    " the code point as UTF-8 bytes, decoded by the codepage API
+    IF lv_code < 128.
+      INSERT lv_code INTO TABLE lt_byte.
+    ELSEIF lv_code < 2048.
+      INSERT 192 + lv_code DIV 64 INTO TABLE lt_byte.
+      INSERT 128 + lv_code MOD 64 INTO TABLE lt_byte.
+    ELSEIF lv_code < 65536.
+      INSERT 224 + lv_code DIV 4096 INTO TABLE lt_byte.
+      INSERT 128 + ( lv_code DIV 64 ) MOD 64 INTO TABLE lt_byte.
+      INSERT 128 + lv_code MOD 64 INTO TABLE lt_byte.
+    ELSE.
+      INSERT 240 + lv_code DIV 262144 INTO TABLE lt_byte.
+      INSERT 128 + ( lv_code DIV 4096 ) MOD 64 INTO TABLE lt_byte.
+      INSERT 128 + ( lv_code DIV 64 ) MOD 64 INTO TABLE lt_byte.
+      INSERT 128 + lv_code MOD 64 INTO TABLE lt_byte.
+    ENDIF.
+    LOOP AT lt_byte INTO lv_byte.
+      lv_x = lv_byte.
+      lv_hex = |{ lv_hex }{ lv_x }|.
+    ENDLOOP.
+    TRY.
+        result = conv_get_string_by_xstring( CONV xstring( lv_hex ) ).
+      CATCH zabaputil_cx_util_error.
+        " no codepage API: the reference stays as it is written
+        CLEAR result.
+    ENDTRY.
 
   ENDMETHOD.
 
@@ -13986,6 +14577,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     " the pending bytes as hex digits - a byte string has no expression
     " that appends to it, the hex text converts back in one step
     DATA lv_xbuf TYPE string.
+    " the same escapes as written - what comes out when they are no UTF-8
+    DATA lv_raw TYPE string.
 
     WHILE lv_i < lv_len.
 
@@ -14005,13 +14598,18 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         DATA lv_x TYPE x LENGTH 1.
         lv_x = lv_hex.
         lv_xbuf = |{ lv_xbuf }{ lv_x }|.
+        lv_raw = lv_raw && substring( val = lv_val
+                                      off = lv_i
+                                      len = 3 ).
         lv_i = lv_i + 3.
         CONTINUE.
       ENDIF.
 
       IF lv_xbuf IS NOT INITIAL.
-        result = result && conv_get_string_by_xstring( CONV xstring( lv_xbuf ) ).
+        result = result && url_decode_bytes( hex = lv_xbuf
+                                             raw = lv_raw ).
         CLEAR lv_xbuf.
+        CLEAR lv_raw.
       ENDIF.
 
       IF lv_char = `+`.
@@ -14024,7 +14622,26 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDWHILE.
 
     IF lv_xbuf IS NOT INITIAL.
-      result = result && conv_get_string_by_xstring( CONV xstring( lv_xbuf ) ).
+      result = result && url_decode_bytes( hex = lv_xbuf
+                                           raw = lv_raw ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD url_decode_bytes.
+
+    DATA lv_invalid TYPE abap_bool.
+
+    " `%E9` (a Latin-1 client), `%FF` or a cut `%C3` raised INVALID_UTF8
+    " out of user-controlled input - such a run stays as it was written,
+    " like `%ZZ` does
+    conv_get_string_by_xstring_cp( EXPORTING val      = CONV xstring( hex )
+                                             codepage = `UTF-8`
+                                             encoding = `UTF-8`
+                                   IMPORTING result   = result
+                                             invalid  = lv_invalid ).
+    IF lv_invalid = abap_true.
+      result = raw.
     ENDIF.
 
   ENDMETHOD.
@@ -14334,6 +14951,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD itab_distinct.
 
     FIELD-SYMBOLS <row> TYPE any.
+    " the values already in result - a line_exists( ) on result itself made
+    " a near-unique column of n rows cost n * n / 2 comparisons
+    DATA lt_seen TYPE HASHED TABLE OF string WITH UNIQUE KEY table_line.
     DATA(lv_fieldname) = to_upper( fieldname ).
 
     LOOP AT tab ASSIGNING <row>.
@@ -14341,8 +14961,11 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       IF sy-subrc <> 0.
         CONTINUE.
       ENDIF.
-      DATA(lv_str) = CONV string( <val> ).
-      IF NOT line_exists( result[ table_line = lv_str ] ).
+      " a string template, not CONV: a plain move writes the sign of a
+      " number behind it (`5-`), where itab_count_by and the UI write `-5`
+      DATA(lv_str) = |{ <val> }|.
+      INSERT lv_str INTO TABLE lt_seen.
+      IF sy-subrc = 0.
         INSERT lv_str INTO TABLE result.
       ENDIF.
     ENDLOOP.
@@ -14356,9 +14979,18 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         n   TYPE string,
         sum TYPE decfloat34,
       END OF ty_s_sum.
+    TYPES:
+      BEGIN OF ty_s_index,
+        n   TYPE string,
+        idx TYPE i,
+      END OF ty_s_index.
 
     DATA lt_sum TYPE STANDARD TABLE OF ty_s_sum WITH EMPTY KEY.
+    " group -> its row in lt_sum: a key read on lt_sum itself scanned every
+    " group for every row
+    DATA lt_index TYPE HASHED TABLE OF ty_s_index WITH UNIQUE KEY n.
     FIELD-SYMBOLS <row> TYPE any.
+    FIELD-SYMBOLS <sum> TYPE ty_s_sum.
 
     DATA(lv_group_by) = to_upper( group_by ).
     DATA(lv_sum_by) = to_upper( sum_by ).
@@ -14374,10 +15006,15 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CONTINUE.
       ENDIF.
 
-      DATA(lv_group) = CONV string( <group> ).
-      ASSIGN lt_sum[ n = lv_group ] TO FIELD-SYMBOL(<sum>).
-      IF sy-subrc <> 0.
+      " a string template, not CONV - see itab_distinct
+      DATA(lv_group) = |{ <group> }|.
+      ASSIGN lt_index[ n = lv_group ] TO FIELD-SYMBOL(<index>).
+      IF sy-subrc = 0.
+        ASSIGN lt_sum[ <index>-idx ] TO <sum>.
+      ELSE.
         INSERT VALUE #( n = lv_group ) INTO TABLE lt_sum ASSIGNING <sum>.
+        INSERT VALUE #( n   = lv_group
+                        idx = lines( lt_sum ) ) INTO TABLE lt_index.
       ENDIF.
       <sum>-sum = <sum>-sum + <val>.
 
@@ -14452,6 +15089,24 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDIF.
 
     result = lv_rounded * lv_sign / lv_factor.
+
+  ENDMETHOD.
+
+  METHOD file_get_name_by_path.
+
+    " a browser hands over `C:\fakepath\name` on Windows, a path with `/`
+    " elsewhere - both separators end a folder
+    result = replace( val  = CONV string( val )
+                      sub  = `\`
+                      with = `/`
+                      occ  = 0 ).
+    DATA(lv_slash) = find( val = result
+                           sub = `/`
+                           occ = -1 ).
+    IF lv_slash >= 0.
+      result = substring( val = result
+                          off = lv_slash + 1 ).
+    ENDIF.
 
   ENDMETHOD.
 
@@ -15185,13 +15840,19 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    DATA(lv_value) = |{ field }|.
+    result = itab_filter_check_text( text        = |{ field }|
+                                     search      = search
+                                     ignore_case = ignore_case ).
+
+  ENDMETHOD.
+
+  METHOD itab_filter_check_text.
+
     IF ignore_case = abap_true.
-      lv_value = to_upper( lv_value ).
-      IF lv_value CS search.
+      IF to_upper( text ) CS search.
         result = abap_true.
       ENDIF.
-    ELSEIF find( val = lv_value
+    ELSEIF find( val = text
                  sub = search ) >= 0.
       result = abap_true.
     ENDIF.
@@ -18120,6 +18781,13 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA lv_was_quoted TYPE abap_bool.
     DATA lv_pos   TYPE i.
     DATA lv_next  TYPE string.
+    " the next separator, CR and LF at or behind lv_pos, lv_len for none:
+    " the text between two of them goes into the cell in one piece - one
+    " concatenation per character made a long cell cost its length squared.
+    " Each is searched again only when lv_pos has passed it
+    DATA lv_next_sep TYPE i VALUE -1.
+    DATA lv_next_cr  TYPE i VALUE -1.
+    DATA lv_next_lf  TYPE i VALUE -1.
 
     DATA(lv_len) = strlen( val ).
     DATA(lv_sep_len) = strlen( separator ).
@@ -18141,9 +18809,32 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CONTINUE.
       ENDIF.
 
-      IF lv_pos + lv_sep_len <= lv_len AND substring( val = val
-                                                      off = lv_pos
-                                                      len = lv_sep_len ) = separator.
+      IF lv_next_sep < lv_pos.
+        lv_next_sep = find( val = val
+                            sub = separator
+                            off = lv_pos ).
+        IF lv_next_sep < 0.
+          lv_next_sep = lv_len.
+        ENDIF.
+      ENDIF.
+      IF lv_next_cr < lv_pos.
+        lv_next_cr = find( val = val
+                           sub = |\r|
+                           off = lv_pos ).
+        IF lv_next_cr < 0.
+          lv_next_cr = lv_len.
+        ENDIF.
+      ENDIF.
+      IF lv_next_lf < lv_pos.
+        lv_next_lf = find( val = val
+                           sub = |\n|
+                           off = lv_pos ).
+        IF lv_next_lf < 0.
+          lv_next_lf = lv_len.
+        ENDIF.
+      ENDIF.
+
+      IF lv_next_sep = lv_pos.
         INSERT lv_cell INTO TABLE lt_cells.
         CLEAR lv_cell.
         lv_was_quoted = abap_false.
@@ -18152,8 +18843,13 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       ENDIF.
 
       IF lv_char <> |\n| AND lv_char <> |\r|.
-        lv_cell = lv_cell && lv_char.
-        lv_pos = lv_pos + 1.
+        DATA(lv_end) = nmin( val1 = lv_next_sep
+                             val2 = nmin( val1 = lv_next_cr
+                                          val2 = lv_next_lf ) ).
+        lv_cell = lv_cell && substring( val = val
+                                        off = lv_pos
+                                        len = lv_end - lv_pos ).
+        lv_pos = lv_end.
         CONTINUE.
       ENDIF.
 
@@ -18345,18 +19041,26 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD csv_read_quoted.
 
+    " the text up to the next quote in one piece, not one concatenation
+    " per character
     DATA(lv_len) = strlen( val ).
     pos = pos + 1.
 
     WHILE pos < lv_len.
-      DATA(lv_char) = substring( val = val
-                                 off = pos
-                                 len = 1 ).
-      pos = pos + 1.
-      IF lv_char <> `"`.
-        cell = cell && lv_char.
-        CONTINUE.
+      DATA(lv_quote) = find( val = val
+                             sub = `"`
+                             off = pos ).
+      " a quote that is never closed: the cell runs to the end of the text
+      IF lv_quote < 0.
+        cell = cell && substring( val = val
+                                  off = pos ).
+        pos = lv_len.
+        RETURN.
       ENDIF.
+      cell = cell && substring( val = val
+                                off = pos
+                                len = lv_quote - pos ).
+      pos = lv_quote + 1.
       " a quote: doubled it is one quote of the text, alone it closes the cell
       IF pos >= lv_len OR substring( val = val
                                      off = pos

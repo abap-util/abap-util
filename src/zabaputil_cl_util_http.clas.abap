@@ -219,6 +219,8 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     DATA lv_destination TYPE c LENGTH 32.
     lv_destination = destination.
     DATA(lv_url) = CONV string( url ).
+    " the classic exception by name - each one has another fix
+    DATA lv_error TYPE string.
 
     TRY.
 
@@ -236,6 +238,18 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
               plugin_not_active        = 4
               internal_error           = 5
               OTHERS                   = 6.
+          CASE sy-subrc.
+            WHEN 0.
+            WHEN 1. lv_error = `ARGUMENT_NOT_FOUND`.
+            WHEN 2. lv_error = `DESTINATION_NOT_FOUND`.
+            WHEN 3. lv_error = `DESTINATION_NO_AUTHORITY`.
+            WHEN 4. lv_error = `PLUGIN_NOT_ACTIVE`.
+            WHEN 5. lv_error = `INTERNAL_ERROR`.
+            WHEN OTHERS. lv_error = `OTHERS`.
+          ENDCASE.
+          IF lv_error IS NOT INITIAL.
+            lv_error = |{ lv_error } ({ condense( lv_destination ) })|.
+          ENDIF.
 
         ELSE.
 
@@ -249,10 +263,18 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
               plugin_not_active  = 2
               internal_error     = 3
               OTHERS             = 4.
+          " the url itself stays out of the text - its query may carry a key
+          CASE sy-subrc.
+            WHEN 0.
+            WHEN 1. lv_error = `ARGUMENT_NOT_FOUND`.
+            WHEN 2. lv_error = `PLUGIN_NOT_ACTIVE`.
+            WHEN 3. lv_error = `INTERNAL_ERROR`.
+            WHEN OTHERS. lv_error = `OTHERS`.
+          ENDCASE.
 
         ENDIF.
 
-        IF sy-subrc <> 0.
+        IF lv_error IS NOT INITIAL.
           CLEAR result.
         ENDIF.
 
@@ -261,9 +283,14 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
           EXPORTING val = x.
     ENDTRY.
 
+    " destination_no_authority, destination_not_found and plugin_not_active
+    " (HTTPS not set up) need different fixes - the text names which one
     IF result IS NOT BOUND.
+      IF lv_error IS INITIAL.
+        lv_error = `check the destination/url configuration`.
+      ENDIF.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
-        EXPORTING val = `HTTP_CLIENT_CREATE_ERROR - check the destination/url configuration`.
+        EXPORTING val = |HTTP_CLIENT_CREATE_ERROR - { lv_error }|.
     ENDIF.
 
     " No logon popup: the client runs inside an ICF request, a work process
@@ -346,6 +373,13 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
         ENDIF.
         lo_response = <any>.
 
+        " the status first - it is what the caller needs most, also when
+        " the body below cannot be read as text
+        CALL METHOD lo_response->(`GET_STATUS`)
+          IMPORTING
+            code   = result-status_code
+            reason = result-status_reason.
+
         " The body as text. GET_CDATA decodes by the charset the response
         " names - and without one in Content-Type (an `application/json`
         " answer of most APIs, the language model providers' among them) the
@@ -369,13 +403,17 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
           CALL METHOD lo_response->(`GET_DATA`)
             RECEIVING
               data = lv_bytes.
-          result-body = zabaputil_cl_util_context=>conv_get_string_by_xstring( lv_bytes ).
+          TRY.
+              result-body = zabaputil_cl_util_context=>conv_get_string_by_xstring( lv_bytes ).
+            CATCH zabaputil_cx_util_error.
+              " no UTF-8 after all - a Latin-1 error page without a charset,
+              " an image, a PDF. That raised, and the caller lost the 404 or
+              " the 500 with it; the ICF's own reading never fails
+              CALL METHOD lo_response->(`GET_CDATA`)
+                RECEIVING
+                  data = result-body.
+          ENDTRY.
         ENDIF.
-
-        CALL METHOD lo_response->(`GET_STATUS`)
-          IMPORTING
-            code   = result-status_code
-            reason = result-status_reason.
 
         " a failed CLOSE changes nothing for the caller, the response is read
         CALL METHOD lo_client->(`CLOSE`)
@@ -435,7 +473,9 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
           value = ls_header-v.
     ENDLOOP.
 
-    DATA(lv_method) = is_req-method.
+    " upper case as on ABAP Cloud - the method token is case-sensitive, and
+    " `post` went out as it was and came back as a 400 or 405
+    DATA(lv_method) = to_upper( is_req-method ).
     CALL METHOD lo_request->(`SET_METHOD`)
       EXPORTING
         method = lv_method.
