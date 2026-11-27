@@ -3935,10 +3935,16 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE ty_s_msg.
 
+    " calls a lock module by name: result = it succeeded. subrc: 0, 1 for
+    " FOREIGN_LOCK of an ENQUEUE_ module, 4 for any other exception it
+    " raised, 99 when the call itself failed (no such module, a parameter
+    " it does not have)
     CLASS-METHODS lock_call_function
       IMPORTING
         val           TYPE clike
         t_param       TYPE ty_t_lock_param OPTIONAL
+      EXPORTING
+        subrc         TYPE i
       RETURNING
         VALUE(result) TYPE abap_bool.
 
@@ -12228,16 +12234,28 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD lock_is_locked.
 
-    " Try to set the lock — if it fails, the object is locked.
-    DATA(lv_locked) = lock_set( val     = val
-                                 t_param = t_param ).
-    IF lv_locked = abap_true.
-      " We got it — release immediately
+    DATA lv_subrc TYPE i.
+    DATA lv_set   TYPE abap_bool.
+
+    " Try to set the lock - FOREIGN_LOCK means someone else holds it. Any
+    " other failure (a wrong module name, a parameter it does not have, a
+    " SYSTEM_FAILURE) says nothing about the lock and is raised - it used
+    " to answer "locked"
+    lock_call_function( EXPORTING val     = val
+                                  t_param = t_param
+                        IMPORTING subrc   = lv_subrc
+                        RECEIVING result  = lv_set ).
+    IF lv_set = abap_true.
+      " We got it - release immediately
       lock_delete( val     = val
                    t_param = t_param ).
       result = abap_false.
-    ELSE.
+    ELSEIF lv_subrc = 1.
       result = abap_true.
+    ELSE.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |LOCK_IS_LOCKED: { val } failed (sy-subrc { lv_subrc })|.
     ENDIF.
 
   ENDMETHOD.
@@ -13110,18 +13128,27 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           INSERT ls_param INTO TABLE lt_param.
         ENDLOOP.
 
+        lv_function = c_trim_upper( val ).
+        " every generated ENQUEUE_ module has FOREIGN_LOCK - the one
+        " failure that means "someone else holds it"
+        IF lv_function CP `ENQUEUE_*`.
+          ls_exception-name  = `FOREIGN_LOCK`.
+          ls_exception-value = 1.
+          INSERT ls_exception INTO TABLE lt_exception.
+        ENDIF.
         ls_exception-name  = `OTHERS`.
         ls_exception-value = 4.
         INSERT ls_exception INTO TABLE lt_exception.
 
-        lv_function = c_trim_upper( val ).
         CALL FUNCTION lv_function
           PARAMETER-TABLE lt_param
           EXCEPTION-TABLE lt_exception.
 
-        result = xsdbool( sy-subrc = 0 ).
+        subrc = sy-subrc.
+        result = xsdbool( subrc = 0 ).
 
       CATCH cx_root.
+        subrc = 99.
         result = abap_false.
     ENDTRY.
 
