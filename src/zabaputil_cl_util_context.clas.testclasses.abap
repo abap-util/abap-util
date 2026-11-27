@@ -2671,6 +2671,8 @@ CLASS ltcl_calendar_ops DEFINITION FINAL
     METHODS add_workdays_zero              FOR TESTING.
     METHODS count_workdays_full_week       FOR TESTING.
     METHODS count_workdays_same_day        FOR TESTING.
+    METHODS count_workdays_invalid_date    FOR TESTING.
+    METHODS count_workdays_backwards       FOR TESTING.
 
 ENDCLASS.
 
@@ -2734,6 +2736,29 @@ CLASS ltcl_calendar_ops IMPLEMENTATION.
         exp = 5
         act = zabaputil_cl_util_context=>cal_count_workdays( date_from = CONV d( `20240101` )
                                                       date_to   = CONV d( `20240108` ) ) ).
+  ENDMETHOD.
+
+  METHOD count_workdays_invalid_date.
+    " 30 February: the loop never met it and ran forever
+    TRY.
+        zabaputil_cl_util_context=>cal_count_workdays( date_from = CONV d( `20240101` )
+                                                       date_to   = CONV d( `20240230` ) ).
+        cl_abap_unit_assert=>fail( `invalid date - must raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+    TRY.
+        zabaputil_cl_util_context=>cal_count_workdays( date_from = CONV d( `20240101` )
+                                                       date_to   = VALUE d( ) ).
+        cl_abap_unit_assert=>fail( `initial date - must raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD count_workdays_backwards.
+    cl_abap_unit_assert=>assert_equals(
+        exp = 5
+        act = zabaputil_cl_util_context=>cal_count_workdays( date_from = CONV d( `20240108` )
+                                                             date_to   = CONV d( `20240101` ) ) ).
   ENDMETHOD.
 
   METHOD count_workdays_same_day.

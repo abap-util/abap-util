@@ -13174,15 +13174,32 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD cal_count_workdays.
 
-    DATA(lv_date) = date_from.
-    DATA(lv_step) = COND i( WHEN date_to < date_from THEN -1 ELSE 1 ).
+    " a date field takes any eight characters: with 20240230 or an initial
+    " date the loop below never met date_to and ran forever, or for
+    " hundreds of thousands of days
+    IF check_is_date_valid( |{ date_from(4) }-{ date_from+4(2) }-{ date_from+6(2) }| ) = abap_false
+        OR check_is_date_valid( |{ date_to(4) }-{ date_to+4(2) }-{ date_to+6(2) }| ) = abap_false.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |CAL_COUNT_WORKDAYS: invalid date { date_from } or { date_to }|.
+    ENDIF.
 
-    WHILE lv_date <> date_to.
-      lv_date = lv_date + lv_step.
-      IF cal_is_workday( date = lv_date calendar_id = calendar_id ) = abap_true.
-        result = result + 1.
-      ENDIF.
-    ENDWHILE.
+    DATA(lv_date) = date_from.
+    IF date_to >= date_from.
+      WHILE lv_date < date_to.
+        lv_date = lv_date + 1.
+        IF cal_is_workday( date = lv_date calendar_id = calendar_id ) = abap_true.
+          result = result + 1.
+        ENDIF.
+      ENDWHILE.
+    ELSE.
+      WHILE lv_date > date_to.
+        lv_date = lv_date - 1.
+        IF cal_is_workday( date = lv_date calendar_id = calendar_id ) = abap_true.
+          result = result + 1.
+        ENDIF.
+      ENDWHILE.
+    ENDIF.
 
   ENDMETHOD.
 
