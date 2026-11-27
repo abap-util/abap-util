@@ -5106,10 +5106,14 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         " the cached spelling, not the caller's: the answer is stored under
         " the upper-case name, so the question has to be asked in it too -
         " otherwise the first caller's spelling decides every later answer
-        cl_abap_classdescr=>describe_by_name( EXPORTING  p_name         = lv_name
-                                              EXCEPTIONS type_not_found = 1 ).
-        IF sy-subrc = 0.
-          result = abap_true.
+        " describe_by_name knows every type - a DDIC table, a structure, a
+        " data element of that name is no class
+        DATA lo_type TYPE REF TO cl_abap_typedescr.
+        cl_abap_typedescr=>describe_by_name( EXPORTING  p_name         = lv_name
+                                             RECEIVING  p_descr_ref    = lo_type
+                                             EXCEPTIONS type_not_found = 1 ).
+        IF sy-subrc = 0 AND lo_type IS BOUND.
+          result = xsdbool( lo_type->kind = cl_abap_typedescr=>kind_class ).
         ENDIF.
 
       CATCH cx_root ##NO_HANDLER.

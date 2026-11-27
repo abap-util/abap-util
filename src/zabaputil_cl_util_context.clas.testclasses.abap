@@ -1825,6 +1825,7 @@ CLASS ltcl_rtti_ops DEFINITION FINAL
     METHODS check_class_exists_false       FOR TESTING.
     METHODS check_class_exists_cached      FOR TESTING.
     METHODS check_class_exists_case        FOR TESTING.
+    METHODS check_class_exists_no_class    FOR TESTING.
     METHODS expand_components_plain        FOR TESTING.
     METHODS expand_components_empty        FOR TESTING.
     METHODS expand_components_depth_ok     FOR TESTING.
@@ -2059,6 +2060,13 @@ CLASS ltcl_rtti_ops IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
         act = zabaputil_cl_util_context=>rtti_check_class_exists( `cl_abap_typedescr` )
         exp = zabaputil_cl_util_context=>rtti_check_class_exists( `CL_ABAP_TYPEDESCR` ) ).
+  ENDMETHOD.
+
+  METHOD check_class_exists_no_class.
+    " a table, a built-in type, an interface: types, but no class
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_class_exists( `T100` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_class_exists( `STRING` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_class_exists( `IF_MESSAGE` ) ).
   ENDMETHOD.
 
 ENDCLASS.
