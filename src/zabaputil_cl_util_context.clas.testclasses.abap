@@ -1523,6 +1523,8 @@ CLASS ltcl_itab_ops DEFINITION FINAL
 
     METHODS csv_roundtrip                  FOR TESTING.
 
+    METHODS csv_deep_column                FOR TESTING.
+
     METHODS json_roundtrip                 FOR TESTING.
 
 ENDCLASS.
@@ -1714,6 +1716,17 @@ CLASS ltcl_itab_ops IMPLEMENTATION.
     " CSV should contain header and data
     cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>c_contains( val = lv_csv sub = `COL1` ) ).
     cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>c_contains( val = lv_csv sub = `A` ) ).
+  ENDMETHOD.
+
+  METHOD csv_deep_column.
+    " a table inside a row has no text - its cell stays empty instead of
+    " ending the call
+    TYPES: BEGIN OF ty, col1 TYPE string, sub TYPE string_table, col2 TYPE string, END OF ty.
+    DATA lt_tab TYPE STANDARD TABLE OF ty WITH EMPTY KEY.
+    lt_tab = VALUE #( ( col1 = `A` sub = VALUE #( ( `x` ) ) col2 = `B` ) ).
+
+    DATA(lv_csv) = zabaputil_cl_util_context=>itab_get_csv_by_itab( lt_tab ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>c_contains( val = lv_csv sub = `A;;B` ) ).
   ENDMETHOD.
 
   METHOD json_roundtrip.
@@ -2299,6 +2312,7 @@ CLASS ltcl_edge_cases DEFINITION FINAL
     " conv_string_to_number edge cases
     METHODS num_one_thousand_no_dot        FOR TESTING.
     METHODS num_european_format            FOR TESTING.
+    METHODS num_thousands_only             FOR TESTING.
     METHODS num_only_minus                 FOR TESTING.
     METHODS num_leading_zeros              FOR TESTING.
 
@@ -2440,20 +2454,30 @@ CLASS ltcl_edge_cases IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD num_one_thousand_no_dot.
-    " EDGE CASE: '1,000' without dot → comma is last separator → decimal!
-    " Result is 1.0 NOT 1000. This is documented European behavior.
+    " a single separator is the decimal one: '1,000' is 1 (European
+    " convention) - see conv_string_to_number
     DATA(lv_result) = zabaputil_cl_util_context=>conv_string_to_number( `1,000` ).
     cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( '1.000' ) act = lv_result ).
   ENDMETHOD.
 
   METHOD num_european_format.
-    " TRANSPILER NOTE: European format (dot=thousands, comma=decimal)
-    " does NOT work correctly! The dot is always kept as-is, creating
-    " invalid numbers like '1.234.56'. Only the comma heuristic applies.
-    " Result: falls back to 0 due to conversion error.
-    DATA(lv_result) = zabaputil_cl_util_context=>conv_string_to_number( `1.234,56` ).
-    " Documents actual (broken) behavior - returns 0 due to double-dot
-    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( 0 ) act = lv_result ).
+    " both separators: the last one is the decimal separator
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( '1234.56' )
+                                        act = zabaputil_cl_util_context=>conv_string_to_number( `1.234,56` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( '1234567.89' )
+                                        act = zabaputil_cl_util_context=>conv_string_to_number( `1.234.567,89` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( '1234567.89' )
+                                        act = zabaputil_cl_util_context=>conv_string_to_number( `1,234,567.89` ) ).
+  ENDMETHOD.
+
+  METHOD num_thousands_only.
+    " one kind of separator, several times: thousands separators
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( 1234567 )
+                                        act = zabaputil_cl_util_context=>conv_string_to_number( `1.234.567` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( 1000000 )
+                                        act = zabaputil_cl_util_context=>conv_string_to_number( `1,000,000` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV decfloat34( -1000000 )
+                                        act = zabaputil_cl_util_context=>conv_string_to_number( `-1,000,000` ) ).
   ENDMETHOD.
 
   METHOD num_only_minus.
@@ -2592,8 +2616,10 @@ ENDCLASS.
 "! ================================================================
 "! Z2UI5_CL_UTIL_EXT - Comprehensive Unit Tests for JS Transpilation
 "! ================================================================
-"! BAL tests removed: bal_search has ASSIGN_TYPE_CONFLICT bug in
-"! production code (runtime error at line ~142). Fix BAL impl first.
+"! No BAL tests: the BAL function modules and CL_BALI_* do not exist in
+"! the transpiled runtime, and every bal_* method raises when they fail.
+"! (The ASSIGN_TYPE_CONFLICT of bal_search is fixed - the BAL tables are
+"! typed generically.)
 "! ================================================================
 
 "! ================================================================
@@ -2660,6 +2686,8 @@ CLASS ltcl_calendar_ops DEFINITION FINAL
     METHODS add_workdays_zero              FOR TESTING.
     METHODS count_workdays_full_week       FOR TESTING.
     METHODS count_workdays_same_day        FOR TESTING.
+    METHODS count_workdays_invalid_date    FOR TESTING.
+    METHODS count_workdays_backwards       FOR TESTING.
 
 ENDCLASS.
 
@@ -2723,6 +2751,29 @@ CLASS ltcl_calendar_ops IMPLEMENTATION.
         exp = 5
         act = zabaputil_cl_util_context=>cal_count_workdays( date_from = CONV d( `20240101` )
                                                       date_to   = CONV d( `20240108` ) ) ).
+  ENDMETHOD.
+
+  METHOD count_workdays_invalid_date.
+    " 30 February: the loop never met it and ran forever
+    TRY.
+        zabaputil_cl_util_context=>cal_count_workdays( date_from = CONV d( `20240101` )
+                                                       date_to   = CONV d( `20240230` ) ).
+        cl_abap_unit_assert=>fail( `invalid date - must raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+    TRY.
+        zabaputil_cl_util_context=>cal_count_workdays( date_from = CONV d( `20240101` )
+                                                       date_to   = VALUE d( ) ).
+        cl_abap_unit_assert=>fail( `initial date - must raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD count_workdays_backwards.
+    cl_abap_unit_assert=>assert_equals(
+        exp = 5
+        act = zabaputil_cl_util_context=>cal_count_workdays( date_from = CONV d( `20240108` )
+                                                             date_to   = CONV d( `20240101` ) ) ).
   ENDMETHOD.
 
   METHOD count_workdays_same_day.
@@ -3000,14 +3051,23 @@ CLASS ltcl_xlsx_ops IMPLEMENTATION.
     TYPES: BEGIN OF ty_row, col1 TYPE string, col2 TYPE string, END OF ty_row.
     DATA lt_tab TYPE STANDARD TABLE OF ty_row WITH EMPTY KEY.
     lt_tab = VALUE #( ( col1 = `A` col2 = `B` ) ).
-    DATA(lv_result) = zabaputil_cl_util_context=>conv_get_xlsx_by_itab( lt_tab ) ##NEEDED.
+    " not implemented - it says so instead of returning nothing
+    TRY.
+        DATA(lv_result) = zabaputil_cl_util_context=>conv_get_xlsx_by_itab( lt_tab ) ##NEEDED.
+        cl_abap_unit_assert=>fail( `not implemented - must raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
   ENDMETHOD.
 
   METHOD itab_by_xlsx_empty.
     DATA lv_xstring TYPE xstring.
     DATA lr_result TYPE REF TO data.
-    zabaputil_cl_util_context=>conv_get_itab_by_xlsx( EXPORTING val = lv_xstring
-                                              IMPORTING result = lr_result ) ##NEEDED.
+    TRY.
+        zabaputil_cl_util_context=>conv_get_itab_by_xlsx( EXPORTING val    = lv_xstring
+                                                          IMPORTING result = lr_result ) ##NEEDED.
+        cl_abap_unit_assert=>fail( `not implemented - must raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
   ENDMETHOD.
 
 ENDCLASS.
@@ -3047,6 +3107,7 @@ CLASS ltcl_escaping DEFINITION FINAL
     METHODS url_encode_unreserved         FOR TESTING.
     METHODS url_encode_special            FOR TESTING.
     METHODS url_encode_umlaut             FOR TESTING.
+    METHODS url_encode_emoji              FOR TESTING.
     METHODS url_decode_simple             FOR TESTING.
     METHODS url_decode_plus_as_space      FOR TESTING.
     METHODS url_roundtrip                 FOR TESTING.
@@ -3089,6 +3150,16 @@ CLASS ltcl_escaping IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
         act = zabaputil_cl_util_context=>url_encode( `ä` )
         exp = `%C3%A4` ).
+  ENDMETHOD.
+
+  METHOD url_encode_emoji.
+    " a character outside the BMP is two UTF-16 code units - encoded as one
+    " UTF-8 sequence, not as two broken halves. Built from its bytes: the
+    " source stays 7-bit
+    DATA(lv_emoji) = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `F09F9880` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        act = zabaputil_cl_util_context=>url_encode( |a{ lv_emoji }b| )
+        exp = `a%F0%9F%98%80b` ).
   ENDMETHOD.
 
   METHOD url_decode_simple.
@@ -3399,9 +3470,14 @@ CLASS ltcl_mimetype_lang IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD lang_sap_to_iso_lowercase.
-    cl_abap_unit_assert=>assert_equals(
+    " SAP language keys are case-sensitive - a lower-case key is another
+    " language than its upper-case twin (c Catalan vs C Czech), never English
+    cl_abap_unit_assert=>assert_differs(
         act = zabaputil_cl_util_context=>lang_sap_to_iso( `e` )
         exp = `en` ).
+    cl_abap_unit_assert=>assert_differs(
+        act = zabaputil_cl_util_context=>lang_sap_to_iso( `c` )
+        exp = `cs` ).
   ENDMETHOD.
 
   METHOD lang_iso_to_sap_english.
@@ -3546,6 +3622,7 @@ CLASS ltcl_sync_back DEFINITION FINAL
     " filter tokens / url params
     METHODS token_excluding_is_negated     FOR TESTING.
     METHODS token_including_unchanged      FOR TESTING.
+    METHODS token_negated_roundtrip        FOR TESTING.
     METHODS url_lower_case_encoded_equals  FOR TESTING.
     METHODS url_startup_params_first       FOR TESTING.
     METHODS url_encoded_value_survives     FOR TESTING.
@@ -3848,6 +3925,30 @@ CLASS ltcl_sync_back IMPLEMENTATION.
     DATA(lt_token) = zabaputil_cl_util_context=>filter_get_token_t_by_range_t( lt_range ).
     cl_abap_unit_assert=>assert_equals( act = lt_token[ 1 ]-text
                                         exp = `!(=4711)` ).
+  ENDMETHOD.
+
+  METHOD token_negated_roundtrip.
+    " every negated token comes back as the range it was rendered from (or
+    " its equivalent: I NE x is E EQ x)
+    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
+                             ( sign = `E` option = `EQ` low = `4711` )
+                             ( sign = `I` option = `NE` low = `4711` )
+                             ( sign = `I` option = `NB` low = `1` high = `9` )
+                             ( sign = `I` option = `NP` low = `ab*` )
+                             ( sign = `E` option = `NE` low = `5` ) ).
+    DATA(lt_token) = zabaputil_cl_util_context=>filter_get_token_t_by_range_t( lt_range ).
+    DATA(lt_back) = zabaputil_cl_util_context=>filter_get_range_t_by_token_t( lt_token ).
+
+    cl_abap_unit_assert=>assert_equals( exp = VALUE zabaputil_cl_util_context=>ty_s_range( sign = `E` option = `EQ` low = `4711` )
+                                        act = lt_back[ 1 ] ).
+    cl_abap_unit_assert=>assert_equals( exp = VALUE zabaputil_cl_util_context=>ty_s_range( sign = `E` option = `EQ` low = `4711` )
+                                        act = lt_back[ 2 ] ).
+    cl_abap_unit_assert=>assert_equals( exp = VALUE zabaputil_cl_util_context=>ty_s_range( sign = `E` option = `BT` low = `1` high = `9` )
+                                        act = lt_back[ 3 ] ).
+    cl_abap_unit_assert=>assert_equals( exp = VALUE zabaputil_cl_util_context=>ty_s_range( sign = `E` option = `CP` low = `ab*` )
+                                        act = lt_back[ 4 ] ).
+    cl_abap_unit_assert=>assert_equals( exp = VALUE zabaputil_cl_util_context=>ty_s_range( sign = `I` option = `EQ` low = `5` )
+                                        act = lt_back[ 5 ] ).
   ENDMETHOD.
 
   METHOD token_including_unchanged.
@@ -4681,11 +4782,27 @@ CLASS ltcl_coverage DEFINITION FINAL
     INCLUDE TYPE ty_s_incl.
     TYPES zip TYPE string.
     TYPES END OF ty_s_with_incl.
+    TYPES BEGIN OF ty_s_with_suffix.
+    TYPES zip TYPE string.
+    INCLUDE TYPE ty_s_flat AS s_flat RENAMING WITH SUFFIX _x.
+    TYPES END OF ty_s_with_suffix.
+    TYPES BEGIN OF ty_s_with_deep.
+    TYPES zip TYPE string.
+    INCLUDE TYPE ty_s_nested AS s_nested RENAMING WITH SUFFIX _x.
+    TYPES END OF ty_s_with_deep.
+    TYPES:
+      BEGIN OF ty_s_stamps,
+        ts  TYPE timestamp,
+        tsl TYPE timestampl,
+      END OF ty_s_stamps.
 
     METHODS test_check_table_standard FOR TESTING RAISING cx_static_check.
     METHODS test_typedescr_by_data    FOR TESTING RAISING cx_static_check.
     METHODS test_flat_components      FOR TESTING RAISING cx_static_check.
     METHODS test_flat_components_none FOR TESTING RAISING cx_static_check.
+    METHODS test_flat_components_incl FOR TESTING RAISING cx_static_check.
+    METHODS test_flat_components_stamp FOR TESTING RAISING cx_static_check.
+    METHODS test_iso_by_stamp         FOR TESTING RAISING cx_static_check.
     METHODS test_attri_by_include     FOR TESTING RAISING cx_static_check.
     METHODS test_expand_components    FOR TESTING RAISING cx_static_check.
     METHODS test_unassign_initial     FOR TESTING RAISING cx_static_check.
@@ -4696,6 +4813,10 @@ CLASS ltcl_coverage DEFINITION FINAL
     METHODS test_attri_by_oref        FOR TESTING RAISING cx_static_check.
     METHODS test_check_abap_cloud     FOR TESTING RAISING cx_static_check.
     METHODS test_classes_impl_intf    FOR TESTING RAISING cx_static_check.
+    METHODS test_sy_get               FOR TESTING RAISING cx_static_check.
+    METHODS test_class_load_error     FOR TESTING RAISING cx_static_check.
+    METHODS test_namespaced           FOR TESTING RAISING cx_static_check.
+    METHODS test_int_digits           FOR TESTING RAISING cx_static_check.
 
 ENDCLASS.
 
@@ -4756,10 +4877,7 @@ CLASS ltcl_coverage IMPLEMENTATION.
     DATA ls_nested TYPE ty_s_nested.
     DATA lv_text TYPE string.
 
-    " a sorted table, a nested structure, a scalar: none is flat. (A
-    " structure with an include is refused too on a system - the transpiled
-    " runtime hands its components out already expanded, so it is not
-    " asserted here)
+    " a sorted table, a nested structure, a scalar: none is flat
     cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>rtti_get_flat_components( REF #( lt_sorted ) ) ).
     cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>rtti_get_flat_components( REF #( ls_nested ) ) ).
     cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>rtti_get_flat_components( REF #( lv_text ) ) ).
@@ -4892,6 +5010,144 @@ CLASS ltcl_coverage IMPLEMENTATION.
 
     cl_abap_unit_assert=>assert_equals( exp = lv_first
                                         act = zabaputil_cl_util_context=>check_abap_cloud( ) ).
+
+  ENDMETHOD.
+
+  METHOD test_flat_components_incl.
+
+    DATA ls_incl   TYPE ty_s_with_incl.
+    DATA ls_suffix TYPE ty_s_with_suffix.
+    DATA ls_deep   TYPE ty_s_with_deep.
+
+    " the fields of an include in its place, under the names the structure
+    " addresses them by - the name of the include itself is none of them
+    DATA(lt_comp) = zabaputil_cl_util_context=>rtti_get_flat_components( REF #( ls_incl ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = lines( lt_comp ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( line_exists( lt_comp[ name = `NAME` ] ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( line_exists( lt_comp[ name = `ZIP` ] ) ) ).
+
+    lt_comp = zabaputil_cl_util_context=>rtti_get_flat_components( REF #( ls_suffix ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 6
+                                        act = lines( lt_comp ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `S`
+                                        act = lt_comp[ name = `TEXT_X` ]-json_kind ).
+    cl_abap_unit_assert=>assert_equals( exp = `D`
+                                        act = lt_comp[ name = `DATE_X` ]-json_kind ).
+    cl_abap_unit_assert=>assert_equals( exp = `B`
+                                        act = lt_comp[ name = `FLAG_X` ]-json_kind ).
+    cl_abap_unit_assert=>assert_equals( exp = `N`
+                                        act = lt_comp[ name = `NUM_X` ]-json_kind ).
+    cl_abap_unit_assert=>assert_false( xsdbool( line_exists( lt_comp[ name = `S_FLAT` ] ) ) ).
+    " every name is one the row can be read by
+    FIELD-SYMBOLS <cell> TYPE any.
+    LOOP AT lt_comp REFERENCE INTO DATA(lr_comp).
+      UNASSIGN <cell>.
+      ASSIGN COMPONENT lr_comp->name OF STRUCTURE ls_suffix TO <cell>.
+      cl_abap_unit_assert=>assert_true( act = xsdbool( <cell> IS ASSIGNED )
+                                        msg = lr_comp->name ).
+    ENDLOOP.
+
+    " an include that brings a nested structure: not flat
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>rtti_get_flat_components( REF #( ls_deep ) ) ).
+
+  ENDMETHOD.
+
+  METHOD test_flat_components_stamp.
+
+    DATA ls_stamps TYPE ty_s_stamps.
+
+    DATA(lt_comp) = zabaputil_cl_util_context=>rtti_get_flat_components( REF #( ls_stamps ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `U`
+                                        act = lt_comp[ name = `TS` ]-json_kind ).
+    cl_abap_unit_assert=>assert_equals( exp = `L`
+                                        act = lt_comp[ name = `TSL` ]-json_kind ).
+
+  ENDMETHOD.
+
+  METHOD test_iso_by_stamp.
+
+    DATA lv_ts  TYPE timestamp.
+    DATA lv_tsl TYPE timestampl.
+
+    cl_abap_unit_assert=>assert_equals( exp = `0000-00-00T00:00:00Z`
+                                        act = zabaputil_cl_util_context=>time_get_iso_by_stamp( lv_ts ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `0000-00-00T00:00:00.0Z`
+                                        act = zabaputil_cl_util_context=>time_get_iso_by_stampl( lv_tsl ) ).
+
+    lv_ts  = '20240229230000'.
+    lv_tsl = '20240229230000.5'.
+    cl_abap_unit_assert=>assert_equals( exp = `2024-02-29T23:00:00Z`
+                                        act = zabaputil_cl_util_context=>time_get_iso_by_stamp( lv_ts ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `2024-02-29T23:00:00.5Z`
+                                        act = zabaputil_cl_util_context=>time_get_iso_by_stampl( lv_tsl ) ).
+    " set from a literal, so exact on every runtime - every digit of the
+    " fraction, and the trailing zeros of a shorter one dropped
+    lv_tsl = '20240229235959.1234567'.
+    cl_abap_unit_assert=>assert_equals( exp = `2024-02-29T23:59:59.1234567Z`
+                                        act = zabaputil_cl_util_context=>time_get_iso_by_stampl( lv_tsl ) ).
+    lv_tsl = '20240229235959.1200000'.
+    cl_abap_unit_assert=>assert_equals( exp = `2024-02-29T23:59:59.12Z`
+                                        act = zabaputil_cl_util_context=>time_get_iso_by_stampl( lv_tsl ) ).
+
+  ENDMETHOD.
+
+  METHOD test_sy_get.
+
+    " the one reader of the system fields hands out what SYST holds - the
+    " user the draft service binds a draft to, and a date and a time the
+    " error context can print
+    DATA(ls_sy) = zabaputil_cl_util_context=>sy_get( ).
+
+    cl_abap_unit_assert=>assert_equals( exp = sy-uname
+                                        act = ls_sy-uname ).
+    cl_abap_unit_assert=>assert_equals( exp = sy-sysid
+                                        act = ls_sy-sysid ).
+    cl_abap_unit_assert=>assert_not_initial( ls_sy-datum ).
+    cl_abap_unit_assert=>assert_not_initial( ls_sy-saprl ).
+
+  ENDMETHOD.
+
+  METHOD test_class_load_error.
+
+    " a class that describes fine and one that does not exist at all have
+    " no load error - only a class that exists and fails to load has one
+    cl_abap_unit_assert=>assert_not_bound(
+        zabaputil_cl_util_context=>rtti_get_class_load_error( `ZABAPUTIL_CL_UTIL_CONTEXT` ) ).
+    cl_abap_unit_assert=>assert_not_bound(
+        zabaputil_cl_util_context=>rtti_get_class_load_error( `ZCL_THIS_CLASS_DOES_NOT_EXIST` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_namespaced.
+
+    DATA ls_flat   TYPE ty_s_flat.
+    DATA lt_flat   TYPE ty_t_flat.
+    DATA ls_suffix TYPE ty_s_with_suffix.
+    DATA lr_none   TYPE REF TO data.
+
+    " no component name starts with a namespace - not even one of an
+    " include, nor one in a table line; an initial reference is no type
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_namespaced( REF #( ls_flat ) ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_namespaced( REF #( lt_flat ) ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_namespaced( REF #( ls_suffix ) ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_namespaced( lr_none ) ).
+
+  ENDMETHOD.
+
+  METHOD test_int_digits.
+
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_int_digits( `42` ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_int_digits( ` 007 ` ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_int_digits( `999999999` ) ).
+    " what would round, carry a sign or an exponent, overflow, or is empty
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_int_digits( `1.5` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_int_digits( `-1` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_int_digits( `1e3` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_int_digits( `1 000` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_int_digits( `1234567890` ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>check_int_digits( `  ` ) ).
 
   ENDMETHOD.
 
@@ -5368,12 +5624,13 @@ CLASS ltcl_filter_where IMPLEMENTATION.
 
   METHOD pattern_escaped.
 
-    " * and + are the wildcards - a typed _ or % only matches itself
+    " * and + are the wildcards - a typed _ or % only matches itself, and
+    " the CP escape #* is a plain star (no wildcard, nothing to escape in LIKE)
     DATA(lv_where) = zabaputil_cl_util_context=>filter_get_sql_where( VALUE #(
         ( name    = `F`
           t_range = VALUE #( ( sign = `I` option = `CP` low = `Z_T%#*+` ) ) ) ) ).
 
-    cl_abap_unit_assert=>assert_equals( exp = `( F LIKE 'Z#_T#%##%_' ESCAPE '#' )`
+    cl_abap_unit_assert=>assert_equals( exp = `( F LIKE 'Z#_T#%*_' ESCAPE '#' )`
                                         act = lv_where ).
 
   ENDMETHOD.
@@ -6136,6 +6393,7 @@ CLASS ltcl_system_api DEFINITION FINAL
     METHODS longtext_lines_split      FOR TESTING.
     METHODS longtext_lines_join       FOR TESTING.
     METHODS longtext_lines_roundtrip  FOR TESTING.
+    METHODS longtext_lines_blank_cut  FOR TESTING.
     METHODS parallel_sequential       FOR TESTING.
 
 ENDCLASS.
@@ -6205,6 +6463,32 @@ CLASS ltcl_system_api IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
         exp = |Dear customer,{ zabaputil_cl_util_context=>cv_char_util_newline }thanks.|
         act = zabaputil_cl_util_context=>longtext_from_lines( lt_line ) ).
+
+  ENDMETHOD.
+
+  METHOD longtext_lines_blank_cut.
+
+    " a blank exactly at the 132-character boundary
+    DATA(lv_text) = repeat( val = `a`
+                            occ = 131 ) && ` next word`.
+    DATA(lt_line) = zabaputil_cl_util_context=>longtext_to_lines( lv_text ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = lines( lt_line ) ).
+    " no chunk ends in a blank - TDLINE (CHAR132) would drop it
+    cl_abap_unit_assert=>assert_equals( exp = 131
+                                        act = strlen( lt_line[ 1 ]-line ) ).
+    cl_abap_unit_assert=>assert_equals( exp = ` next word`
+                                        act = lt_line[ 2 ]-line ).
+
+    " as stored: every line through CHAR132 and back
+    DATA lv_tdline TYPE c LENGTH 132.
+    LOOP AT lt_line REFERENCE INTO DATA(lr_line).
+      lv_tdline = lr_line->line.
+      lr_line->line = lv_tdline.
+    ENDLOOP.
+    cl_abap_unit_assert=>assert_equals( exp = lv_text
+                                        act = zabaputil_cl_util_context=>longtext_from_lines( lt_line ) ).
 
   ENDMETHOD.
 
@@ -6578,6 +6862,7 @@ CLASS ltcl_fixes DEFINITION FINAL
     METHODS csv_empty_input          FOR TESTING.
     METHODS csv_byte_order_mark      FOR TESTING.
     METHODS sql_like_escape          FOR TESTING.
+    METHODS sql_like_cp_escape       FOR TESTING.
     METHODS sql_lowercase_keywords   FOR TESTING.
     METHODS sql_keyword_in_literal   FOR TESTING.
     METHODS sql_exclude_roundtrip    FOR TESTING.
@@ -6822,6 +7107,18 @@ CLASS ltcl_fixes IMPLEMENTATION.
     DATA(lt_back) = zabaputil_cl_util_context=>filter_get_multi_by_sql_where( lv_where ).
     cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_back ) ).
     cl_abap_unit_assert=>assert_equals( exp = `F` act = lt_back[ 1 ]-name ).
+    cl_abap_unit_assert=>assert_equals( exp = lt_filter[ 1 ]-t_range act = lt_back[ 1 ]-t_range ).
+  ENDMETHOD.
+
+  METHOD sql_like_cp_escape.
+    " # makes the next CP character plain: #* is a star, ## a hash
+    DATA(lv_cond) = zabaputil_cl_util_context=>filter_get_sql_where( VALUE #(
+      ( name = `F` t_range = VALUE #( ( sign = `I` option = `CP` low = `A#*B##C*` ) ) ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_cond CS `LIKE 'A*B##C%' ESCAPE '#'` ) ).
+    DATA(lt_filter) = VALUE zabaputil_cl_util_context=>ty_t_filter_multi(
+      ( name = `F` t_range = VALUE #( ( sign = `I` option = `CP` low = `A#*B##C+D*` ) ) ) ).
+    DATA(lt_back) = zabaputil_cl_util_context=>filter_get_multi_by_sql_where(
+                      zabaputil_cl_util_context=>filter_get_sql_where( lt_filter ) ).
     cl_abap_unit_assert=>assert_equals( exp = lt_filter[ 1 ]-t_range act = lt_back[ 1 ]-t_range ).
   ENDMETHOD.
 

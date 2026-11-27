@@ -172,6 +172,14 @@ CLASS zabaputil_cl_util_http DEFINITION PUBLIC.
       RETURNING
         VALUE(result) TYPE ty_s_http_res.
 
+    CLASS-METHODS client_execute_cloud
+      IMPORTING
+        io_client     TYPE REF TO object
+        method        TYPE any
+        timeout       TYPE i
+      RETURNING
+        VALUE(result) TYPE REF TO object.
+
     CLASS-METHODS client_destination_cloud
       IMPORTING
         is_req        TYPE ty_s_client_req
@@ -258,6 +266,26 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
         EXPORTING val = `HTTP_CLIENT_CREATE_ERROR - check the destination/url configuration`.
     ENDIF.
 
+    " No logon popup: the client runs inside an ICF request, a work process
+    " without a dialog, and with the popup left enabled (the default of
+    " create_by_url) a 401 of the remote made RECEIVE fail as a
+    " communication error - the caller saw "could not be reached" instead of
+    " the 401 and the service's own message. 0 is IF_HTTP_CLIENT=>CO_DISABLED,
+    " named by value because this class names no on-premise type statically.
+    " The attribute is reached by its alias on CL_HTTP_CLIENT and by its
+    " interface name otherwise; a stack that has neither keeps its default
+    FIELD-SYMBOLS <popup> TYPE any.
+    TRY.
+        ASSIGN result->(`PROPERTYTYPE_LOGON_POPUP`) TO <popup>.
+        IF <popup> IS NOT ASSIGNED.
+          ASSIGN result->(`IF_HTTP_CLIENT~PROPERTYTYPE_LOGON_POPUP`) TO <popup>.
+        ENDIF.
+        IF <popup> IS ASSIGNED.
+          <popup> = 0.
+        ENDIF.
+      CATCH cx_root ##NO_HANDLER.
+    ENDTRY.
+
   ENDMETHOD.
 
   METHOD client_call.
@@ -318,9 +346,31 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
         ENDIF.
         lo_response = <any>.
 
-        CALL METHOD lo_response->(`GET_CDATA`)
+        " The body as text. GET_CDATA decodes by the charset the response
+        " names - and without one in Content-Type (an `application/json`
+        " answer of most APIs, the language model providers' among them) the
+        " ICF falls back to ISO-8859-1, and every UTF-8 multibyte sequence
+        " came back as two or three Latin-1 characters. JSON is
+        " UTF-8 unless it says otherwise (RFC 8259), so a body without a
+        " charset is read as bytes and decoded as UTF-8; one that names its
+        " charset is left to the ICF
+        DATA lv_content_type TYPE string.
+        CALL METHOD lo_response->(`GET_HEADER_FIELD`)
+          EXPORTING
+            name  = `content-type`
           RECEIVING
-            data = result-body.
+            value = lv_content_type.
+        IF to_lower( lv_content_type ) CS `charset=`.
+          CALL METHOD lo_response->(`GET_CDATA`)
+            RECEIVING
+              data = result-body.
+        ELSE.
+          DATA lv_bytes TYPE xstring.
+          CALL METHOD lo_response->(`GET_DATA`)
+            RECEIVING
+              data = lv_bytes.
+          result-body = zabaputil_cl_util_context=>conv_get_string_by_xstring( lv_bytes ).
+        ENDIF.
 
         CALL METHOD lo_response->(`GET_STATUS`)
           IMPORTING
@@ -519,13 +569,18 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     TRY.
         DATA(lo_destination) = client_destination_cloud( ls_req ).
 
+        " every call on the client, request and response objects names its
+        " interface: the objects are typed REF TO object, and a bare
+        " GET_HTTP_REQUEST resolves only where the implementing class
+        " happens to declare an alias - the server branch of this class
+        " qualifies its IF_WEB_HTTP_REQUEST~ calls the same way
         CALL METHOD (lv_manager)=>create_by_http_destination
           EXPORTING
             i_destination = lo_destination
           RECEIVING
             r_client      = lo_client.
 
-        CALL METHOD lo_client->(`GET_HTTP_REQUEST`)
+        CALL METHOD lo_client->(`IF_WEB_HTTP_CLIENT~GET_HTTP_REQUEST`)
           RECEIVING
             r_http_request = lo_request.
 
@@ -533,20 +588,20 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
         " path is already part of it
         IF ls_target-request_uri IS NOT INITIAL.
           DATA(lv_path) = ls_target-request_uri.
-          CALL METHOD lo_request->(`SET_URI_PATH`)
+          CALL METHOD lo_request->(`IF_WEB_HTTP_REQUEST~SET_URI_PATH`)
             EXPORTING
               i_uri_path = lv_path.
         ENDIF.
 
         LOOP AT is_req-t_header INTO DATA(ls_header).
-          CALL METHOD lo_request->(`SET_HEADER_FIELD`)
+          CALL METHOD lo_request->(`IF_WEB_HTTP_REQUEST~SET_HEADER_FIELD`)
             EXPORTING
               i_name  = ls_header-n
               i_value = ls_header-v.
         ENDLOOP.
 
         DATA(lv_body) = is_req-body.
-        CALL METHOD lo_request->(`SET_TEXT`)
+        CALL METHOD lo_request->(`IF_WEB_HTTP_REQUEST~SET_TEXT`)
           EXPORTING
             i_text = lv_body.
 
@@ -557,45 +612,64 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
             EXPORTING val = |HTTP_CLIENT_METHOD_NOT_FOUND - { is_req-method } is no IF_WEB_HTTP_CLIENT method|.
         ENDIF.
 
-        " the timeout only when one is asked for - the parameter's own
-        " default is the client's
-        IF is_req-timeout > 0.
-          DATA(lv_timeout) = is_req-timeout.
-          CALL METHOD lo_client->(`EXECUTE`)
-            EXPORTING
-              i_method   = <method>
-              i_timeout  = lv_timeout
-            RECEIVING
-              r_response = lo_response.
-        ELSE.
-          CALL METHOD lo_client->(`EXECUTE`)
-            EXPORTING
-              i_method   = <method>
-            RECEIVING
-              r_response = lo_response.
-        ENDIF.
+        lo_response = client_execute_cloud( io_client = lo_client
+                                            method    = <method>
+                                            timeout   = is_req-timeout ).
 
-        CALL METHOD lo_response->(`GET_STATUS`)
+        CALL METHOD lo_response->(`IF_WEB_HTTP_RESPONSE~GET_STATUS`)
           RECEIVING
             r_value = ls_status.
         result-status_code   = ls_status-code.
         result-status_reason = ls_status-reason.
 
-        CALL METHOD lo_response->(`GET_TEXT`)
+        CALL METHOD lo_response->(`IF_WEB_HTTP_RESPONSE~GET_TEXT`)
           RECEIVING
             r_value = result-body.
 
-        CALL METHOD lo_client->(`CLOSE`).
+        CALL METHOD lo_client->(`IF_WEB_HTTP_CLIENT~CLOSE`).
 
       CATCH cx_root INTO DATA(x).
         IF lo_client IS BOUND.
           TRY.
-              CALL METHOD lo_client->(`CLOSE`).
+              CALL METHOD lo_client->(`IF_WEB_HTTP_CLIENT~CLOSE`).
             CATCH cx_root ##NO_HANDLER.
           ENDTRY.
         ENDIF.
         RAISE EXCEPTION TYPE zabaputil_cx_util_error
           EXPORTING val = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD client_execute_cloud.
+
+    " the timeout only when one is asked for - the parameter's own default is
+    " the client's. A failed EXECUTE (no connection, TLS, timeout) is the
+    " Cloud twin of a failed SEND/RECEIVE in client_send_std and carries the
+    " same HTTP_COMMUNICATION_ERROR text, the marker callers read to tell a
+    " transient failure from a missing configuration (a retry decision,
+    " for one). The caller closes the client on the way out
+    TRY.
+        IF timeout > 0.
+          DATA(lv_timeout) = timeout.
+          CALL METHOD io_client->(`IF_WEB_HTTP_CLIENT~EXECUTE`)
+            EXPORTING
+              i_method   = method
+              i_timeout  = lv_timeout
+            RECEIVING
+              r_response = result.
+        ELSE.
+          CALL METHOD io_client->(`IF_WEB_HTTP_CLIENT~EXECUTE`)
+            EXPORTING
+              i_method   = method
+            RECEIVING
+              r_response = result.
+        ENDIF.
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val      = `HTTP_COMMUNICATION_ERROR - the request could not be sent or no response came back`
+            previous = x.
     ENDTRY.
 
   ENDMETHOD.
@@ -825,11 +899,20 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
   METHOD get_req_info.
 
+    " ~request_uri is read ONCE for the two fields taken from it: every
+    " header read is a dynamic call into the request object, and this
+    " method runs on every request. get_query( ) reads the header itself
+    " and stays for a caller that wants the query alone
+    DATA(lv_uri) = get_header_field( `~request_uri` ).
+
     result-body     = get_cdata( ).
     result-method   = get_method( ).
     result-path     = get_header_field( `~path` ).
-    result-t_params = zabaputil_cl_util_context=>url_param_get_tab( get_header_field( `~request_uri` ) ).
-    result-query    = get_query( ).
+    result-t_params = zabaputil_cl_util_context=>url_param_get_tab( lv_uri ).
+    IF lv_uri CS `?`.
+      result-query = substring_after( val = lv_uri
+                                      sub = `?` ).
+    ENDIF.
 
   ENDMETHOD.
 

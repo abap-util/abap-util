@@ -30,6 +30,8 @@ CLASS ltcl_unit_test DEFINITION FINAL
     METHODS test_factory_exclude    FOR TESTING RAISING cx_static_check.
     METHODS test_factory_with_sql   FOR TESTING RAISING cx_static_check.
     METHODS test_get_sql_multi      FOR TESTING RAISING cx_static_check.
+    METHODS test_include_and_exclude FOR TESTING RAISING cx_static_check.
+    METHODS test_pattern_range_unchanged FOR TESTING RAISING cx_static_check.
 
 ENDCLASS.
 
@@ -58,7 +60,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
       ir_range     = REF #( lt_range ) ).
 
     cl_abap_unit_assert=>assert_equals(
-      exp = `( CARRID EQ 'AA' )`
+      exp = `( CARRID = 'AA' )`
       act = lo_range->get_sql( ) ).
 
   ENDMETHOD.
@@ -73,7 +75,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
       ir_range     = REF #( lt_range ) ).
 
     cl_abap_unit_assert=>assert_equals(
-      exp = `( CARRID NE 'BB' )`
+      exp = `( CARRID <> 'BB' )`
       act = lo_range->get_sql( ) ).
 
   ENDMETHOD.
@@ -88,7 +90,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
       ir_range     = REF #( lt_range ) ).
 
     cl_abap_unit_assert=>assert_equals(
-      exp = `( AMOUNT GT '100' )`
+      exp = `( AMOUNT > '100' )`
       act = lo_range->get_sql( ) ).
 
   ENDMETHOD.
@@ -103,7 +105,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
       ir_range     = REF #( lt_range ) ).
 
     cl_abap_unit_assert=>assert_equals(
-      exp = `( AMOUNT GE '50' )`
+      exp = `( AMOUNT >= '50' )`
       act = lo_range->get_sql( ) ).
 
   ENDMETHOD.
@@ -118,7 +120,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
       ir_range     = REF #( lt_range ) ).
 
     cl_abap_unit_assert=>assert_equals(
-      exp = `( AMOUNT LT '200' )`
+      exp = `( AMOUNT < '200' )`
       act = lo_range->get_sql( ) ).
 
   ENDMETHOD.
@@ -133,7 +135,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
       ir_range     = REF #( lt_range ) ).
 
     cl_abap_unit_assert=>assert_equals(
-      exp = `( AMOUNT LE '300' )`
+      exp = `( AMOUNT <= '300' )`
       act = lo_range->get_sql( ) ).
 
   ENDMETHOD.
@@ -178,7 +180,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
       ir_range     = REF #( lt_range ) ).
 
     cl_abap_unit_assert=>assert_equals(
-      exp = `( NAME LIKE '%test%' )`
+      exp = `( NAME LIKE '%test%' ESCAPE '#' )`
       act = lo_range->get_sql( ) ).
 
   ENDMETHOD.
@@ -193,7 +195,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
       ir_range     = REF #( lt_range ) ).
 
     cl_abap_unit_assert=>assert_equals(
-      exp = `( NAME NOT LIKE '%test%' )`
+      exp = `( NAME NOT LIKE '%test%' ESCAPE '#' )`
       act = lo_range->get_sql( ) ).
 
   ENDMETHOD.
@@ -208,7 +210,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
       ir_range     = REF #( lt_range ) ).
 
     cl_abap_unit_assert=>assert_equals(
-      exp = `( NOT CARRID EQ 'XX' )`
+      exp = `( CARRID <> 'XX' )`
       act = lo_range->get_sql( ) ).
 
   ENDMETHOD.
@@ -224,7 +226,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
       ir_range     = REF #( lt_range ) ).
 
     cl_abap_unit_assert=>assert_equals(
-      exp = `( CARRID EQ 'AA' OR CARRID EQ 'BB' )`
+      exp = `( CARRID = 'AA' OR CARRID = 'BB' )`
       act = lo_range->get_sql( ) ).
 
   ENDMETHOD.
@@ -239,7 +241,7 @@ CLASS ltcl_unit_test IMPLEMENTATION.
       ir_range     = REF #( lt_range ) ).
 
     cl_abap_unit_assert=>assert_equals(
-      exp = `( NAME EQ 'O''Brien' )`
+      exp = `( NAME = 'O''Brien' )`
       act = lo_range->get_sql( ) ).
 
   ENDMETHOD.
@@ -371,8 +373,46 @@ CLASS ltcl_unit_test IMPLEMENTATION.
       ir_range     = REF #( lt_range ) ).
 
     cl_abap_unit_assert=>assert_equals(
-      exp = `( CARRID EQ 'AA' OR CARRID EQ 'BB' )`
+      exp = `( CARRID = 'AA' OR CARRID = 'BB' )`
       act = lo_range->get_sql( ) ).
+
+  ENDMETHOD.
+
+  METHOD test_include_and_exclude.
+
+    " select-option semantics: one of the including rows and none of the
+    " excluding ones - not an OR of all of them
+    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
+      ( sign = `I` option = `EQ` low = `AA` )
+      ( sign = `E` option = `EQ` low = `BB` ) ).
+
+    DATA(lo_range) = NEW zabaputil_cl_util_range(
+      iv_fieldname = `CARRID`
+      ir_range     = REF #( lt_range ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+      exp = `( ( CARRID = 'AA' ) AND CARRID <> 'BB' )`
+      act = lo_range->get_sql( ) ).
+
+  ENDMETHOD.
+
+  METHOD test_pattern_range_unchanged.
+
+    " the pattern is escaped for LIKE (a typed _ matches itself, + is one
+    " character) and the caller's range keeps its CP form
+    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
+      ( sign = `I` option = `CP` low = `A_+*` ) ).
+
+    DATA(lo_range) = NEW zabaputil_cl_util_range(
+      iv_fieldname = `NAME`
+      ir_range     = REF #( lt_range ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+      exp = `( NAME LIKE 'A#__%' ESCAPE '#' )`
+      act = lo_range->get_sql( ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `A_+*`
+      act = lt_range[ 1 ]-low ).
 
   ENDMETHOD.
 

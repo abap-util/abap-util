@@ -129,7 +129,11 @@ CLASS zabaputil_cl_util_log IMPLEMENTATION.
 
   METHOD has_error.
 
-    result = xsdbool( line_exists( mt_log[ type = `E` ] ) ).
+    " A (abort) and X (exit) are errors as well - a log that holds only
+    " an abort message reported "no error"
+    result = xsdbool( line_exists( mt_log[ type = `E` ] )
+                   OR line_exists( mt_log[ type = `A` ] )
+                   OR line_exists( mt_log[ type = `X` ] ) ).
 
   ENDMETHOD.
 

@@ -169,6 +169,7 @@ CLASS ltcl_test DEFINITION FINAL
     METHODS test_target_none_is_url   FOR TESTING RAISING cx_static_check.
     METHODS test_get_query            FOR TESTING RAISING cx_static_check.
     METHODS test_get_query_none       FOR TESTING RAISING cx_static_check.
+    METHODS test_client_create_url    FOR TESTING RAISING cx_static_check.
 
 ENDCLASS.
 
@@ -427,6 +428,36 @@ CLASS ltcl_test IMPLEMENTATION.
                     v = `/sap/bc/z2ui5` ) INTO TABLE mo_server->request->mt_header.
 
     cl_abap_unit_assert=>assert_initial( mo_cut->get_query( ) ).
+
+  ENDMETHOD.
+
+  METHOD test_client_create_url.
+
+    " client_create is the Standard half (client_request decides between the
+    " two): ABAP Cloud has no CL_HTTP_CLIENT, so there the method can only
+    " raise, and a unit run reported that as an error of this test
+    IF zabaputil_cl_util_context=>check_abap_cloud( ) = abap_true.
+      RETURN.
+    ENDIF.
+
+    " by url: a client comes back without the call going anywhere - the
+    " dynamic CL_HTTP_CLIENT=>create_by_url only builds the object
+    DATA(lo_client) = zabaputil_cl_util_http=>client_create( url = `https://localhost/never-called` ).
+
+    cl_abap_unit_assert=>assert_bound( lo_client ).
+
+    " and without a logon popup (0 = IF_HTTP_CLIENT=>CO_DISABLED): a 401 of
+    " the remote has to come back as a 401, not as a communication error of
+    " a work process that has no dialog to show the popup in
+    FIELD-SYMBOLS <popup> TYPE any.
+    ASSIGN lo_client->(`PROPERTYTYPE_LOGON_POPUP`) TO <popup>.
+    IF <popup> IS NOT ASSIGNED.
+      ASSIGN lo_client->(`IF_HTTP_CLIENT~PROPERTYTYPE_LOGON_POPUP`) TO <popup>.
+    ENDIF.
+    IF <popup> IS ASSIGNED.
+      cl_abap_unit_assert=>assert_equals( exp = 0
+                                          act = <popup> ).
+    ENDIF.
 
   ENDMETHOD.
 
