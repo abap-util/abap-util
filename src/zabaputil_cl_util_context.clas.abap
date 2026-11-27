@@ -5433,58 +5433,42 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD rtti_get_t_attri_by_table_name.
 
+    DATA lo_obj    TYPE REF TO cl_abap_typedescr.
+    DATA lo_struct TYPE REF TO cl_abap_structdescr.
+
     IF table_name IS INITIAL.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
         EXPORTING
           val = `TABLE_NAME_INITIAL_ERROR`.
     ENDIF.
 
+    cl_abap_typedescr=>describe_by_name( EXPORTING  p_name         = table_name
+                                         RECEIVING  p_descr_ref    = lo_obj
+                                         EXCEPTIONS type_not_found = 1
+                                                    OTHERS         = 2 ).
+    IF sy-subrc <> 0.
+      " an unknown name has no columns - the result stays empty, as it always
+      " did (the former TABLE_NOT_FOUND raise sat inside its own CATCH cx_root)
+      RETURN.
+    ENDIF.
+
+    " one describe: a structure (DDIC table, structure, view) or a table
+    " type, whose line type is the structure. Anything else has no columns
     TRY.
-        cl_abap_structdescr=>describe_by_name( EXPORTING  p_name         = table_name
-                                               RECEIVING  p_descr_ref    = DATA(lo_obj)
-                                               EXCEPTIONS type_not_found = 1
-                                                          OTHERS         = 2
-            ).
-
-        IF sy-subrc <> 0.
-          RAISE EXCEPTION TYPE zabaputil_cx_util_error
-            EXPORTING
-              val = |TABLE_NOT_FOUND_NAME___{ table_name }|.
-        ENDIF.
-        DATA(lo_struct) = CAST cl_abap_structdescr( lo_obj ).
-
-      CATCH cx_root.
-
-        TRY.
-            cl_abap_structdescr=>describe_by_name( EXPORTING  p_name         = table_name
-                                                   RECEIVING  p_descr_ref    = lo_obj
-                                                   EXCEPTIONS type_not_found = 1
-                                                              OTHERS         = 2
-            ).
-            IF sy-subrc <> 0.
-              RAISE EXCEPTION TYPE zabaputil_cx_util_error
-                EXPORTING
-                  val = |TABLE_NOT_FOUND_NAME___{ table_name }|.
-            ENDIF.
-
-            DATA(lo_tab) = CAST cl_abap_tabledescr( lo_obj ).
-            lo_struct = CAST cl_abap_structdescr( lo_tab->get_table_line_type( ) ).
-          CATCH cx_root.
+        CASE lo_obj->kind.
+          WHEN cl_abap_typedescr=>kind_struct.
+            lo_struct = CAST #( lo_obj ).
+          WHEN cl_abap_typedescr=>kind_table.
+            lo_struct = CAST #( CAST cl_abap_tabledescr( lo_obj )->get_table_line_type( ) ).
+          WHEN OTHERS.
             RETURN.
-        ENDTRY.
-
+        ENDCASE.
+      CATCH cx_sy_move_cast_error.
+        RETURN.
     ENDTRY.
 
-    DATA(lt_comps) = lo_struct->get_components( ).
-
-    LOOP AT lt_comps REFERENCE INTO DATA(lr_comp).
-      IF lr_comp->as_include = abap_true.
-        DATA(lt_attri) = rtti_get_t_attri_by_include( lr_comp->type ).
-        INSERT LINES OF lt_attri INTO TABLE result.
-      ELSE.
-        INSERT lr_comp->* INTO TABLE result.
-      ENDIF.
-    ENDLOOP.
+    " expand_components also applies the RENAMING WITH SUFFIX of an include
+    result = expand_components( lo_struct->get_components( ) ).
 
   ENDMETHOD.
 
@@ -6558,7 +6542,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           OR cl_abap_typedescr=>typekind_decfloat
           OR cl_abap_typedescr=>typekind_decfloat16
           OR cl_abap_typedescr=>typekind_decfloat34
-          OR cl_abap_typedescr=>typekind_num.
+          OR cl_abap_typedescr=>typekind_num
+          OR `8`.
+        " `8`: typekind_int8, a constant lower releases do not have
         result = abap_true.
     ENDCASE.
 
@@ -9514,10 +9500,12 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDTRY.
 
 
-    DATA(lt_comp)  =  rtti_get_t_attri_by_any( tabname ).
+    " by NAME: rtti_get_t_attri_by_any( tabname ) described the string
+    " holding the name, and the cast to a structure failed every time
+    DATA(lt_comp) = rtti_get_t_attri_by_table_name( tabname ).
     LOOP AT lt_comp REFERENCE INTO DATA(lr_comp).
 
-      DATA(lv_check_key) = abap_false.
+      DATA(lv_check_key) = abap_false..
       IF line_exists( names[ table_line = lr_comp->name ] ).
         lv_check_key = abap_true.
       ENDIF.
@@ -15333,7 +15321,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       WHEN cl_abap_typedescr=>typekind_int
           OR cl_abap_typedescr=>typekind_int1
           OR cl_abap_typedescr=>typekind_int2
-          OR cl_abap_typedescr=>typekind_int8.
+          OR `8`.
+        " `8`: typekind_int8, a constant lower releases do not have
         result = `IntType`.
       WHEN cl_abap_typedescr=>typekind_packed
           OR cl_abap_typedescr=>typekind_float
