@@ -3868,6 +3868,64 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE ty_p_seconds.
 
+    " The control characters below U+0020 that c_escape_json has no short
+    " escape for (all but tab, line feed and carriage return), built once.
+    CLASS-DATA gv_json_ctrl TYPE string.
+
+    " Splits CSV text into rows of cells, RFC 4180: a cell may be wrapped in
+    " double quotes and then carry the separator, a line break and a doubled
+    " quote. Rows end with CRLF, LF or CR. Empty rows are left out.
+    TYPES ty_t_csv_rows TYPE STANDARD TABLE OF string_table WITH EMPTY KEY.
+
+    CLASS-METHODS csv_split_rows
+      IMPORTING
+        val           TYPE string
+        separator     TYPE string DEFAULT `;`
+      RETURNING
+        VALUE(result) TYPE ty_t_csv_rows.
+
+    " One CSV cell: wrapped in double quotes when it carries the separator,
+    " a quote or a line break, quotes doubled.
+    CLASS-METHODS csv_escape_cell
+      IMPORTING
+        val           TYPE string
+        separator     TYPE string DEFAULT `;`
+      RETURNING
+        VALUE(result) TYPE string.
+
+    " Offset of a keyword in a condition, outside of quoted literals and
+    " whatever its case; -1 when it is not there.
+    CLASS-METHODS filter_sql_find
+      IMPORTING
+        val           TYPE string
+        keyword       TYPE string
+      RETURNING
+        VALUE(result) TYPE i.
+
+    " Removes the parentheses around a condition, as long as the first one
+    " closes at the very end: `( A ) OR ( B )` keeps its own.
+    CLASS-METHODS filter_sql_strip_parens
+      IMPORTING
+        val           TYPE string
+      RETURNING
+        VALUE(result) TYPE string.
+
+    " The ranges of conditions joined with OR; the name is the field of the
+    " first one.
+    CLASS-METHODS filter_sql_get_or_group
+      IMPORTING
+        val           TYPE string
+      RETURNING
+        VALUE(result) TYPE ty_s_filter_multi.
+
+    " A LIKE pattern as a CP pattern: % and _ become * and +, an escaped
+    " character stands for itself.
+    CLASS-METHODS filter_sql_like_to_pattern
+      IMPORTING
+        val           TYPE string
+      RETURNING
+        VALUE(result) TYPE string.
+
 ENDCLASS.
 
 CLASS zabaputil_cl_util_context IMPLEMENTATION.
@@ -4134,66 +4192,49 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD filter_get_range_by_token.
-
     DATA(lv_value) = val.
     IF lv_value IS INITIAL.
       RETURN.
     ENDIF.
-    DATA(lv_length) = strlen( lv_value ) - 1.
+    DATA(lv_length) = strlen( lv_value ).
 
-    CASE lv_value(1).
+    result-sign = `I`.
 
-      WHEN `=`.
-        result = VALUE #( sign   = `I`
-                          option = `EQ`
-                          low    = lv_value+1 ).
-      WHEN `<`.
-        IF lv_value+1(1) = `=`.
-          result = VALUE #( sign   = `I`
-                            option = `LE`
-                            low    = lv_value+2 ).
-        ELSE.
-          result = VALUE #( sign   = `I`
-                            option = `LT`
-                            low    = lv_value+1 ).
-        ENDIF.
-      WHEN `>`.
-        IF lv_value+1(1) = `=`.
-          result = VALUE #( sign   = `I`
-                            option = `GE`
-                            low    = lv_value+2 ).
-        ELSE.
-          result = VALUE #( sign   = `I`
-                            option = `GT`
-                            low    = lv_value+1 ).
-        ENDIF.
+    IF lv_length >= 2 AND ( lv_value(2) = `<=` OR lv_value(2) = `>=` ).
+      result-option = COND #( WHEN lv_value(1) = `<` THEN `LE` ELSE `GE` ).
+      result-low    = substring( val = lv_value
+                                 off = 2 ).
 
-      WHEN `*`.
-        IF lv_length > 0 AND lv_value+lv_length(1) = `*`.
-          lv_value = substring( val = lv_value off = 1 len = lv_length - 1 ).
-          result = VALUE #( sign   = `I`
-                            option = `CP`
-                            low    = lv_value ).
-        ELSEIF lv_length = 0.
-          " Single '*' means contains-pattern with empty value
-          result = VALUE #( sign   = `I`
-                            option = `CP`
-                            low    = `` ).
-        ENDIF.
+    ELSEIF lv_value(1) = `=`.
+      result-option = `EQ`.
+      result-low    = substring( val = lv_value
+                                 off = 1 ).
 
-      WHEN OTHERS.
-        IF lv_value CS `...`.
-          SPLIT lv_value AT `...` INTO result-low result-high.
-          result-sign   = `I`.
-          result-option = `BT`.
-        ELSE.
-          result = VALUE #( sign   = `I`
-                            option = `EQ`
-                            low    = lv_value ).
-        ENDIF.
+    ELSEIF lv_value(1) = `<`.
+      result-option = `LT`.
+      result-low    = substring( val = lv_value
+                                 off = 1 ).
 
-    ENDCASE.
+    ELSEIF lv_value(1) = `>`.
+      result-option = `GT`.
+      result-low    = substring( val = lv_value
+                                 off = 1 ).
 
+    ELSEIF lv_value CA `*`.
+      " the pattern as it was typed: `*abc*` contains, `abc*` starts with,
+      " `*abc` ends with. LOW keeps the asterisks - they are what makes a CP
+      " row a pattern, for IN as well as for the LIKE built from it
+      result-option = `CP`.
+      result-low    = lv_value.
+
+    ELSEIF lv_value CS `...`.
+      SPLIT lv_value AT `...` INTO result-low result-high.
+      result-option = `BT`.
+
+    ELSE.
+      result-option = `EQ`.
+      result-low    = lv_value.
+    ENDIF.
   ENDMETHOD.
 
   METHOD filter_update_tokens.
@@ -4296,9 +4337,16 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       IF lv_value IS INITIAL.
         lv_value = lt_mapping[ n = `EQ` ]-v. "#EC CI_SORTSEQ
       ENDIF.
-      lv_value = filter_token_fill( template = lv_value
-                                    low      = lr_row->low
-                                    high     = lr_row->high ).
+      IF ( lv_option = `CP` OR lv_option = `NP` ) AND lr_row->low CA `*`.
+        " LOW is a pattern already - wrapping it in the template's asterisks
+        " would turn `abc*` into `*abc**`
+        lv_value = COND #( WHEN lv_option = `CP` THEN lr_row->low
+                           ELSE |!({ lr_row->low })| ).
+      ELSE.
+        lv_value = filter_token_fill( template = lv_value
+                                      low      = lr_row->low
+                                      high     = lr_row->high ).
+      ENDIF.
 
       " an excluding row must not render like its including twin - negate the
       " token so the MultiInput shows the filter's real meaning
@@ -4383,26 +4431,25 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD itab_get_csv_by_itab.
-
     FIELD-SYMBOLS <tab> TYPE table.
     DATA lt_lines TYPE string_table.
-    DATA lv_line TYPE string.
+    DATA lt_cells TYPE string_table.
 
     ASSIGN val TO <tab>.
     DATA(tab) = CAST cl_abap_tabledescr( cl_abap_typedescr=>describe_by_data( <tab> ) ).
 
     DATA(struc) = CAST cl_abap_structdescr( tab->get_table_line_type( ) ).
 
-    CLEAR lv_line.
     LOOP AT struc->get_components( ) REFERENCE INTO DATA(lr_comp).
-      lv_line = |{ lv_line }{ lr_comp->name };|.
+      INSERT csv_escape_cell( lr_comp->name ) INTO TABLE lt_cells.
     ENDLOOP.
-    INSERT lv_line INTO TABLE lt_lines.
+    INSERT concat_lines_of( table = lt_cells
+                            sep   = `;` ) INTO TABLE lt_lines.
 
     DATA lr_row TYPE REF TO data.
     LOOP AT <tab> REFERENCE INTO lr_row.
 
-      CLEAR lv_line.
+      CLEAR lt_cells.
       DATA(lv_index) = 1.
       DO.
         ASSIGN lr_row->* TO FIELD-SYMBOL(<row>).
@@ -4411,36 +4458,74 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           EXIT.
         ENDIF.
         lv_index = lv_index + 1.
-        DATA(lv_field_val) = |{ <field> }|.
-        lv_field_val = replace( val = lv_field_val sub = `;` with = `,` occ = 0 ).
-        lv_line = |{ lv_line }{ lv_field_val };|.
+        " the value as it is - a separator, a quote or a line break inside
+        " it is quoted, not replaced
+        INSERT csv_escape_cell( |{ <field> }| ) INTO TABLE lt_cells.
       ENDDO.
-      INSERT lv_line INTO TABLE lt_lines.
+      INSERT concat_lines_of( table = lt_cells
+                              sep   = `;` ) INTO TABLE lt_lines.
     ENDLOOP.
 
-    result = concat_lines_of( table = lt_lines sep = cv_char_util_cr_lf ).
-
+    result = concat_lines_of( table = lt_lines
+                              sep   = cv_char_util_cr_lf ).
   ENDMETHOD.
 
   METHOD itab_get_itab_by_csv.
-
     DATA lt_comp TYPE cl_abap_structdescr=>component_table.
     FIELD-SYMBOLS <tab> TYPE STANDARD TABLE.
     DATA lr_row TYPE REF TO data.
+    DATA lt_names TYPE string_table.
+    FIELD-SYMBOLS <field> TYPE any.
 
-    SPLIT val AT cv_char_util_newline INTO TABLE DATA(lt_rows).
-    SPLIT lt_rows[ 1 ] AT `;` INTO TABLE DATA(lt_cols).
+    DATA(lt_rows) = csv_split_rows( val ).
+    " no row, no header to build a table from
+    IF lt_rows IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    DATA(lt_cols) = lt_rows[ 1 ].
+    " a header written with a separator behind the last column
+    DATA(lv_last) = lines( lt_cols ).
+    IF lv_last > 1 AND lt_cols[ lv_last ] IS INITIAL.
+      DELETE lt_cols INDEX lv_last.
+    ENDIF.
 
     LOOP AT lt_cols REFERENCE INTO DATA(lr_col).
+      DATA(lv_tabix) = sy-tabix.
 
+      " a component name: letters, digits and underscores, not empty, not
+      " starting with a digit, at most 30 characters, unique
       DATA(lv_name) = c_trim_upper( lr_col->* ).
-      lv_name = replace( val = lv_name sub = ` ` with = `_` occ = 0 ).
+      DATA(lv_clean) = ``.
+      DATA(lv_i) = 0.
+      WHILE lv_i < strlen( lv_name ).
+        DATA(lv_c) = lv_name+lv_i(1).
+        IF lv_c CA `ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_`.
+          lv_clean = lv_clean && lv_c.
+        ELSE.
+          lv_clean = lv_clean && `_`.
+        ENDIF.
+        lv_i = lv_i + 1.
+      ENDWHILE.
+      IF lv_clean IS INITIAL.
+        lv_clean = |COL{ lv_tabix }|.
+      ELSEIF lv_clean(1) CA `0123456789`.
+        lv_clean = `C_` && lv_clean.
+      ENDIF.
+      IF strlen( lv_clean ) > 30.
+        lv_clean = lv_clean(30).
+      ENDIF.
+      IF line_exists( lt_names[ table_line = lv_clean ] ).
+        lv_clean = |COL{ lv_tabix }|.
+      ENDIF.
+      INSERT lv_clean INTO TABLE lt_names.
 
-      INSERT VALUE #( name = lv_name
-                      type = cl_abap_elemdescr=>get_c( 40 ) ) INTO TABLE lt_comp.
+      " a string per column - a fixed length cut every longer value
+      INSERT VALUE #( name = lv_clean
+                      type = cl_abap_elemdescr=>get_string( ) ) INTO TABLE lt_comp.
     ENDLOOP.
 
-    DATA(struc) = cl_abap_structdescr=>get( lt_comp ).
+    DATA(struc) = cl_abap_structdescr=>create( lt_comp ).
     DATA(data) = CAST cl_abap_datadescr( struc ).
     DATA(o_table_desc) = cl_abap_tabledescr=>create( p_line_type  = data
                                                      p_table_kind = cl_abap_tabledescr=>tablekind_std
@@ -4448,17 +4533,18 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     CREATE DATA result TYPE HANDLE o_table_desc.
     ASSIGN result->* TO <tab>.
-    DELETE lt_rows WHERE table_line IS INITIAL.
 
     LOOP AT lt_rows REFERENCE INTO DATA(lr_rows) FROM 2.
 
-      SPLIT lr_rows->* AT `;` INTO TABLE lt_cols.
       CREATE DATA lr_row TYPE HANDLE struc.
+      ASSIGN lr_row->* TO FIELD-SYMBOL(<row>).
 
-      LOOP AT lt_cols REFERENCE INTO lr_col.
-        ASSIGN lr_row->* TO FIELD-SYMBOL(<row>).
-        ASSIGN COMPONENT sy-tabix OF STRUCTURE <row> TO FIELD-SYMBOL(<field>).
-        IF sy-subrc <> 0.
+      DATA(lv_index) = 0.
+      LOOP AT lr_rows->* REFERENCE INTO lr_col.
+        lv_index = lv_index + 1.
+        UNASSIGN <field>.
+        ASSIGN COMPONENT lv_index OF STRUCTURE <row> TO <field>.
+        IF <field> IS NOT ASSIGNED.
           EXIT.
         ENDIF.
         <field> = lr_col->*.
@@ -4466,7 +4552,6 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
       INSERT <row> INTO TABLE <tab>.
     ENDLOOP.
-
   ENDMETHOD.
 
   METHOD json_parse.
@@ -4892,6 +4977,19 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     SPLIT lv_tab AT `WHERE` INTO lv_tab lv_dummy.
 
     result-tabname = lv_tab.
+
+    " the word behind FROM, where the statement has one: cutting the squished
+    " text at FIELDS and WHERE took `ZMY_` out of `zmy_fields`
+    DATA(lv_words) = | { condense( to_upper( lv_sql ) ) } |.
+    DATA(lv_from) = find( val = lv_words
+                          sub = ` FROM ` ).
+    IF lv_from >= 0.
+      SPLIT substring( val = lv_words
+                       off = lv_from + 6 ) AT ` ` INTO lv_tab lv_dummy.
+      IF lv_tab IS NOT INITIAL.
+        result-tabname = lv_tab.
+      ENDIF.
+    ENDIF.
 
     DATA(lv_upper) = to_upper( lv_sql ).
     IF lv_upper CS ` WHERE `.
@@ -5473,7 +5571,6 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD filter_get_multi_by_sql_where.
-
     DATA(lv_where) = c_trim( CONV string( val ) ).
     IF lv_where IS INITIAL.
       RETURN.
@@ -5484,58 +5581,83 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     LOOP AT lt_groups INTO DATA(lv_group).
 
-      lv_group = c_trim( lv_group ).
-      DATA(lv_len) = strlen( lv_group ).
+      lv_group = filter_sql_strip_parens( lv_group ).
 
-      IF lv_len >= 2
-         AND lv_group(1) = `(`
-         AND substring( val = lv_group
-                        off = lv_len - 1
-                        len = 1 ) = `)`.
-        lv_group = c_trim( substring( val = lv_group
-                                      off = 1
-                                      len = lv_len - 2 ) ).
+      DATA(lt_parts) = filter_sql_split_top_level( val = lv_group
+                                                   sep = ` AND ` ).
+
+      IF lines( lt_parts ) <= 1.
+        DATA(ls_filter) = filter_sql_get_or_group( lv_group ).
+        IF ls_filter-name IS NOT INITIAL.
+          INSERT ls_filter INTO TABLE result.
+        ENDIF.
+        CONTINUE.
       ENDIF.
 
-      DATA(lt_conds) = filter_sql_split_top_level( val = lv_group
-                                                   sep = ` OR ` ).
-
-      DATA ls_filter TYPE ty_s_filter_multi.
-      CLEAR ls_filter.
-
-      LOOP AT lt_conds INTO DATA(lv_cond).
-
-        DATA ls_range TYPE ty_s_range.
-        DATA lv_fieldname TYPE string.
-        CLEAR ls_range.
-        CLEAR lv_fieldname.
-
-        filter_get_range_by_sql_cond(
-          EXPORTING val       = c_trim( lv_cond )
-          IMPORTING fieldname = lv_fieldname
-                    range     = ls_range ).
-
-        IF ls_range-option IS INITIAL.
+      " several conditions joined with AND inside one group. On one field
+      " that is the shape filter_get_sql_where writes for excluding ranges:
+      " `( includes ) AND exclude AND exclude`, or the excludes alone. The
+      " excludes were negated on the way out and are turned back here.
+      " On different fields they are filters of their own
+      DATA lt_sub TYPE ty_t_filter_multi.
+      DATA lv_first_wrapped TYPE abap_bool.
+      DATA lv_same_field TYPE abap_bool.
+      CLEAR lt_sub.
+      lv_same_field = abap_true.
+      LOOP AT lt_parts INTO DATA(lv_part).
+        DATA(lv_tabix) = sy-tabix.
+        lv_part = c_trim( lv_part ).
+        IF lv_tabix = 1.
+          lv_first_wrapped = xsdbool( lv_part IS NOT INITIAL AND lv_part(1) = `(` ).
+        ENDIF.
+        DATA(ls_sub) = filter_sql_get_or_group( filter_sql_strip_parens( lv_part ) ).
+        IF ls_sub-name IS INITIAL.
           CONTINUE.
         ENDIF.
-
-        IF ls_filter-name IS INITIAL.
-          ls_filter-name = lv_fieldname.
+        IF lt_sub IS NOT INITIAL AND to_upper( lt_sub[ 1 ]-name ) <> to_upper( ls_sub-name ).
+          lv_same_field = abap_false.
         ENDIF.
-        INSERT ls_range INTO TABLE ls_filter-t_range.
-
+        INSERT ls_sub INTO TABLE lt_sub.
       ENDLOOP.
 
+      IF lv_same_field = abap_false.
+        INSERT LINES OF lt_sub INTO TABLE result.
+        CONTINUE.
+      ENDIF.
+
+      CLEAR ls_filter.
+      LOOP AT lt_sub INTO ls_sub.
+        lv_tabix = sy-tabix.
+        ls_filter-name = lt_sub[ 1 ]-name.
+        IF lv_tabix = 1 AND lv_first_wrapped = abap_true.
+          INSERT LINES OF ls_sub-t_range INTO TABLE ls_filter-t_range.
+          CONTINUE.
+        ENDIF.
+        LOOP AT ls_sub-t_range INTO DATA(ls_range).
+          ls_range-sign = `E`.
+          CASE ls_range-option.
+            WHEN `EQ`. ls_range-option = `NE`.
+            WHEN `NE`. ls_range-option = `EQ`.
+            WHEN `LT`. ls_range-option = `GE`.
+            WHEN `LE`. ls_range-option = `GT`.
+            WHEN `GT`. ls_range-option = `LE`.
+            WHEN `GE`. ls_range-option = `LT`.
+            WHEN `CP`. ls_range-option = `NP`.
+            WHEN `NP`. ls_range-option = `CP`.
+            WHEN `BT`. ls_range-option = `NB`.
+            WHEN `NB`. ls_range-option = `BT`.
+          ENDCASE.
+          INSERT ls_range INTO TABLE ls_filter-t_range.
+        ENDLOOP.
+      ENDLOOP.
       IF ls_filter-name IS NOT INITIAL.
         INSERT ls_filter INTO TABLE result.
       ENDIF.
 
     ENDLOOP.
-
   ENDMETHOD.
 
   METHOD filter_get_range_by_sql_cond.
-
     CLEAR range.
     CLEAR fieldname.
 
@@ -5543,96 +5665,124 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     range-sign = `I`.
 
     DATA lv_rest TYPE string.
-    DATA lv_low TYPE string.
-    DATA lv_high TYPE string.
-    DATA lv_like TYPE string.
+    DATA lv_off  TYPE i.
+    DATA lv_and  TYPE i.
+    DATA lv_esc  TYPE i.
 
-    IF lv_cond CS ` NOT BETWEEN `.
-      SPLIT lv_cond AT ` NOT BETWEEN ` INTO fieldname lv_rest.
-      SPLIT lv_rest AT ` AND ` INTO lv_low lv_high.
+    " the keywords are looked for outside of the literals and whatever their
+    " case: `TEXT = 'A LIKE B'` is an equality, `name like 'A%'` a pattern
+    lv_off = filter_sql_find( val     = lv_cond
+                              keyword = ` NOT BETWEEN ` ).
+    IF lv_off < 0.
+      lv_off = filter_sql_find( val     = lv_cond
+                                keyword = ` BETWEEN ` ).
+      IF lv_off >= 0.
+        range-option = `BT`.
+        lv_rest = substring( val = lv_cond
+                             off = lv_off + 9 ).
+      ENDIF.
+    ELSE.
       range-option = `NB`.
-      range-low    = filter_sql_strip_quotes( lv_low ).
-      range-high   = filter_sql_strip_quotes( lv_high ).
+      lv_rest = substring( val = lv_cond
+                           off = lv_off + 13 ).
+    ENDIF.
+    IF lv_off >= 0.
+      fieldname = c_trim( substring( val = lv_cond
+                                     len = lv_off ) ).
+      lv_and = filter_sql_find( val     = lv_rest
+                                keyword = ` AND ` ).
+      IF lv_and < 0.
+        range-low = filter_sql_strip_quotes( lv_rest ).
+      ELSE.
+        range-low  = filter_sql_strip_quotes( substring( val = lv_rest
+                                                         len = lv_and ) ).
+        range-high = filter_sql_strip_quotes( substring( val = lv_rest
+                                                         off = lv_and + 5 ) ).
+      ENDIF.
       RETURN.
     ENDIF.
 
-    IF lv_cond CS ` BETWEEN `.
-      SPLIT lv_cond AT ` BETWEEN ` INTO fieldname lv_rest.
-      SPLIT lv_rest AT ` AND ` INTO lv_low lv_high.
-      range-option = `BT`.
-      range-low    = filter_sql_strip_quotes( lv_low ).
-      range-high   = filter_sql_strip_quotes( lv_high ).
-      RETURN.
-    ENDIF.
-
-    IF lv_cond CS ` NOT LIKE `.
-      SPLIT lv_cond AT ` NOT LIKE ` INTO fieldname lv_rest.
-      lv_like = filter_sql_strip_quotes( lv_rest ).
-      lv_like = replace( val = lv_like sub = `%` with = `*` occ = 0 ).
-      lv_like = replace( val = lv_like sub = `_` with = `+` occ = 0 ).
+    lv_off = filter_sql_find( val     = lv_cond
+                              keyword = ` NOT LIKE ` ).
+    IF lv_off < 0.
+      lv_off = filter_sql_find( val     = lv_cond
+                                keyword = ` LIKE ` ).
+      IF lv_off >= 0.
+        range-option = `CP`.
+        lv_rest = substring( val = lv_cond
+                             off = lv_off + 6 ).
+      ENDIF.
+    ELSE.
       range-option = `NP`.
-      range-low    = lv_like.
+      lv_rest = substring( val = lv_cond
+                           off = lv_off + 10 ).
+    ENDIF.
+    IF lv_off >= 0.
+      fieldname = c_trim( substring( val = lv_cond
+                                     len = lv_off ) ).
+      " `'A#%%' ESCAPE '#'`: the pattern, and the character that makes the
+      " next one a plain character
+      lv_esc = filter_sql_find( val     = lv_rest
+                                keyword = ` ESCAPE ` ).
+      IF lv_esc < 0.
+        range-low = filter_sql_like_to_pattern( filter_sql_strip_quotes( lv_rest ) ).
+      ELSE.
+        DATA(lv_escape) = filter_sql_strip_quotes( substring( val = lv_rest
+                                                              off = lv_esc + 8 ) ).
+        DATA(lv_like) = filter_sql_strip_quotes( substring( val = lv_rest
+                                                            len = lv_esc ) ).
+        DATA(lv_pos) = 0.
+        DATA(lv_plain) = ``.
+        DATA(lv_segment) = ``.
+        " the escaped characters are taken out before % and _ are mapped
+        WHILE lv_pos < strlen( lv_like ).
+          DATA(lv_char) = substring( val = lv_like
+                                     off = lv_pos
+                                     len = 1 ).
+          IF lv_escape IS NOT INITIAL AND lv_char = lv_escape AND lv_pos + 1 < strlen( lv_like ).
+            lv_plain = lv_plain && filter_sql_like_to_pattern( lv_segment )
+                    && substring( val = lv_like
+                                  off = lv_pos + 1
+                                  len = 1 ).
+            CLEAR lv_segment.
+            lv_pos = lv_pos + 2.
+            CONTINUE.
+          ENDIF.
+          lv_segment = lv_segment && lv_char.
+          lv_pos = lv_pos + 1.
+        ENDWHILE.
+        range-low = lv_plain && filter_sql_like_to_pattern( lv_segment ).
+      ENDIF.
       RETURN.
     ENDIF.
 
-    IF lv_cond CS ` LIKE `.
-      SPLIT lv_cond AT ` LIKE ` INTO fieldname lv_rest.
-      lv_like = filter_sql_strip_quotes( lv_rest ).
-      lv_like = replace( val = lv_like sub = `%` with = `*` occ = 0 ).
-      lv_like = replace( val = lv_like sub = `_` with = `+` occ = 0 ).
-      range-option = `CP`.
-      range-low    = lv_like.
+    " the two-character operators before the ones they contain
+    DATA lt_operator TYPE ty_t_name_value.
+    lt_operator = VALUE #( ( n = `<>` v = `NE` )
+                           ( n = `<=` v = `LE` )
+                           ( n = `>=` v = `GE` )
+                           ( n = `<`  v = `LT` )
+                           ( n = `>`  v = `GT` )
+                           ( n = `=`  v = `EQ` ) ).
+    LOOP AT lt_operator INTO DATA(ls_operator).
+      lv_off = filter_sql_find( val     = lv_cond
+                                keyword = | { ls_operator-n } | ).
+      IF lv_off < 0.
+        CONTINUE.
+      ENDIF.
+      fieldname    = c_trim( substring( val = lv_cond
+                                        len = lv_off ) ).
+      range-option = ls_operator-v.
+      range-low    = filter_sql_strip_quotes( substring( val = lv_cond
+                                                         off = lv_off + strlen( ls_operator-n ) + 2 ) ).
       RETURN.
-    ENDIF.
-
-    IF lv_cond CS ` <> `.
-      SPLIT lv_cond AT ` <> ` INTO fieldname lv_rest.
-      range-option = `NE`.
-      range-low    = filter_sql_strip_quotes( lv_rest ).
-      RETURN.
-    ENDIF.
-
-    IF lv_cond CS ` <= `.
-      SPLIT lv_cond AT ` <= ` INTO fieldname lv_rest.
-      range-option = `LE`.
-      range-low    = filter_sql_strip_quotes( lv_rest ).
-      RETURN.
-    ENDIF.
-
-    IF lv_cond CS ` >= `.
-      SPLIT lv_cond AT ` >= ` INTO fieldname lv_rest.
-      range-option = `GE`.
-      range-low    = filter_sql_strip_quotes( lv_rest ).
-      RETURN.
-    ENDIF.
-
-    IF lv_cond CS ` < `.
-      SPLIT lv_cond AT ` < ` INTO fieldname lv_rest.
-      range-option = `LT`.
-      range-low    = filter_sql_strip_quotes( lv_rest ).
-      RETURN.
-    ENDIF.
-
-    IF lv_cond CS ` > `.
-      SPLIT lv_cond AT ` > ` INTO fieldname lv_rest.
-      range-option = `GT`.
-      range-low    = filter_sql_strip_quotes( lv_rest ).
-      RETURN.
-    ENDIF.
-
-    IF lv_cond CS ` = `.
-      SPLIT lv_cond AT ` = ` INTO fieldname lv_rest.
-      range-option = `EQ`.
-      range-low    = filter_sql_strip_quotes( lv_rest ).
-      RETURN.
-    ENDIF.
-
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD filter_sql_split_top_level.
 
     DATA(lv_val) = CONV string( val ).
-    DATA(lv_sep) = CONV string( sep ).
+    DATA(lv_sep) = to_upper( CONV string( sep ) ).
     DATA(lv_len) = strlen( lv_val ).
     DATA(lv_sep_len) = strlen( lv_sep ).
     DATA(lv_depth) = 0.
@@ -5703,10 +5853,11 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CONTINUE.
       ENDIF.
 
+      " whatever the case of the keyword - `and` separates like `AND`
       IF lv_depth = 0
          AND lv_in_between = abap_false
          AND lv_pos + lv_sep_len <= lv_len
-         AND lv_val+lv_pos(lv_sep_len) = lv_sep.
+         AND to_upper( lv_val+lv_pos(lv_sep_len) ) = lv_sep.
         INSERT substring( val = lv_val
                           off = lv_start
                           len = lv_pos - lv_start ) INTO TABLE result.
@@ -6326,6 +6477,12 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       ENDIF.
       lv_i = lv_i + 1.
     ENDWHILE.
+
+    " fewer digits than the format asks for: no date, instead of reading
+    " behind the end of the value
+    IF strlen( lv_clean ) < strlen( lv_fmt_clean ).
+      RETURN.
+    ENDIF.
 
     DATA(lv_year)  = ``.
     DATA(lv_month) = ``.
@@ -6953,26 +7110,32 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   " ========== String Extras ==========
 
   METHOD c_pad_left.
-
     result = val.
+    DATA(lv_missing) = len - strlen( result ).
+    IF lv_missing <= 0.
+      RETURN.
+    ENDIF.
     " pad is TYPE c - space value would be trimmed by && (same as c_pad_right fix)
     DATA(lv_pad) = COND string( WHEN pad IS INITIAL THEN ` ` ELSE CONV #( pad ) ).
-    WHILE strlen( result ) < len.
-      result = lv_pad && result.
-    ENDWHILE.
-
+    " exactly the missing characters, also for a pad of several characters
+    result = substring( val = repeat( val = lv_pad
+                                      occ = lv_missing )
+                        len = lv_missing ) && result.
   ENDMETHOD.
 
   METHOD c_pad_right.
-
     result = val.
+    DATA(lv_missing) = len - strlen( result ).
+    IF lv_missing <= 0.
+      RETURN.
+    ENDIF.
     " pad is TYPE c - a space value IS INITIAL in ABAP and CONV string trims it.
     " Preserve the space explicitly via COND.
     DATA(lv_pad) = COND string( WHEN pad IS INITIAL THEN ` ` ELSE CONV #( pad ) ).
-    WHILE strlen( result ) < len.
-      result = result && lv_pad.
-    ENDWHILE.
-
+    " exactly the missing characters, also for a pad of several characters
+    result = result && substring( val = repeat( val = lv_pad
+                                                occ = lv_missing )
+                                  len = lv_missing ).
   ENDMETHOD.
 
   METHOD c_truncate.
@@ -7038,7 +7201,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA lv_str TYPE string.
 
     IF decimals >= 0.
-      DATA(lv_fmt) = |{ val }|.
+      " rounded to the decimals asked for - cutting the digits off turned
+      " 1.999 into 1.99
+      DATA(lv_fmt) = |{ num_round( val      = CONV decfloat34( val )
+                                   decimals = decimals ) }|.
       DATA(lv_dot_pos) = find( val = lv_fmt sub = `.` ).
       IF lv_dot_pos < 0.
         lv_str = lv_fmt.
@@ -7106,6 +7272,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         lv_clean = lv_clean && lv_c.
       ELSEIF lv_c = `-` AND lv_i = 0.
         lv_clean = lv_clean && lv_c.
+      ELSEIF lv_c = `-` AND lv_i = strlen( lv_val ) - 1 AND lv_val(1) <> `-`.
+        " the sign behind the number, as a MOVE and WRITE put it
+        lv_clean = `-` && lv_clean.
       ELSEIF lv_c = `.`.
         lv_clean = lv_clean && lv_c.
       ELSEIF lv_c = `,`.
@@ -7222,7 +7391,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     total_count = lines( tab ).
     total_pages = COND #( WHEN page_size <= 0 THEN 1
-                          ELSE ( total_count + page_size - 1 ) / page_size ).
+                          ELSE ( total_count + page_size - 1 ) DIV page_size ).
 
     DATA(lv_from) = ( page - 1 ) * page_size + 1.
     DATA(lv_to)   = page * page_size.
@@ -7271,7 +7440,6 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   " ========== Validation Helpers ==========
 
   METHOD check_is_email.
-
     DATA(lv_val) = c_trim( CONV string( val ) ).
 
     IF lv_val IS INITIAL.
@@ -7279,26 +7447,35 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    " Basic email validation: contains exactly one @, has text before and after,
-    " domain part contains at least one dot
+    " Basic email validation: no blank, exactly one @, text before and after,
+    " a dot inside the domain - not at its start or end, and not doubled
+    IF lv_val CA | \t|.
+      RETURN.
+    ENDIF.
+
     SPLIT lv_val AT `@` INTO DATA(lv_local) DATA(lv_domain) DATA(lv_extra).
     IF lv_extra IS NOT INITIAL OR lv_local IS INITIAL OR lv_domain IS INITIAL.
       result = abap_false.
       RETURN.
     ENDIF.
 
-    IF lv_domain NA `.`.
+    IF lv_domain NA `.` OR lv_domain CS `..` OR lv_local CS `..`.
+      result = abap_false.
+      RETURN.
+    ENDIF.
+
+    DATA(lv_last) = strlen( lv_domain ) - 1.
+    IF lv_domain(1) = `.` OR lv_domain+lv_last(1) = `.`.
       result = abap_false.
       RETURN.
     ENDIF.
 
     result = abap_true.
-
   ENDMETHOD.
 
   METHOD check_is_numeric_string.
-
     DATA(lv_val) = c_trim( CONV string( val ) ).
+    DATA(lv_len) = strlen( lv_val ).
 
     IF lv_val IS INITIAL.
       result = abap_false.
@@ -7307,14 +7484,16 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     DATA(lv_i) = 0.
     DATA(lv_has_dot) = abap_false.
-    WHILE lv_i < strlen( lv_val ).
+    DATA(lv_has_digit) = abap_false.
+    DATA(lv_has_sign) = abap_false.
+    WHILE lv_i < lv_len.
       DATA(lv_c) = lv_val+lv_i(1).
       IF lv_c >= `0` AND lv_c <= `9`.
-        " digit ok
-      ELSEIF lv_c = `-` AND lv_i = 0.
-        " leading minus ok
-      ELSEIF lv_c = `+` AND lv_i = 0.
-        " leading plus ok
+        lv_has_digit = abap_true.
+      ELSEIF ( lv_c = `-` OR lv_c = `+` ) AND lv_i = 0.
+        lv_has_sign = abap_true.
+      ELSEIF lv_c = `-` AND lv_i = lv_len - 1 AND lv_has_sign = abap_false.
+        " the sign behind the number, as a MOVE and WRITE put it
       ELSEIF ( lv_c = `.` OR lv_c = `,` ) AND lv_has_dot = abap_false.
         lv_has_dot = abap_true.
       ELSE.
@@ -7324,29 +7503,53 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       lv_i = lv_i + 1.
     ENDWHILE.
 
-    result = abap_true.
-
+    " a sign or a separator alone is no number
+    result = lv_has_digit.
   ENDMETHOD.
 
   METHOD check_is_date_valid.
-
-    " declared, not CONV string( ) - see error_get_attributes
-    DATA lv_check TYPE string.
+    DATA lv_date  TYPE d.
+    DATA lv_str   TYPE string.
+    DATA lv_year  TYPE i.
+    DATA lv_month TYPE i.
+    DATA lv_day   TYPE i.
+    DATA lv_max   TYPE i.
 
     TRY.
-        DATA(lv_date) = conv_string_to_date( val = val format = format ).
-        " Check the date is actually valid (not 00000000 and not invalid like Feb 30)
-        IF lv_date IS INITIAL.
-          result = abap_false.
-          RETURN.
-        ENDIF.
-        " ABAP validates dates on assignment — if it passed conv_string_to_date it's valid
-        lv_check = lv_date.
-        result = xsdbool( lv_check <> `00000000` ).
+        lv_date = conv_string_to_date( val    = val
+                                       format = format ).
       CATCH cx_root.
-        result = abap_false.
+        RETURN.
     ENDTRY.
 
+    " a date field takes any eight characters - `20240230` is as welcome as
+    " `20240229`, nothing checks the calendar on assignment. So the month
+    " and the day are checked here
+    lv_str = lv_date.
+    IF strlen( lv_str ) <> 8 OR lv_str CN `0123456789`.
+      RETURN.
+    ENDIF.
+    lv_year  = lv_str(4).
+    lv_month = lv_str+4(2).
+    lv_day   = lv_str+6(2).
+    IF lv_year < 1 OR lv_month < 1 OR lv_month > 12 OR lv_day < 1.
+      RETURN.
+    ENDIF.
+
+    CASE lv_month.
+      WHEN 4 OR 6 OR 9 OR 11.
+        lv_max = 30.
+      WHEN 2.
+        IF ( lv_year MOD 4 = 0 AND lv_year MOD 100 <> 0 ) OR lv_year MOD 400 = 0.
+          lv_max = 29.
+        ELSE.
+          lv_max = 28.
+        ENDIF.
+      WHEN OTHERS.
+        lv_max = 31.
+    ENDCASE.
+
+    result = xsdbool( lv_day <= lv_max ).
   ENDMETHOD.
 
   METHOD check_is_guid.
@@ -7557,9 +7760,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             RECEIVING
               rv_technical_name = lv_result.
         ELSE.
-          CALL METHOD (lv_class)=>(`GET_USER_BUSINESS_PARTNER_ID`)
-            RECEIVING
-              rv_business_partner_id = lv_result.
+          " the technical name, as the cloud branch answers it - this branch
+          " asked for the business partner id, which is another value and
+          " needs a class that older releases do not have
+          lv_result = sy-uname.
         ENDIF.
 
         result = lv_result.
@@ -12850,12 +13054,17 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD c_escape_json.
+    CONSTANTS lc_ctrl_hex TYPE string VALUE `01020304050607080B0C0E0F101112131415161718191A1B1C1D1E1F`.
+
+    IF gv_json_ctrl IS INITIAL.
+      gv_json_ctrl = conv_get_string_by_xstring( CONV xstring( lc_ctrl_hex ) ).
+    ENDIF.
 
     " the backslash first: escaping it afterwards would double the ones the
     " replacements below have just written. The common value carries none
-    " of the five characters - skip the copies then
+    " of these characters - skip the copies then
     result = val.
-    IF result NA |"\\\t\n\r|.
+    IF result NA |"\\\t\n\r| AND result NA gv_json_ctrl.
       RETURN.
     ENDIF.
     result = replace( val  = result
@@ -12879,6 +13088,28 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                       with = `\"`
                       occ  = 0 ).
 
+    " every other control character has to be escaped too - a raw form feed
+    " or 0x01 (legacy long texts carry them) makes the JSON unparseable
+    IF result NA gv_json_ctrl.
+      RETURN.
+    ENDIF.
+    DATA(lv_i) = 0.
+    WHILE lv_i < strlen( gv_json_ctrl ).
+      DATA(lv_code) = substring( val = lc_ctrl_hex
+                                 off = lv_i * 2
+                                 len = 2 ).
+      DATA(lv_escape) = SWITCH string( lv_code
+                                       WHEN `08` THEN `\b`
+                                       WHEN `0C` THEN `\f`
+                                       ELSE `\u00` && lv_code ).
+      result = replace( val  = result
+                        sub  = substring( val = gv_json_ctrl
+                                          off = lv_i
+                                          len = 1 )
+                        with = lv_escape
+                        occ  = 0 ).
+      lv_i = lv_i + 1.
+    ENDWHILE.
   ENDMETHOD.
 
   METHOD c_escape_js.
@@ -13299,11 +13530,17 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                                  off = lv_i
                                  len = 1 ).
 
+      " only two hex digits make an escape - `%ZZ` stays as it is instead
+      " of becoming a NUL byte
+      DATA(lv_hex) = ``.
       IF lv_char = `%` AND lv_i + 2 < lv_len.
+        lv_hex = to_upper( substring( val = lv_val
+                                      off = lv_i + 1
+                                      len = 2 ) ).
+      ENDIF.
+      IF lv_hex IS NOT INITIAL AND lv_hex CO `0123456789ABCDEF`.
         DATA lv_x TYPE x LENGTH 1.
-        lv_x = to_upper( substring( val = lv_val
-                                    off = lv_i + 1
-                                    len = 2 ) ).
+        lv_x = lv_hex.
         lv_xbuf = |{ lv_xbuf }{ lv_x }|.
         lv_i = lv_i + 3.
         CONTINUE.
@@ -13377,6 +13614,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD regex_find_all.
 
     DATA lv_success TYPE abap_bool.
+    DATA lv_empty_off TYPE i VALUE -1.
     DATA lv_off     TYPE i.
     DATA lv_len     TYPE i.
 
@@ -13399,8 +13637,15 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         RECEIVING
           length = lv_len.
 
+      " a match of length zero is skipped, not the end: `a*` on `baaa`
+      " matches nothing at offset 0 and `aaa` after it. Two empty matches
+      " at the same offset mean the matcher does not move on - stop then
       IF lv_len = 0.
-        EXIT.
+        IF lv_off = lv_empty_off.
+          EXIT.
+        ENDIF.
+        lv_empty_off = lv_off.
+        CONTINUE.
       ENDIF.
 
       INSERT substring( val = lv_val
@@ -13413,6 +13658,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD regex_replace_all.
 
     DATA lv_success TYPE abap_bool.
+    DATA lv_empty_off TYPE i VALUE -1.
     DATA lv_off     TYPE i.
     DATA lv_len     TYPE i.
     DATA lv_pos     TYPE i.
@@ -13436,8 +13682,15 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         RECEIVING
           length = lv_len.
 
+      " a match of length zero is skipped, not the end: `a*` on `baaa`
+      " matches nothing at offset 0 and `aaa` after it. Two empty matches
+      " at the same offset mean the matcher does not move on - stop then
       IF lv_len = 0.
-        EXIT.
+        IF lv_off = lv_empty_off.
+          EXIT.
+        ENDIF.
+        lv_empty_off = lv_off.
+        CONTINUE.
       ENDIF.
 
       result = result && substring( val = lv_val
@@ -13706,18 +13959,46 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     lv_rounded = trunc( lv_abs ).
 
+    DATA(lv_frac) = frac( lv_abs ).
+
     CASE lv_mode.
       WHEN `UP`.
-        IF frac( lv_abs ) > 0.
+        IF lv_frac > 0.
           lv_rounded = lv_rounded + 1.
         ENDIF.
       WHEN `DOWN`.
         " truncation is already rounding toward zero
+      WHEN `CEILING`.
+        " toward plus infinity: away from zero for a positive value only
+        IF lv_frac > 0 AND lv_sign > 0.
+          lv_rounded = lv_rounded + 1.
+        ENDIF.
+      WHEN `FLOOR`.
+        " toward minus infinity: away from zero for a negative value only
+        IF lv_frac > 0 AND lv_sign < 0.
+          lv_rounded = lv_rounded + 1.
+        ENDIF.
+      WHEN `HALF_DOWN`.
+        IF lv_frac > lv_half.
+          lv_rounded = lv_rounded + 1.
+        ENDIF.
+      WHEN `HALF_EVEN`.
+        " the tie goes to the even neighbour
+        IF lv_frac > lv_half
+            OR ( lv_frac = lv_half AND frac( lv_rounded / 2 ) <> 0 ).
+          lv_rounded = lv_rounded + 1.
+        ENDIF.
       WHEN OTHERS.
-        IF frac( lv_abs ) >= lv_half.
+        IF lv_frac >= lv_half.
           lv_rounded = lv_rounded + 1.
         ENDIF.
     ENDCASE.
+
+    " no minus sign on a result that rounded to zero
+    IF lv_rounded = 0.
+      result = 0.
+      RETURN.
+    ENDIF.
 
     result = lv_rounded * lv_sign / lv_factor.
 
@@ -13727,6 +14008,11 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     DATA(lv_name) = to_lower( c_trim( val ) ).
     SPLIT lv_name AT `.` INTO TABLE DATA(lt_parts).
+    " no name, no extension - an empty name splits into no part at all
+    IF lt_parts IS INITIAL.
+      result = `application/octet-stream`.
+      RETURN.
+    ENDIF.
     DATA(lv_ext) = lt_parts[ lines( lt_parts ) ].
 
     CASE lv_ext.
@@ -13792,7 +14078,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD lang_sap_to_iso.
 
-    CONSTANTS lc_map TYPE string VALUE `A:af;B:he;C:zh;D:de;E:en;F:fr;G:el;H:hu;I:it;J:ja;K:da;L:pl;M:zf;N:nl;O:no;P:pt;Q:sk;R:ru;S:es;T:tr;U:fi;V:sv;W:bg;X:lt;Y:lv`.
+    CONSTANTS lc_map TYPE string VALUE `0:sr;1:zh;2:th;3:ko;4:ro;5:sl;6:hr;7:ms;8:uk;9:et;A:ar;B:he;C:cs;D:de;E:en;F:fr;G:el;H:hu;I:it;J:ja;K:da;L:pl;M:zf;N:nl;O:no;P:pt;Q:sk;R:ru;S:es;T:tr;U:fi;V:sv;W:bg;X:lt;Y:lv`.
 
     DATA(lv_sap) = to_upper( c_trim( val ) ).
 
@@ -13821,7 +14107,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD lang_iso_to_sap.
 
-    CONSTANTS lc_map TYPE string VALUE `A:af;B:he;C:zh;D:de;E:en;F:fr;G:el;H:hu;I:it;J:ja;K:da;L:pl;M:zf;N:nl;O:no;P:pt;Q:sk;R:ru;S:es;T:tr;U:fi;V:sv;W:bg;X:lt;Y:lv`.
+    CONSTANTS lc_map TYPE string VALUE `0:sr;1:zh;2:th;3:ko;4:ro;5:sl;6:hr;7:ms;8:uk;9:et;A:ar;B:he;C:cs;D:de;E:en;F:fr;G:el;H:hu;I:it;J:ja;K:da;L:pl;M:zf;N:nl;O:no;P:pt;Q:sk;R:ru;S:es;T:tr;U:fi;V:sv;W:bg;X:lt;Y:lv`.
 
     DATA(lv_iso) = to_lower( c_trim( val ) ).
 
@@ -17248,6 +17534,227 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       rv_result = c_pad_left( val = rv_result
                               len = iv_length ).
     ENDIF.
+
+  ENDMETHOD.
+
+  METHOD csv_escape_cell.
+
+    result = val.
+    IF result NA |"\n\r| AND find( val = result
+                                   sub = separator ) < 0.
+      RETURN.
+    ENDIF.
+    result = replace( val  = result
+                      sub  = `"`
+                      with = `""`
+                      occ  = 0 ).
+    result = |"{ result }"|.
+
+  ENDMETHOD.
+
+  METHOD csv_split_rows.
+
+    DATA lt_cells  TYPE string_table.
+    DATA lv_cell   TYPE string.
+    DATA lv_quoted TYPE abap_bool.
+    " the cell was opened with a quote - an empty quoted cell is content
+    DATA lv_was_quoted TYPE abap_bool.
+    DATA lv_pos    TYPE i.
+
+    DATA(lv_len) = strlen( val ).
+    DATA(lv_sep_len) = strlen( separator ).
+    IF lv_sep_len = 0.
+      RETURN.
+    ENDIF.
+
+    WHILE lv_pos < lv_len.
+
+      DATA(lv_char) = substring( val = val
+                                 off = lv_pos
+                                 len = 1 ).
+
+      IF lv_quoted = abap_true.
+        IF lv_char <> `"`.
+          lv_cell = lv_cell && lv_char.
+        ELSEIF lv_pos + 1 < lv_len AND substring( val = val
+                                                  off = lv_pos + 1
+                                                  len = 1 ) = `"`.
+          " a doubled quote is one quote
+          lv_cell = lv_cell && `"`.
+          lv_pos = lv_pos + 1.
+        ELSE.
+          lv_quoted = abap_false.
+        ENDIF.
+        lv_pos = lv_pos + 1.
+        CONTINUE.
+      ENDIF.
+
+      IF lv_char = `"` AND lv_cell IS INITIAL AND lv_was_quoted = abap_false.
+        lv_quoted = abap_true.
+        lv_was_quoted = abap_true.
+        lv_pos = lv_pos + 1.
+        CONTINUE.
+      ENDIF.
+
+      IF lv_pos + lv_sep_len <= lv_len AND substring( val = val
+                                                      off = lv_pos
+                                                      len = lv_sep_len ) = separator.
+        INSERT lv_cell INTO TABLE lt_cells.
+        CLEAR lv_cell.
+        lv_was_quoted = abap_false.
+        lv_pos = lv_pos + lv_sep_len.
+        CONTINUE.
+      ENDIF.
+
+      IF lv_char = |\n| OR lv_char = |\r|.
+        " CRLF is one line end
+        IF lv_char = |\r| AND lv_pos + 1 < lv_len AND substring( val = val
+                                                                  off = lv_pos + 1
+                                                                  len = 1 ) = |\n|.
+          lv_pos = lv_pos + 1.
+        ENDIF.
+        IF lt_cells IS NOT INITIAL OR lv_cell IS NOT INITIAL OR lv_was_quoted = abap_true.
+          INSERT lv_cell INTO TABLE lt_cells.
+          INSERT lt_cells INTO TABLE result.
+        ENDIF.
+        CLEAR lt_cells.
+        CLEAR lv_cell.
+        lv_was_quoted = abap_false.
+        lv_pos = lv_pos + 1.
+        CONTINUE.
+      ENDIF.
+
+      lv_cell = lv_cell && lv_char.
+      lv_pos = lv_pos + 1.
+
+    ENDWHILE.
+
+    IF lt_cells IS NOT INITIAL OR lv_cell IS NOT INITIAL OR lv_was_quoted = abap_true.
+      INSERT lv_cell INTO TABLE lt_cells.
+      INSERT lt_cells INTO TABLE result.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD filter_sql_find.
+
+    DATA lv_pos      TYPE i.
+    DATA lv_in_quote TYPE abap_bool.
+
+    result = -1.
+    DATA(lv_upper) = to_upper( val ).
+    DATA(lv_keyword) = to_upper( keyword ).
+    DATA(lv_len) = strlen( lv_upper ).
+    DATA(lv_key_len) = strlen( lv_keyword ).
+    IF lv_key_len = 0.
+      RETURN.
+    ENDIF.
+
+    WHILE lv_pos + lv_key_len <= lv_len.
+      IF substring( val = lv_upper
+                    off = lv_pos
+                    len = 1 ) = `'`.
+        lv_in_quote = xsdbool( lv_in_quote = abap_false ).
+      ELSEIF lv_in_quote = abap_false AND substring( val = lv_upper
+                                                     off = lv_pos
+                                                     len = lv_key_len ) = lv_keyword.
+        result = lv_pos.
+        RETURN.
+      ENDIF.
+      lv_pos = lv_pos + 1.
+    ENDWHILE.
+
+  ENDMETHOD.
+
+  METHOD filter_sql_strip_parens.
+
+    DATA lv_pos      TYPE i.
+    DATA lv_depth    TYPE i.
+    DATA lv_in_quote TYPE abap_bool.
+    DATA lv_wrapped  TYPE abap_bool.
+
+    result = c_trim( val ).
+
+    DO.
+      DATA(lv_len) = strlen( result ).
+      IF lv_len < 2 OR result(1) <> `(`.
+        RETURN.
+      ENDIF.
+
+      " does the first parenthesis close at the last character?
+      lv_pos = 0.
+      lv_depth = 0.
+      lv_in_quote = abap_false.
+      lv_wrapped = abap_false.
+      WHILE lv_pos < lv_len.
+        DATA(lv_char) = substring( val = result
+                                   off = lv_pos
+                                   len = 1 ).
+        IF lv_char = `'`.
+          lv_in_quote = xsdbool( lv_in_quote = abap_false ).
+        ELSEIF lv_in_quote = abap_false AND lv_char = `(`.
+          lv_depth = lv_depth + 1.
+        ELSEIF lv_in_quote = abap_false AND lv_char = `)`.
+          lv_depth = lv_depth - 1.
+          IF lv_depth = 0.
+            lv_wrapped = xsdbool( lv_pos = lv_len - 1 ).
+            EXIT.
+          ENDIF.
+        ENDIF.
+        lv_pos = lv_pos + 1.
+      ENDWHILE.
+
+      IF lv_wrapped = abap_false.
+        RETURN.
+      ENDIF.
+      result = c_trim( substring( val = result
+                                  off = 1
+                                  len = lv_len - 2 ) ).
+    ENDDO.
+
+  ENDMETHOD.
+
+  METHOD filter_sql_get_or_group.
+
+    DATA ls_range     TYPE ty_s_range.
+    DATA lv_fieldname TYPE string.
+
+    DATA(lt_conds) = filter_sql_split_top_level( val = val
+                                                 sep = ` OR ` ).
+
+    LOOP AT lt_conds INTO DATA(lv_cond).
+
+      CLEAR ls_range.
+      CLEAR lv_fieldname.
+
+      filter_get_range_by_sql_cond(
+        EXPORTING val       = filter_sql_strip_parens( lv_cond )
+        IMPORTING fieldname = lv_fieldname
+                  range     = ls_range ).
+
+      IF ls_range-option IS INITIAL.
+        CONTINUE.
+      ENDIF.
+
+      IF result-name IS INITIAL.
+        result-name = lv_fieldname.
+      ENDIF.
+      INSERT ls_range INTO TABLE result-t_range.
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD filter_sql_like_to_pattern.
+
+    result = replace( val  = val
+                      sub  = `%`
+                      with = `*`
+                      occ  = 0 ).
+    result = replace( val  = result
+                      sub  = `_`
+                      with = `+`
+                      occ  = 0 ).
 
   ENDMETHOD.
 
