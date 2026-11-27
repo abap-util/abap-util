@@ -473,7 +473,9 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
           value = ls_header-v.
     ENDLOOP.
 
-    DATA(lv_method) = is_req-method.
+    " upper case as on ABAP Cloud - the method token is case-sensitive, and
+    " `post` went out as it was and came back as a 400 or 405
+    DATA(lv_method) = to_upper( is_req-method ).
     CALL METHOD lo_request->(`SET_METHOD`)
       EXPORTING
         method = lv_method.
