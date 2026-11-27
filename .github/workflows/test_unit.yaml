@@ -1,6 +1,8 @@
 name: test_unit
 
 on:
+  push:
+    branches: [main]
   pull_request:
 
 permissions:
@@ -11,15 +13,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # main: the source as it is installed from main; 702: the same source after
+  # the downport, as auto_downport pushes it to the branch 702
   test_unit:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [main, '702']
+    name: test_unit (${{ matrix.target }})
     steps:
-    - uses: actions/checkout@v3
-    - uses: actions/setup-node@v3
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version: '22'
     - run: npm ci
     - run: npm run downport
+      if: matrix.target == '702'
+    - run: npx abaplint .github/abaplint/abap_702.jsonc
+      if: matrix.target == '702'
     - run: npm run auto_transpile
     - run: npm run unit

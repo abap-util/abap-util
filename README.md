@@ -724,7 +724,9 @@ npm run downport        # rewrite src/ to 7.02 syntax - what auto_downport pushe
 npm run auto_transpile  # transpile to JavaScript
 npm run unit            # run the unit tests in Node.js
 npm run rename          # rename every object to the longest prefix allowed
+npm test                # lint, lint:cloud, rename, auto_transpile and unit in one go
 ```
+`node .github/scripts/sync-check.mjs --consumer <dir>` compares a consumer's renamed copies with their masters here - which methods changed, which exist only in the copy.
 The rules every change keeps - compatibility with all three targets, the master-catalog contract, the sync-back - are in [AGENTS.md](AGENTS.md).
 
 #### Documentation

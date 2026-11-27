@@ -1,8 +1,7 @@
 # AGENTS.md — AI Assistant Guide for abap-util
 
 > This file follows the cross-tool AGENTS.md convention and is the single
-> agent instruction file of this repository — there is no separate
-> `CLAUDE.md`; Claude Code reads `AGENTS.md` natively.
+> agent instruction file of this repository — `CLAUDE.md` only points here.
 
 ## Project Overview
 
@@ -27,7 +26,7 @@ abap-util (master catalog, this repo)             Downstream projects (vendored 
 │   linted for 7.02/Standard/  │  trim to used    │  z2ui5_cl_ui5_util_http            │
 │   Cloud)                     │  methods         │  z2ui5_cx_ui5_util_error           │
 │ zabaputil_cl_util_http       │ ───────────────→ ├────────────────────────────────────┤
-│ zabaputil_cx_error           │  other classes:  │ popups:                            │
+│ zabaputil_cx_util_error      │  other classes:  │ popups:                            │
 │ ...                          │  copy as-is      │  z2ui5_cl_popup_context            │
 │                              │                  │  (src/00/, popup subset)           │
 └──────────────────────────────┘                  └────────────────────────────────────┘
@@ -48,7 +47,7 @@ abap-util (master catalog, this repo)             Downstream projects (vendored 
 3. **New methods are developed locally.** When a project needs a utility method during development that its context-class copy does not have, it is simply written directly into the project's local context class — no upstream round-trip is required. (If the method already exists in this catalog, copy it from here with its helper closure instead of re-implementing it.)
 4. **Periodic AI sync-back:** every few weeks an AI compares abap-util with all consumers and merges what was added or fixed downstream into this repository — so abap-util always converges back to the superset of all methods, unit-tested and linted for all targets, and every other consumer can pick them up from here.
 
-   **The sync covers every vendored class, not only the context class.** The context class is where most of the movement is, but a consumer fixes whatever it has a copy of: abap2UI5's `z2ui5_cx_ui5_util_error` and `z2ui5_cl_ui5_util_http` are copies of `zabaputil_cx_error` and `zabaputil_cl_util_http` and drift exactly the same way. Diff each consumer's full set of vendored classes against its master here.
+   **The sync covers every vendored class, not only the context class.** The context class is where most of the movement is, but a consumer fixes whatever it has a copy of: abap2UI5's `z2ui5_cx_ui5_util_error` and `z2ui5_cl_ui5_util_http` are copies of `zabaputil_cx_util_error` and `zabaputil_cl_util_http` and drift exactly the same way. Diff each consumer's full set of vendored classes against its master here.
 
    The class names above are abap2UI5's current ones. They carry a `ui5` segment since that repository's rename (`z2ui5_cl_a2ui5_context` → `z2ui5_cl_ui5_util_context`, `z2ui5_cl_a2ui5_http` → `z2ui5_cl_ui5_util_http`, `z2ui5_cx_a2ui5_error` → `z2ui5_cx_ui5_util_error`) — the same three objects under new names, so an older note written under the pre-rename names is describing the same code. A consumer renaming its copy is expected and costs nothing here; read the consumer's own AGENTS.md for the list that is current at sync time.
 
@@ -56,7 +55,7 @@ abap-util (master catalog, this repo)             Downstream projects (vendored 
 
    **The sync compares method *bodies*, not just method names.** A consumer that fixes a bug in a method it already has produces no missing method at all, so a name-level diff reports "in sync" while the master keeps shipping the broken implementation to every other consumer. Diff each shared method's body (normalizing the renamed class/exception prefixes), and treat a behavioral difference as a sync item exactly like a missing method. Pure formatting and comment-wording differences are expected — each consumer runs its own formatter config — and are not sync items.
 
-   **A method the master has to keep wider than the consumer's is not drift.** A consumer trims its copy, so a symbol its trim dropped will show up as a body difference forever. Known and settled: `class_constructor` keeps `cv_char_util_charsize`, which abap2UI5 dropped because its trimmed copy has no caller for it and the catalogue has two (the XLSX column-width calculation). Also settled: `uuid_get_c32` keeps its `gv_uuid_failed` re-entrancy guard here. This catalog raises `zabaputil_cx_util_error`, whose constructor asks for a uuid, so a failing UUID source would re-enter the method without it; abap2UI5's copy raises a class whose constructor no longer does, so it dropped the guard (2026-10 full sync). Record such a case here when it is decided, or the next run re-opens it.
+   **A method the master has to keep wider than the consumer's is not drift.** A consumer trims its copy, so a symbol its trim dropped will show up as a body difference forever. Known and settled: `class_constructor` keeps `cv_char_util_charsize`, which abap2UI5 dropped because its trimmed copy has no caller for it and the catalogue has two (the XLSX column-width calculation). Also settled: `uuid_get_c32` keeps its `gv_uuid_failed` re-entrancy guard here, which abap2UI5 dropped (2026-10 full sync). Since the two exception classes of this catalog became one, the constructor of `zabaputil_cx_util_error` no longer asks for a uuid either - only the full report does, lazily - so the guard is a safety net now, not a necessity. Record such a case here when it is decided, or the next run re-opens it.
 
    **Extract methods with their pragmas.** A naive `METHOD <name>.` extractor silently skips `METHOD constructor ##ADT_SUPPRESS_GENERATION.` and every other declaration carrying a pragma or a pseudo-comment — the method then appears in neither the missing list nor the changed list, and a defect in it survives every sync run that has ever been made. The 2026-09 sync found two real changes hiding in exactly that method. Match the pragmas, and sanity-check the extracted method count against `grep -c '^  METHOD'` on both sides.
 5. **Multi-environment compatibility is non-negotiable:** every method must work on NW 7.02, Standard ABAP, and ABAP Cloud, because any consumer may run on any of these targets. Environment-specific behavior is branched via `check_abap_cloud( )` and dynamic calls so the code compiles everywhere.
@@ -75,9 +74,7 @@ src/
 ├── zabaputil_cl_util_msg.clas.abap       # Message handling
 ├── zabaputil_cl_util_range.clas.abap     # Select-option range builders
 ├── zabaputil_cl_util_xml.clas.abap       # Fluent XML builder
-├── zabaputil_cl_http.clas.abap           # HTTP helper
-├── zabaputil_cx_error.clas.abap          # No-check exception
-├── zabaputil_cx_util_error.clas.abap     # Exception (compatibility)
+├── zabaputil_cx_util_error.clas.abap     # THE exception (no-check): text chain, full diagnostic report
 └── 00/
     ├── 01/                               # ajson mirror — DO NOT MODIFY (synced from upstream)
     └── 02/                               # S-RTTI mirror — DO NOT MODIFY (synced from upstream)
@@ -88,14 +85,34 @@ Every class has a `.testclasses.abap` file. The master carries the **full** test
 ## Build & Validation
 
 ```bash
-npm install
-npx abaplint                  # Lint (v750 syntax, downport rule for 7.02 compatibility)
+npm ci
+npm run lint                  # Lint, Standard ABAP (v750)
+npm run lint:cloud            # Lint, ABAP Cloud
+npm run rename                # Rename check: zabaputil_ -> znamespace_ (the longest prefix allowed), 0 issues
 npm run auto_transpile        # Transpile ABAP → JS
 npm run unit                  # Run unit tests in Node.js
-npm run rename                # Rename check: zabaputil_ -> zoblomov_, must report 0 issues
+npm test                      # all of the above
+npm run downport              # rewrites src/ to 7.02 syntax - never commit the result
 ```
 
-CI lints against all three targets (`ABAP_702.yaml`, `ABAP_STANDARD.yaml`, `ABAP_CLOUD.yaml`) runs the transpiled unit tests (`test_unit.yaml`) and the rename check (`test_rename.yaml`, `npm run rename`) - consumers vendor renamed copies, so every class must still lint under another prefix. There is no mirror from abap2UI5 any more: the sync runs consumer-side (see above). All must stay green — they guarantee that any subset of methods can be vendored into any consumer on any release.
+CI runs on every pull request and on every push to `main`: the lints for Standard ABAP and ABAP Cloud (`ABAP_STANDARD.yaml`, `ABAP_CLOUD.yaml`), the rename check (`test_rename.yaml`) - consumers vendor renamed copies, so every class must still lint under another prefix - and the transpiled unit tests **twice** (`test_unit.yaml`): on the source as `main` ships it and on the same source after the downport, linted at v702. `auto_downport.yaml` pushes that downport to the branch `702` on every push to `main`, `ABAP_702.yaml` lints the branch. All must stay green — they guarantee that any subset of methods can be vendored into any consumer on any release.
+
+Every action in `.github/workflows/` is pinned to a commit sha with the tag as a comment; `bump-deps.yaml` moves the pins and the npm dependencies once a month, in one pull request.
+
+## One class per purpose
+
+There is exactly one HTTP class (`zabaputil_cl_util_http`) and one exception class (`zabaputil_cx_util_error`). Until 2026-11 each had a twin (`zabaputil_cl_http`, a subset; `zabaputil_cx_error`, the superset with the chain rendering and the full report) and the consumers copied different ones. They were merged under the `util_` names with the superset's code. Do not add a second class for a purpose that has one - widen the one that is there.
+
+## Checking a consumer's copies: `sync-check`
+
+```bash
+node .github/scripts/sync-check.mjs --consumer ../business-api            # exit 1 on a finding
+node .github/scripts/sync-check.mjs --consumer ../business-api --report   # list only
+```
+
+A consumer describes its copies in `.github/abap-util.json`: the master commit they were taken from, the rename (copy name → master name) and, per copy, the master file, whether it is trimmed, and the differences that are decided (`settled`) or have no master (`own`), each with its reason. The method list is not written down - it is read from the copy. The script compares bodies and declarations after the rename, without comments and layout, and extracts methods with their pragmas (the two traps described above). It reports `changed`, `copy-only` (sync it back) and, for a copy that is not trimmed, `missing`.
+
+Run it at the manifest's commit to see what the consumer changed since the copy was taken, and at `main` to see what a refresh would bring. It is the first step of every sync run; the decision what to merge stays with the reader. business-api carries a manifest and runs the check in its CI; abap2UI5 and popups are compared the same way with a manifest of their own.
 
 ## Rules for AI Assistants
 

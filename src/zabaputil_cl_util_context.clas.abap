@@ -3761,8 +3761,8 @@ CLASS zabaputil_cl_util_context DEFINITION
     CLASS-DATA gv_check_cloud TYPE abap_bool.
     CLASS-DATA gv_check_cloud_cached TYPE abap_bool.
 
-    " Guards the cycle zabaputil_cx_util_error=>constructor -> uuid_get_c32 ->
-    " RAISE zabaputil_cx_util_error -> ... see uuid_get_c32.
+    " Guards uuid_get_c32 against re-entering itself through the exception it
+    " raises (zabaputil_cx_util_error reads a uuid for its full report).
     CLASS-DATA gv_uuid_failed TYPE abap_bool.
 
     CLASS-METHODS bal_cloud_add_items
@@ -8327,10 +8327,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         " consumer's single top-level catch can turn it into a handled error.
         " ASSERT would raise the uncatchable ASSERTION_FAILED and bypass that
         " catch (short dump instead of a handled error response).
-        " zabaputil_cx_util_error=>constructor itself calls uuid_get_c32, so the
-        " raise below re-enters this method. gv_uuid_failed makes that nested
-        " call return an empty UUID instead of raising again (endless recursion
-        " until the stack overflows, which would defeat the handled error above).
+        " zabaputil_cx_util_error reads a uuid when it renders its full report,
+        " so a renderer running while the raise below is on its way would
+        " re-enter this method. gv_uuid_failed makes that nested call return an
+        " empty UUID instead of raising again.
         IF gv_uuid_failed = abap_true.
           RETURN.
         ENDIF.

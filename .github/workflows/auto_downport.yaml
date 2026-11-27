@@ -18,10 +18,10 @@ jobs:
     timeout-minutes: 10
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Set up Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version: '22'
 
@@ -31,19 +31,11 @@ jobs:
     - name: Run abaplint on downported code
       run: npx abaplint .github/abaplint/abap_702.jsonc
 
-    - name: Commit Changes
+    - name: Push the downported source to the branch 702
       run: |
-        git config --global user.name 'github-actions[bot]'
-        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+        git config user.name 'github-actions[bot]'
+        git config user.email 'github-actions[bot]@users.noreply.github.com'
+        git checkout -B 702
         git add src
-        git diff --staged --quiet || git commit -m "Downport changes"
-
-    - name: Switch to Branch 702
-      run: git checkout -b 702
-
-    - name: Push Changes
-      uses: ad-m/github-push-action@v0.6.0
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        branch: 702
-        force: true
+        git diff --staged --quiet || git commit -m "Downport of $GITHUB_SHA to 7.02"
+        git push --force origin 702
