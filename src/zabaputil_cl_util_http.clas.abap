@@ -346,6 +346,13 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
         ENDIF.
         lo_response = <any>.
 
+        " the status first - it is what the caller needs most, also when
+        " the body below cannot be read as text
+        CALL METHOD lo_response->(`GET_STATUS`)
+          IMPORTING
+            code   = result-status_code
+            reason = result-status_reason.
+
         " The body as text. GET_CDATA decodes by the charset the response
         " names - and without one in Content-Type (an `application/json`
         " answer of most APIs, the language model providers' among them) the
@@ -369,13 +376,17 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
           CALL METHOD lo_response->(`GET_DATA`)
             RECEIVING
               data = lv_bytes.
-          result-body = zabaputil_cl_util_context=>conv_get_string_by_xstring( lv_bytes ).
+          TRY.
+              result-body = zabaputil_cl_util_context=>conv_get_string_by_xstring( lv_bytes ).
+            CATCH zabaputil_cx_util_error.
+              " no UTF-8 after all - a Latin-1 error page without a charset,
+              " an image, a PDF. That raised, and the caller lost the 404 or
+              " the 500 with it; the ICF's own reading never fails
+              CALL METHOD lo_response->(`GET_CDATA`)
+                RECEIVING
+                  data = result-body.
+          ENDTRY.
         ENDIF.
-
-        CALL METHOD lo_response->(`GET_STATUS`)
-          IMPORTING
-            code   = result-status_code
-            reason = result-status_reason.
 
         " a failed CLOSE changes nothing for the caller, the response is read
         CALL METHOD lo_client->(`CLOSE`)
