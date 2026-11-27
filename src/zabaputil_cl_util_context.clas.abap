@@ -9708,7 +9708,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA(lt_comp) = rtti_get_t_attri_by_table_name( tabname ).
     LOOP AT lt_comp REFERENCE INTO DATA(lr_comp).
 
-      DATA(lv_check_key) = abap_false..
+      DATA(lv_check_key) = abap_false.
       IF line_exists( names[ table_line = lr_comp->name ] ).
         lv_check_key = abap_true.
       ENDIF.
@@ -14982,7 +14982,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             tabname = lv_tabname
           EXCEPTIONS
             error_message = 1
-            OTHERS        = 1.
+            OTHERS        = 2.
       CATCH cx_root ##NO_HANDLER.
     ENDTRY.
 
