@@ -99,12 +99,6 @@ CLASS zabaputil_cl_util_range DEFINITION PUBLIC
     DATA mv_fieldname TYPE string.
     DATA mr_range     TYPE REF TO data.
 
-    CLASS-METHODS quote
-      IMPORTING
-        val        TYPE clike
-      RETURNING
-        VALUE(out) TYPE string.
-
 ENDCLASS.
 
 CLASS zabaputil_cl_util_range IMPLEMENTATION.
@@ -180,71 +174,25 @@ CLASS zabaputil_cl_util_range IMPLEMENTATION.
 
   METHOD get_sql.
 
-    FIELD-SYMBOLS <lt_range> TYPE STANDARD TABLE.
-    ASSIGN me->mr_range->* TO <lt_range>.
+    " the WHERE of the context class, not a second writer of its own: that
+    " one ORed an excluding row with the including ones (I EQ A, E EQ B let
+    " every row but B through), escaped nothing in a pattern, did not map
+    " the + wildcard, and wrote the LIKE form of a pattern back into the
+    " caller's range
+    DATA lt_range TYPE zabaputil_cl_util_context=>ty_t_range.
+    FIELD-SYMBOLS <lt_range> TYPE ANY TABLE.
 
-    IF xsdbool( <lt_range> IS INITIAL ) = abap_true.
+    ASSIGN mr_range->* TO <lt_range>.
+    IF <lt_range> IS NOT ASSIGNED OR <lt_range> IS INITIAL.
       RETURN.
     ENDIF.
 
-    result = `(`.
+    zabaputil_cl_util_context=>itab_corresponding( EXPORTING val = <lt_range>
+                                                   CHANGING  tab = lt_range ).
 
-    LOOP AT <lt_range> ASSIGNING FIELD-SYMBOL(<ls_range_item>).
-
-      ASSIGN COMPONENT `SIGN` OF STRUCTURE <ls_range_item> TO FIELD-SYMBOL(<lv_sign>).
-      ASSIGN COMPONENT `OPTION` OF STRUCTURE <ls_range_item> TO FIELD-SYMBOL(<lv_option>).
-      ASSIGN COMPONENT `LOW` OF STRUCTURE <ls_range_item> TO FIELD-SYMBOL(<lv_low>).
-      ASSIGN COMPONENT `HIGH` OF STRUCTURE <ls_range_item> TO FIELD-SYMBOL(<lv_high>).
-
-      IF sy-tabix <> 1.
-        result = |{ result } OR|.
-      ENDIF.
-
-      IF <lv_sign> = signs-excluding.
-        result = |{ result } NOT|.
-      ENDIF.
-
-      result = |{ result } { me->mv_fieldname }|.
-
-      CASE <lv_option>.
-        WHEN options-equal OR
-             options-not_equal OR
-             options-greater_than OR
-             options-greater_equal OR
-             options-less_equal OR
-             options-less_than.
-          result = |{ result } { <lv_option> } { quote( <lv_low> ) }|.
-
-        WHEN options-between.
-          result = |{ result } BETWEEN { quote( <lv_low> ) } AND { quote( <lv_high> ) }|.
-
-        WHEN options-not_between.
-          result = |{ result } NOT BETWEEN { quote( <lv_low> ) } AND { quote( <lv_high> ) }|.
-
-        WHEN options-contains_pattern.
-          <lv_low> = translate( val  = <lv_low>
-                                from = `*`
-                                to   = `%` ).
-          result = |{ result } LIKE { quote( <lv_low> ) }|.
-
-        WHEN options-not_contains_pattern.
-          <lv_low> = translate( val  = <lv_low>
-                                from = `*`
-                                to   = `%` ).
-          result = |{ result } NOT LIKE { quote( <lv_low> ) }|.
-      ENDCASE.
-    ENDLOOP.
-
-    result = |{ result } )|.
-
-  ENDMETHOD.
-
-  METHOD quote.
-
-    out = |'{ replace( val  = val
-                       sub  = `'`
-                       with = `''`
-                       occ  = 0 ) }'|.
+    result = zabaputil_cl_util_context=>filter_get_sql_where(
+                 VALUE #( ( name    = mv_fieldname
+                            t_range = lt_range ) ) ).
 
   ENDMETHOD.
 
