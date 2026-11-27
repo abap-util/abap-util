@@ -84,6 +84,14 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
     cl_abap_unit_assert=>assert_true( lo_log->has_error( ) ).
 
+    " an abort or exit message is an error too
+    DATA(lo_abort) = NEW zabaputil_cl_util_log( ).
+    lo_abort->add( VALUE zabaputil_cl_util_context=>ty_s_msg( type = `A` text = `Abort` ) ).
+    cl_abap_unit_assert=>assert_true( lo_abort->has_error( ) ).
+    DATA(lo_exit) = NEW zabaputil_cl_util_log( ).
+    lo_exit->add( VALUE zabaputil_cl_util_context=>ty_s_msg( type = `X` text = `Exit` ) ).
+    cl_abap_unit_assert=>assert_true( lo_exit->has_error( ) ).
+
   ENDMETHOD.
 
   METHOD test_has_no_error.
