@@ -3268,6 +3268,10 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE decfloat34.
 
+    "! val in unit_from as a value in unit_to. On ABAP Cloud from the SI
+    "! conversion of I_UnitOfMeasure: value_SI = value * rate + additive
+    "! value, so temperatures convert too; two units of different
+    "! dimensions raise, as UNIT_CONVERSION_SIMPLE does on-premise.
     CLASS-METHODS unit_convert
       IMPORTING
         val           TYPE decfloat34
@@ -4175,6 +4179,19 @@ CLASS zabaputil_cl_util_context DEFINITION
         val           TYPE REF TO data
       RETURNING
         VALUE(result) TYPE string.
+
+    " the SI conversion of a unit from I_UnitOfMeasure (value_SI = value *
+    " factor + additive) and its dimension. The columns are looked up by
+    " the names the view may carry (SIUnitCnvrsnRate..., UnitOfMeasureSI...)
+    " - one fixed name was a failed SELECT where the view names it
+    " otherwise. An unknown unit, or one without a rate, raises.
+    CLASS-METHODS unit_get_si
+      IMPORTING
+        unit      TYPE clike
+      EXPORTING
+        factor    TYPE decfloat34
+        additive  TYPE decfloat34
+        dimension TYPE string.
 
     CLASS-METHODS bal_cloud_add_items
       IMPORTING
@@ -16192,8 +16209,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD unit_convert.
 
-    DATA lv_fm  TYPE string.
-    DATA lv_tab TYPE string.
+    DATA lv_fm TYPE string.
 
     IF unit_from = unit_to.
       result = val.
@@ -16230,75 +16246,123 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     ELSE.
 
-      TRY.
-          TYPES:
-            BEGIN OF ty_s_uom,
-              unitofmeasuresinumerator   TYPE decfloat34,
-              unitofmeasuresidenominator TYPE decfloat34,
-              unitofmeasuresiexponent    TYPE i,
-            END OF ty_s_uom.
-          DATA ls_uom_from TYPE ty_s_uom.
-          DATA ls_uom_to   TYPE ty_s_uom.
-          DATA lv_num_from TYPE decfloat34.
-          DATA lv_den_from TYPE decfloat34.
-          DATA lv_exp_from TYPE i.
-          DATA lv_num_to   TYPE decfloat34.
-          DATA lv_den_to   TYPE decfloat34.
-          DATA lv_exp_to   TYPE i.
+      DATA lv_factor_from TYPE decfloat34.
+      DATA lv_factor_to   TYPE decfloat34.
+      DATA lv_add_from    TYPE decfloat34.
+      DATA lv_add_to      TYPE decfloat34.
+      DATA lv_dim_from    TYPE string.
+      DATA lv_dim_to      TYPE string.
 
-          DATA(lv_from) = to_upper( c_trim( unit_from ) ).
-          DATA(lv_to) = to_upper( c_trim( unit_to ) ).
+      unit_get_si( EXPORTING unit      = unit_from
+                   IMPORTING factor    = lv_factor_from
+                             additive  = lv_add_from
+                             dimension = lv_dim_from ).
+      unit_get_si( EXPORTING unit      = unit_to
+                   IMPORTING factor    = lv_factor_to
+                             additive  = lv_add_to
+                             dimension = lv_dim_to ).
 
-          lv_tab = `I_UNITOFMEASURE`.
-          SELECT SINGLE unitofmeasuresinumerator, unitofmeasuresidenominator, unitofmeasuresiexponent
-            FROM (lv_tab)
-            WHERE unitofmeasure = @lv_from
-            INTO CORRESPONDING FIELDS OF @ls_uom_from.
-          IF sy-subrc <> 0.
-            x_raise( `UNIT_CONVERSION_FAILED` ).
-          ENDIF.
-          SELECT SINGLE unitofmeasuresinumerator, unitofmeasuresidenominator, unitofmeasuresiexponent
-            FROM (lv_tab)
-            WHERE unitofmeasure = @lv_to
-            INTO CORRESPONDING FIELDS OF @ls_uom_to.
-          IF sy-subrc <> 0.
-            x_raise( `UNIT_CONVERSION_FAILED` ).
-          ENDIF.
+      " KG into M is no conversion - UNIT_CONVERSION_SIMPLE refuses it
+      IF lv_dim_from <> lv_dim_to.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |UNIT_CONVERSION_FAILED: { unit_from } ({ lv_dim_from }) and { unit_to } ({ lv_dim_to }) are of different dimensions|.
+      ENDIF.
 
-          lv_num_from = ls_uom_from-unitofmeasuresinumerator.
-          lv_den_from = ls_uom_from-unitofmeasuresidenominator.
-          lv_exp_from = ls_uom_from-unitofmeasuresiexponent.
-          lv_num_to   = ls_uom_to-unitofmeasuresinumerator.
-          lv_den_to   = ls_uom_to-unitofmeasuresidenominator.
-          lv_exp_to   = ls_uom_to-unitofmeasuresiexponent.
-
-          DATA lv_factor_from TYPE decfloat34.
-          DATA lv_factor_to   TYPE decfloat34.
-          DATA lv_ten         TYPE decfloat34 VALUE 10.
-
-          lv_factor_from = lv_num_from / lv_den_from.
-          DO lv_exp_from TIMES.
-            lv_factor_from = lv_factor_from * lv_ten.
-          ENDDO.
-          DO lv_exp_from * -1 TIMES.
-            lv_factor_from = lv_factor_from / lv_ten.
-          ENDDO.
-
-          lv_factor_to = lv_num_to / lv_den_to.
-          DO lv_exp_to TIMES.
-            lv_factor_to = lv_factor_to * lv_ten.
-          ENDDO.
-          DO lv_exp_to * -1 TIMES.
-            lv_factor_to = lv_factor_to / lv_ten.
-          ENDDO.
-
-          result = val * lv_factor_from / lv_factor_to.
-
-        CATCH cx_root.
-          x_raise( `UNIT_CONVERSION_FAILED` ).
-      ENDTRY.
+      " through the SI unit, with the additive value of temperatures
+      result = ( val * lv_factor_from + lv_add_from - lv_add_to ) / lv_factor_to.
 
     ENDIF.
+
+  ENDMETHOD.
+
+  METHOD unit_get_si.
+
+    DATA lr_row TYPE REF TO data.
+    DATA lv_num TYPE decfloat34.
+    DATA lv_den TYPE decfloat34.
+    DATA lv_exp TYPE i.
+    FIELD-SYMBOLS <row>  TYPE any.
+    FIELD-SYMBOLS <comp> TYPE any.
+
+    CLEAR factor.
+    CLEAR additive.
+    CLEAR dimension.
+
+    DATA(lv_unit) = to_upper( c_trim( unit ) ).
+
+    TRY.
+        DATA(lv_tab) = `I_UNITOFMEASURE`.
+        DATA(lo_struct) = cl_abap_structdescr=>create( rtti_get_t_attri_by_table_name( lv_tab ) ).
+        CREATE DATA lr_row TYPE HANDLE lo_struct.
+        ASSIGN lr_row->* TO <row>.
+        SELECT SINGLE *
+          FROM (lv_tab)
+          WHERE unitofmeasure = @lv_unit
+          INTO CORRESPONDING FIELDS OF @<row>.
+        DATA(lv_subrc) = sy-subrc.
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = x.
+    ENDTRY.
+    IF lv_subrc <> 0.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |UNIT_CONVERSION_FAILED: unit { lv_unit } not found|.
+    ENDIF.
+
+    " numerator, denominator, exponent, additive value, dimension - each
+    " under the first of its names the view has
+    DATA(lt_names) = VALUE string_table( ( `NUM:SIUNITCNVRSNRATENUMERATOR` )
+                                         ( `NUM:UNITOFMEASURESINUMERATOR` )
+                                         ( `DEN:SIUNITCNVRSNRATEDENOMINATOR` )
+                                         ( `DEN:UNITOFMEASURESIDENOMINATOR` )
+                                         ( `EXP:SIUNITCNVRSNRATEEXPONENT` )
+                                         ( `EXP:UNITOFMEASURESIEXPONENT` )
+                                         ( `ADD:SIUNITCNVRSNADDITIVEVALUE` )
+                                         ( `ADD:UNITOFMEASURESIADDITIVEVALUE` )
+                                         ( `DIM:UNITOFMEASUREDIMENSION` ) ).
+    DATA(lv_found) = ``.
+    LOOP AT lt_names INTO DATA(lv_entry).
+      SPLIT lv_entry AT `:` INTO DATA(lv_what) DATA(lv_column).
+      IF lv_found CS lv_what.
+        CONTINUE.
+      ENDIF.
+      UNASSIGN <comp>.
+      ASSIGN COMPONENT lv_column OF STRUCTURE <row> TO <comp>.
+      IF <comp> IS NOT ASSIGNED.
+        CONTINUE.
+      ENDIF.
+      lv_found = lv_found && lv_what.
+      CASE lv_what.
+        WHEN `NUM`.
+          lv_num = <comp>.
+        WHEN `DEN`.
+          lv_den = <comp>.
+        WHEN `EXP`.
+          lv_exp = <comp>.
+        WHEN `ADD`.
+          additive = <comp>.
+        WHEN `DIM`.
+          dimension = <comp>.
+      ENDCASE.
+    ENDLOOP.
+
+    IF lv_num = 0 OR lv_den = 0.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |UNIT_CONVERSION_FAILED: no SI conversion rate for unit { lv_unit }|.
+    ENDIF.
+
+    factor = lv_num / lv_den.
+    DO abs( lv_exp ) TIMES.
+      IF lv_exp > 0.
+        factor = factor * 10.
+      ELSE.
+        factor = factor / 10.
+      ENDIF.
+    ENDDO.
 
   ENDMETHOD.
 
