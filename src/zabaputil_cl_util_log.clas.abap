@@ -63,9 +63,12 @@ CLASS zabaputil_cl_util_log DEFINITION
       RETURNING
         VALUE(result) TYPE string.
 
+    " the log as an Excel workbook (conv_get_xlsx_by_itab). An xstring
+    " since 2026-11: it was declared as a string while the method always
+    " raised "not implemented", so no caller can have used its value
     METHODS to_xlsx
       RETURNING
-        VALUE(result) TYPE string.
+        VALUE(result) TYPE xstring.
 
     METHODS to_msg
       RETURNING

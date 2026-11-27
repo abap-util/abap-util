@@ -3113,6 +3113,7 @@ CLASS ltcl_xlsx_ops DEFINITION FINAL
   PRIVATE SECTION.
 
     METHODS xlsx_by_itab_basic             FOR TESTING.
+    METHODS xlsx_by_itab_elementary        FOR TESTING.
     METHODS itab_by_xlsx_empty             FOR TESTING.
 
 ENDCLASS.
@@ -3120,15 +3121,50 @@ ENDCLASS.
 CLASS ltcl_xlsx_ops IMPLEMENTATION.
 
   METHOD xlsx_by_itab_basic.
-    TYPES: BEGIN OF ty_row, col1 TYPE string, col2 TYPE string, END OF ty_row.
+    TYPES: BEGIN OF ty_row,
+             text   TYPE string,
+             num    TYPE i,
+             amount TYPE p LENGTH 8 DECIMALS 2,
+             date   TYPE d,
+             numc   TYPE n LENGTH 4,
+             sub    TYPE string_table,
+           END OF ty_row.
     DATA lt_tab TYPE STANDARD TABLE OF ty_row WITH EMPTY KEY.
-    lt_tab = VALUE #( ( col1 = `A` col2 = `B` ) ).
-    " not implemented - it says so instead of returning nothing
-    TRY.
-        DATA(lv_result) = zabaputil_cl_util_context=>conv_get_xlsx_by_itab( lt_tab ) ##NEEDED.
-        cl_abap_unit_assert=>fail( `not implemented - must raise` ).
-      CATCH zabaputil_cx_util_error ##NO_HANDLER.
-    ENDTRY.
+    lt_tab = VALUE #( ( text = `  a&b<c` num = -5 amount = `-12.5` date = `20240315` numc = `0042` )
+                      ( text = |x{ cl_abap_char_utilities=>form_feed }y| ) ).
+
+    DATA(lt_files) = zabaputil_cl_util_context=>zip_unpack( zabaputil_cl_util_context=>conv_get_xlsx_by_itab( lt_tab ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 5
+                                        act = lines( lt_files ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( line_exists( lt_files[ name = `[Content_Types].xml` ] ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( line_exists( lt_files[ name = `xl/workbook.xml` ] ) ) ).
+
+    DATA(lv_sheet) = zabaputil_cl_util_context=>conv_get_string_by_xstring(
+                         lt_files[ name = `xl/worksheets/sheet1.xml` ]-content ).
+    " a number as value, leading blanks kept, & and < escaped, the form
+    " feed XML forbids dropped, a NUMC as text, a date in ISO form, a table
+    " column and an initial date empty
+    DATA(lv_text) = `<c t="inlineStr"><is><t xml:space="preserve">`.
+    DATA(lv_end) = `</t></is></c>`.
+    DATA(lv_exp) = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+                && `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`
+                && |<row>{ lv_text }TEXT{ lv_end }{ lv_text }NUM{ lv_end }{ lv_text }AMOUNT{ lv_end }|
+                && |{ lv_text }DATE{ lv_end }{ lv_text }NUMC{ lv_end }{ lv_text }SUB{ lv_end }</row>|
+                && |<row>{ lv_text }  a&amp;b&lt;c{ lv_end }<c><v>-5</v></c><c><v>-12.50</v></c>|
+                && |{ lv_text }2024-03-15{ lv_end }{ lv_text }0042{ lv_end }<c/></row>|
+                && |<row>{ lv_text }xy{ lv_end }<c><v>0</v></c><c><v>0.00</v></c><c/>{ lv_text }0000{ lv_end }<c/></row>|
+                && `</sheetData></worksheet>`.
+    cl_abap_unit_assert=>assert_equals( exp = lv_exp
+                                        act = lv_sheet ).
+  ENDMETHOD.
+
+  METHOD xlsx_by_itab_elementary.
+    " a table without components is one column
+    DATA(lt_files) = zabaputil_cl_util_context=>zip_unpack(
+                         zabaputil_cl_util_context=>conv_get_xlsx_by_itab( VALUE string_table( ( `a` ) ) ) ).
+    DATA(lv_sheet) = zabaputil_cl_util_context=>conv_get_string_by_xstring(
+                         lt_files[ name = `xl/worksheets/sheet1.xml` ]-content ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<row><c t="inlineStr"><is><t xml:space="preserve">a</t></is></c></row>` ) ).
   ENDMETHOD.
 
   METHOD itab_by_xlsx_empty.

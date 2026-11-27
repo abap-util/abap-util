@@ -2854,6 +2854,12 @@ CLASS zabaputil_cl_util_context DEFINITION
       END OF ty_s_zip_file.
     TYPES ty_t_zip_file TYPE STANDARD TABLE OF ty_s_zip_file WITH EMPTY KEY.
 
+    "! An Excel workbook (Office Open XML) of one sheet: a header row with
+    "! the component names, then one row per line of val. A number is a
+    "! number cell; a date (YYYY-MM-DD), a time (HH:MM:SS) and everything
+    "! else are text; a table, a structure or a reference stays empty. No
+    "! abap2xlsx, no XCO - CL_ABAP_ZIP only, so it runs on every release
+    "! down to 7.02 and on ABAP Cloud
     CLASS-METHODS conv_get_xlsx_by_itab
       IMPORTING
         val           TYPE ANY TABLE
@@ -4229,6 +4235,21 @@ CLASS zabaputil_cl_util_context DEFINITION
         ignore_case   TYPE abap_bool
       RETURNING
         VALUE(result) TYPE abap_bool.
+
+    " the kind of an XLSX column (conv_get_xlsx_by_itab): N number, D date,
+    " T time, S text, empty for a type without text
+    CLASS-METHODS xlsx_get_column_kind
+      IMPORTING
+        !type         TYPE REF TO cl_abap_datadescr
+      RETURNING
+        VALUE(result) TYPE string.
+
+    " one inline-text cell of the sheet, `<c/>` for an empty text
+    CLASS-METHODS xlsx_get_text_cell
+      IMPORTING
+        val           TYPE string
+      RETURNING
+        VALUE(result) TYPE string.
 
     " a run of percent escapes of url_decode as text: the bytes as UTF-8,
     " or the escapes as they were written (raw) when they are no UTF-8
@@ -13551,20 +13572,144 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD conv_get_xlsx_by_itab.
 
-*    DATA(write_access) = xco_cp_xlsx=>document->empty( )->write_access( ).
-*    DATA(worksheet) = write_access->get_workbook( )->worksheet->at_position( 1 ).
-*    DATA(selection_pattern) = xco_cp_xlsx_selection=>pattern_builder->simple_from_to( )->get_pattern( ).
-*    worksheet->select( selection_pattern
-*               )->row_stream(
-*               )->operation->write_from( REF #( val )
-*               )->execute( ).
-*    result = write_access->get_file_content( ).
+    " One worksheet as XML, zipped with the four parts a workbook needs
+    " (zip_pack: CL_ABAP_ZIP, released on ABAP Cloud and there on every
+    " release down to 7.02). Ported from abap-cloud-gui's ALV export, with
+    " its escaping: c_escape_xml drops the control characters XML 1.0
+    " forbids - a legacy text carries them, and Excel "repairs" a workbook
+    " with one - and xml:space keeps leading and trailing blanks
+    CONSTANTS lc_xml      TYPE string VALUE `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`.
+    CONSTANTS lc_main     TYPE string VALUE `http://schemas.openxmlformats.org/spreadsheetml/2006/main`.
+    CONSTANTS lc_rel      TYPE string VALUE `http://schemas.openxmlformats.org/officeDocument/2006/relationships`.
+    CONSTANTS lc_pkg_rel  TYPE string VALUE `http://schemas.openxmlformats.org/package/2006/relationships`.
+    CONSTANTS lc_ct       TYPE string VALUE `application/vnd.openxmlformats-officedocument.spreadsheetml`.
+    TYPES:
+      BEGIN OF ty_s_col,
+        name TYPE string,
+        kind TYPE string,
+      END OF ty_s_col.
+    DATA lt_col  TYPE STANDARD TABLE OF ty_s_col WITH EMPTY KEY.
+    DATA lt_xml  TYPE string_table.
+    DATA lt_cell TYPE string_table.
+    DATA lv_date TYPE d.
+    DATA lv_time TYPE t.
+    DATA lv_text TYPE string.
+    FIELD-SYMBOLS <row>  TYPE any.
+    FIELD-SYMBOLS <cell> TYPE any.
 
-    " not implemented: the result was silently empty, which reads like
-    " a success - the XCO version above is the template
-    RAISE EXCEPTION TYPE zabaputil_cx_util_error
-      EXPORTING
-        val = `CONV_GET_XLSX_BY_ITAB is not implemented`.
+    " the columns, decided once from the line type: the included view, so
+    " that an include gives its fields, not one nameless column
+    DATA(lo_table) = CAST cl_abap_tabledescr( cl_abap_typedescr=>describe_by_data( val ) ).
+    DATA(lo_line) = lo_table->get_table_line_type( ).
+    DATA(lv_elementary) = xsdbool( lo_line->kind <> cl_abap_typedescr=>kind_struct ).
+    IF lv_elementary = abap_true.
+      INSERT VALUE #( name = `TABLE_LINE`
+                      kind = xlsx_get_column_kind( lo_line ) ) INTO TABLE lt_col.
+    ELSE.
+      DATA(lt_comp) = CAST cl_abap_structdescr( lo_line )->get_included_view( ).
+      LOOP AT lt_comp REFERENCE INTO DATA(lr_comp).
+        INSERT VALUE #( name = lr_comp->name
+                        kind = xlsx_get_column_kind( lr_comp->type ) ) INTO TABLE lt_col.
+      ENDLOOP.
+    ENDIF.
+
+    INSERT |{ lc_xml }<worksheet xmlns="{ lc_main }"><sheetData>| INTO TABLE lt_xml.
+    LOOP AT lt_col REFERENCE INTO DATA(lr_col).
+      INSERT xlsx_get_text_cell( lr_col->name ) INTO TABLE lt_cell.
+    ENDLOOP.
+    INSERT |<row>{ concat_lines_of( lt_cell ) }</row>| INTO TABLE lt_xml.
+
+    LOOP AT val ASSIGNING <row>.
+      CLEAR lt_cell.
+      LOOP AT lt_col REFERENCE INTO lr_col.
+        IF lr_col->kind IS INITIAL.
+          INSERT `<c/>` INTO TABLE lt_cell.
+          CONTINUE.
+        ENDIF.
+        IF lv_elementary = abap_true.
+          ASSIGN <row> TO <cell>.
+        ELSE.
+          ASSIGN COMPONENT lr_col->name OF STRUCTURE <row> TO <cell>.
+        ENDIF.
+        CASE lr_col->kind.
+          WHEN `N`.
+            " a string template writes the sign in front and a period
+            " as decimal separator, without thousands separators - the
+            " number format of the file, whatever the user's settings
+            INSERT |<c><v>{ <cell> }</v></c>| INTO TABLE lt_cell.
+          WHEN `D`.
+            lv_date = <cell>.
+            CLEAR lv_text.
+            IF lv_date IS NOT INITIAL.
+              lv_text = |{ lv_date(4) }-{ lv_date+4(2) }-{ lv_date+6(2) }|.
+            ENDIF.
+            INSERT xlsx_get_text_cell( lv_text ) INTO TABLE lt_cell.
+          WHEN `T`.
+            lv_time = <cell>.
+            INSERT xlsx_get_text_cell( |{ lv_time(2) }:{ lv_time+2(2) }:{ lv_time+4(2) }| ) INTO TABLE lt_cell.
+          WHEN OTHERS.
+            INSERT xlsx_get_text_cell( |{ <cell> }| ) INTO TABLE lt_cell.
+        ENDCASE.
+      ENDLOOP.
+      INSERT |<row>{ concat_lines_of( lt_cell ) }</row>| INTO TABLE lt_xml.
+    ENDLOOP.
+    INSERT `</sheetData></worksheet>` INTO TABLE lt_xml.
+
+    DATA(lt_files) = VALUE ty_t_zip_file(
+        ( name    = `[Content_Types].xml`
+          content = conv_get_xstring_by_string(
+                        |{ lc_xml }<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">|
+                     && |<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>|
+                     && |<Default Extension="xml" ContentType="application/xml"/>|
+                     && |<Override PartName="/xl/workbook.xml" ContentType="{ lc_ct }.sheet.main+xml"/>|
+                     && |<Override PartName="/xl/worksheets/sheet1.xml" ContentType="{ lc_ct }.worksheet+xml"/>|
+                     && |</Types>| ) )
+        ( name    = `_rels/.rels`
+          content = conv_get_xstring_by_string(
+                        |{ lc_xml }<Relationships xmlns="{ lc_pkg_rel }">|
+                     && |<Relationship Id="rId1" Type="{ lc_rel }/officeDocument" Target="xl/workbook.xml"/>|
+                     && |</Relationships>| ) )
+        ( name    = `xl/workbook.xml`
+          content = conv_get_xstring_by_string(
+                        |{ lc_xml }<workbook xmlns="{ lc_main }" xmlns:r="{ lc_rel }">|
+                     && |<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>| ) )
+        ( name    = `xl/_rels/workbook.xml.rels`
+          content = conv_get_xstring_by_string(
+                        |{ lc_xml }<Relationships xmlns="{ lc_pkg_rel }">|
+                     && |<Relationship Id="rId1" Type="{ lc_rel }/worksheet" Target="worksheets/sheet1.xml"/>|
+                     && |</Relationships>| ) )
+        ( name    = `xl/worksheets/sheet1.xml`
+          content = conv_get_xstring_by_string( concat_lines_of( lt_xml ) ) ) ).
+
+    result = zip_pack( lt_files ).
+
+  ENDMETHOD.
+
+  METHOD xlsx_get_column_kind.
+
+    IF type->kind <> cl_abap_typedescr=>kind_elem.
+      RETURN.
+    ENDIF.
+    IF type->type_kind = cl_abap_typedescr=>typekind_date.
+      result = `D`.
+    ELSEIF type->type_kind = cl_abap_typedescr=>typekind_time.
+      result = `T`.
+    ELSEIF rtti_check_typekind_number( type->type_kind ) = abap_true.
+      result = `N`.
+    ELSE.
+      " a NUMC is text - its leading zeros are the point of it
+      result = `S`.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD xlsx_get_text_cell.
+
+    IF val IS INITIAL.
+      result = `<c/>`.
+      RETURN.
+    ENDIF.
+    result = |<c t="inlineStr"><is><t xml:space="preserve">{ c_escape_xml( val ) }</t></is></c>|.
 
   ENDMETHOD.
 

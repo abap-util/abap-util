@@ -13,6 +13,7 @@ CLASS ltcl_unit_test DEFINITION FINAL
     METHODS test_clear             FOR TESTING RAISING cx_static_check.
     METHODS test_to_msg            FOR TESTING RAISING cx_static_check.
     METHODS test_to_string         FOR TESTING RAISING cx_static_check.
+    METHODS test_to_xlsx           FOR TESTING RAISING cx_static_check.
     METHODS test_add_cx            FOR TESTING RAISING cx_static_check.
 
 ENDCLASS.
@@ -146,6 +147,20 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
     cl_abap_unit_assert=>assert_true( xsdbool( lv_str CS `[I] Hello` ) ).
     cl_abap_unit_assert=>assert_true( xsdbool( lv_str CS `[E] World` ) ).
+
+  ENDMETHOD.
+
+  METHOD test_to_xlsx.
+
+    DATA(lo_log) = NEW zabaputil_cl_util_log( ).
+    lo_log->info( `Hello` )->error( `World` ).
+
+    DATA(lt_files) = zabaputil_cl_util_context=>zip_unpack( lo_log->to_xlsx( ) ).
+    DATA(lv_sheet) = zabaputil_cl_util_context=>conv_get_string_by_xstring(
+                         lt_files[ name = `xl/worksheets/sheet1.xml` ]-content ).
+
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `>Hello<` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `>World<` ) ).
 
   ENDMETHOD.
 
