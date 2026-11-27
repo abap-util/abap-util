@@ -1074,6 +1074,7 @@ CLASS ltcl_filter_ops DEFINITION FINAL
     METHODS token_cp                       FOR TESTING.
     METHODS token_bt                       FOR TESTING.
     METHODS token_plain_value              FOR TESTING.
+    METHODS token_empty_value              FOR TESTING.
 
     " conv_get_bintab_by_xstring
     METHODS bintab_flat_lines              FOR TESTING.
@@ -1275,6 +1276,20 @@ CLASS ltcl_filter_ops IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( exp = `I` act = ls_range-sign ).
     cl_abap_unit_assert=>assert_equals( exp = `EQ` act = ls_range-option ).
     cl_abap_unit_assert=>assert_equals( exp = `hello` act = ls_range-low ).
+  ENDMETHOD.
+
+  METHOD token_empty_value.
+    " the empty-value token of filter_get_token_range_mapping - it was read
+    " as LT `leer>`
+    DATA(ls_range) = zabaputil_cl_util_context=>filter_get_range_by_token( `<leer>` ).
+    cl_abap_unit_assert=>assert_equals( exp = `I` act = ls_range-sign ).
+    cl_abap_unit_assert=>assert_equals( exp = `EQ` act = ls_range-option ).
+    cl_abap_unit_assert=>assert_initial( ls_range-low ).
+
+    ls_range = zabaputil_cl_util_context=>filter_get_range_by_token( `!(<leer>)` ).
+    cl_abap_unit_assert=>assert_equals( exp = `E` act = ls_range-sign ).
+    cl_abap_unit_assert=>assert_equals( exp = `EQ` act = ls_range-option ).
+    cl_abap_unit_assert=>assert_initial( ls_range-low ).
   ENDMETHOD.
 
   METHOD sql_where_eq.

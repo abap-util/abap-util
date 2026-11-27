@@ -4665,6 +4665,13 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     result-sign = `I`.
 
+    " the empty-value token of filter_get_token_range_mapping - read as `<`
+    " it was LT `leer>`
+    IF lv_value = `<leer>`.
+      result-option = `EQ`.
+      RETURN.
+    ENDIF.
+
     IF lv_length >= 2 AND ( lv_value(2) = `<=` OR lv_value(2) = `>=` ).
       result-option = COND #( WHEN lv_value(1) = `<` THEN `LE` ELSE `GE` ).
       result-low    = substring( val = lv_value
@@ -4745,6 +4752,11 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                       (   n = `NB`      v = `!({LOW}...{HIGH})` )
                       (   n = `NE`      v = `!(={LOW})` )
                       (   n = `NP`      v = `!(*{LOW}*)` )
+                      " no options of a range: the empty value (EQ an empty
+                      " LOW) and the non-empty one (NE an empty LOW). The
+                      " popups' range dialog offers them in its option list
+                      " and maps them itself; filter_get_range_by_token
+                      " reads the token `<leer>` as EQ ``
                       (   n = `!<leer>` v = `!(<leer>)` )
                       (   n = `<leer>`  v = `<leer>` ) ).
 
