@@ -55,6 +55,14 @@ CLASS zabaputil_cl_util_db DEFINITION
 
   PROTECTED SECTION.
   PRIVATE SECTION.
+
+    " The id of a new row, derived from its handles - see save
+    CLASS-METHODS get_id_by_handle
+      IMPORTING
+        is_db         TYPE ty_s_db
+      RETURNING
+        VALUE(result) TYPE string.
+
 ENDCLASS.
 
 
@@ -182,10 +190,16 @@ CLASS zabaputil_cl_util_db IMPLEMENTATION.
                     previous = x.
     ENDTRY.
 
+    " The table's key is the id alone, and nothing locks the handles: two
+    " saves of the same handles running in parallel both found no row,
+    " each inserted one under a random id, and from then on save and
+    " load_by_handle picked either row - a lost update that looked like
+    " random data. An id derived from the handles makes the second MODIFY
+    " an update of the first. A row that already exists keeps its id
     IF lv_id IS NOT INITIAL.
       ls_db-id = lv_id.
     ELSE.
-      ls_db-id = zabaputil_cl_util_context=>uuid_get_c32( ).
+      ls_db-id = get_id_by_handle( ls_db ).
     ENDIF.
 
     MODIFY zabaputil_t_91 FROM @ls_db.
@@ -200,6 +214,27 @@ CLASS zabaputil_cl_util_db IMPLEMENTATION.
     ENDIF.
 
     result = ls_db-id.
+
+  ENDMETHOD.
+
+
+  METHOD get_id_by_handle.
+
+    " each handle with its length in front, so that no two tuples give the
+    " same text; SHA-256 in hex, its first 32 characters fill the id
+    DATA(lv_key) = |{ strlen( is_db-uname ) }:{ is_db-uname }|
+                && |{ strlen( is_db-handle ) }:{ is_db-handle }|
+                && |{ strlen( is_db-handle2 ) }:{ is_db-handle2 }|
+                && |{ strlen( is_db-handle3 ) }:{ is_db-handle3 }|.
+    DATA(lv_hash) = to_upper( zabaputil_cl_util_context=>hash_string( lv_key ) ).
+
+    " no digest class answers: hash_string gives the text back - a random
+    " id then, as before
+    IF strlen( lv_hash ) = 64 AND lv_hash CO `0123456789ABCDEF`.
+      result = lv_hash(32).
+    ELSE.
+      result = zabaputil_cl_util_context=>uuid_get_c32( ).
+    ENDIF.
 
   ENDMETHOD.
 
