@@ -3887,6 +3887,32 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE ty_t_csv_rows.
 
+    " Reads a quoted cell: pos stands on the opening quote and is moved
+    " behind the closing one; a doubled quote inside is one quote.
+    CLASS-METHODS csv_read_quoted
+      IMPORTING
+        val  TYPE string
+      CHANGING
+        pos  TYPE i
+        cell TYPE string.
+
+    " The text without the byte order mark Excel's "CSV UTF-8" starts a
+    " file with.
+    CLASS-METHODS csv_strip_bom
+      IMPORTING
+        val           TYPE string
+      RETURNING
+        VALUE(result) TYPE string.
+
+    " A header cell as a component name: letters, digits and underscores,
+    " not empty, not starting with a digit, at most 30 characters.
+    CLASS-METHODS csv_get_column_name
+      IMPORTING
+        val           TYPE string
+        index         TYPE i
+      RETURNING
+        VALUE(result) TYPE string.
+
     " One CSV cell: wrapped in double quotes when it carries the separator,
     " a quote or a line break, quotes doubled.
     CLASS-METHODS csv_escape_cell
@@ -4480,24 +4506,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA lt_names TYPE string_table.
     FIELD-SYMBOLS <field> TYPE any.
 
-    " Excel's "CSV UTF-8" starts the file with the byte order mark EF BB BF,
-    " and the UTF-8 decoding keeps it as the character U+FEFF in front of
-    " the first column name. Built at run time from its bytes - a literal
-    " U+FEFF in the source breaks the 7-bit rule and the downport. Where the
-    " decoding drops it, it is empty
-    DATA(lv_csv) = val.
-    TRY.
-        DATA(lv_bom) = conv_get_string_by_xstring( CONV xstring( `EFBBBF` ) ).
-        IF lv_bom IS NOT INITIAL AND find( val = lv_csv
-                                           sub = lv_bom ) = 0.
-          lv_csv = substring( val = lv_csv
-                              off = strlen( lv_bom ) ).
-        ENDIF.
-      CATCH zabaputil_cx_util_error ##NO_HANDLER.
-        " no codepage API: the text cannot have come through one either
-    ENDTRY.
-
-    DATA(lt_rows) = csv_split_rows( lv_csv ).
+    DATA(lt_rows) = csv_split_rows( csv_strip_bom( val ) ).
     " no row, no header to build a table from
     IF lt_rows IS INITIAL.
       RETURN.
@@ -4513,35 +4522,16 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     LOOP AT lt_cols REFERENCE INTO DATA(lr_col).
       DATA(lv_tabix) = sy-tabix.
 
-      " a component name: letters, digits and underscores, not empty, not
-      " starting with a digit, at most 30 characters, unique
-      DATA(lv_name) = c_trim_upper( lr_col->* ).
-      DATA(lv_clean) = ``.
-      DATA(lv_i) = 0.
-      WHILE lv_i < strlen( lv_name ).
-        DATA(lv_c) = lv_name+lv_i(1).
-        IF lv_c CA `ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_`.
-          lv_clean = lv_clean && lv_c.
-        ELSE.
-          lv_clean = lv_clean && `_`.
-        ENDIF.
-        lv_i = lv_i + 1.
-      ENDWHILE.
-      IF lv_clean IS INITIAL.
-        lv_clean = |COL{ lv_tabix }|.
-      ELSEIF lv_clean(1) CA `0123456789`.
-        lv_clean = `C_` && lv_clean.
+      DATA(lv_name) = csv_get_column_name( val   = lr_col->*
+                                           index = lv_tabix ).
+      " a name the header carries twice
+      IF line_exists( lt_names[ table_line = lv_name ] ).
+        lv_name = |COL{ lv_tabix }|.
       ENDIF.
-      IF strlen( lv_clean ) > 30.
-        lv_clean = lv_clean(30).
-      ENDIF.
-      IF line_exists( lt_names[ table_line = lv_clean ] ).
-        lv_clean = |COL{ lv_tabix }|.
-      ENDIF.
-      INSERT lv_clean INTO TABLE lt_names.
+      INSERT lv_name INTO TABLE lt_names.
 
       " a string per column - a fixed length cut every longer value
-      INSERT VALUE #( name = lv_clean
+      INSERT VALUE #( name = lv_name
                       type = cl_abap_elemdescr=>get_string( ) ) INTO TABLE lt_comp.
     ENDLOOP.
 
@@ -17581,13 +17571,12 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD csv_split_rows.
-
-    DATA lt_cells  TYPE string_table.
-    DATA lv_cell   TYPE string.
-    DATA lv_quoted TYPE abap_bool.
+    DATA lt_cells TYPE string_table.
+    DATA lv_cell  TYPE string.
     " the cell was opened with a quote - an empty quoted cell is content
     DATA lv_was_quoted TYPE abap_bool.
-    DATA lv_pos    TYPE i.
+    DATA lv_pos   TYPE i.
+    DATA lv_next  TYPE string.
 
     DATA(lv_len) = strlen( val ).
     DATA(lv_sep_len) = strlen( separator ).
@@ -17601,26 +17590,11 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                                  off = lv_pos
                                  len = 1 ).
 
-      IF lv_quoted = abap_true.
-        IF lv_char <> `"`.
-          lv_cell = lv_cell && lv_char.
-        ELSEIF lv_pos + 1 < lv_len AND substring( val = val
-                                                  off = lv_pos + 1
-                                                  len = 1 ) = `"`.
-          " a doubled quote is one quote
-          lv_cell = lv_cell && `"`.
-          lv_pos = lv_pos + 1.
-        ELSE.
-          lv_quoted = abap_false.
-        ENDIF.
-        lv_pos = lv_pos + 1.
-        CONTINUE.
-      ENDIF.
-
       IF lv_char = `"` AND lv_cell IS INITIAL AND lv_was_quoted = abap_false.
-        lv_quoted = abap_true.
+        csv_read_quoted( EXPORTING val  = val
+                         CHANGING  pos  = lv_pos
+                                   cell = lv_cell ).
         lv_was_quoted = abap_true.
-        lv_pos = lv_pos + 1.
         CONTINUE.
       ENDIF.
 
@@ -17634,26 +17608,28 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CONTINUE.
       ENDIF.
 
-      IF lv_char = |\n| OR lv_char = |\r|.
-        " CRLF is one line end
-        IF lv_char = |\r| AND lv_pos + 1 < lv_len AND substring( val = val
-                                                                  off = lv_pos + 1
-                                                                  len = 1 ) = |\n|.
-          lv_pos = lv_pos + 1.
-        ENDIF.
-        IF lt_cells IS NOT INITIAL OR lv_cell IS NOT INITIAL OR lv_was_quoted = abap_true.
-          INSERT lv_cell INTO TABLE lt_cells.
-          INSERT lt_cells INTO TABLE result.
-        ENDIF.
-        CLEAR lt_cells.
-        CLEAR lv_cell.
-        lv_was_quoted = abap_false.
+      IF lv_char <> |\n| AND lv_char <> |\r|.
+        lv_cell = lv_cell && lv_char.
         lv_pos = lv_pos + 1.
         CONTINUE.
       ENDIF.
 
-      lv_cell = lv_cell && lv_char.
+      " the end of a row - CRLF is one line end. An empty row is left out
+      lv_next = substring( val = val
+                           off = lv_pos + 1
+                           len = nmin( val1 = 1
+                                       val2 = lv_len - lv_pos - 1 ) ).
+      IF lv_char = |\r| AND lv_next = |\n|.
+        lv_pos = lv_pos + 1.
+      ENDIF.
       lv_pos = lv_pos + 1.
+      IF lt_cells IS NOT INITIAL OR lv_cell IS NOT INITIAL OR lv_was_quoted = abap_true.
+        INSERT lv_cell INTO TABLE lt_cells.
+        INSERT lt_cells INTO TABLE result.
+      ENDIF.
+      CLEAR lt_cells.
+      CLEAR lv_cell.
+      lv_was_quoted = abap_false.
 
     ENDWHILE.
 
@@ -17661,7 +17637,6 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       INSERT lv_cell INTO TABLE lt_cells.
       INSERT lt_cells INTO TABLE result.
     ENDIF.
-
   ENDMETHOD.
 
   METHOD filter_sql_find.
@@ -17783,6 +17758,82 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                       sub  = `_`
                       with = `+`
                       occ  = 0 ).
+
+  ENDMETHOD.
+
+  METHOD csv_read_quoted.
+
+    DATA(lv_len) = strlen( val ).
+    pos = pos + 1.
+
+    WHILE pos < lv_len.
+      DATA(lv_char) = substring( val = val
+                                 off = pos
+                                 len = 1 ).
+      pos = pos + 1.
+      IF lv_char <> `"`.
+        cell = cell && lv_char.
+        CONTINUE.
+      ENDIF.
+      " a quote: doubled it is one quote of the text, alone it closes the cell
+      IF pos >= lv_len OR substring( val = val
+                                     off = pos
+                                     len = 1 ) <> `"`.
+        RETURN.
+      ENDIF.
+      cell = cell && `"`.
+      pos = pos + 1.
+    ENDWHILE.
+
+  ENDMETHOD.
+
+  METHOD csv_strip_bom.
+
+    " the UTF-8 decoding keeps the mark EF BB BF as the character U+FEFF in
+    " front of the first column name. Built at run time from its bytes - a
+    " literal U+FEFF in the source breaks the 7-bit rule and the downport.
+    " Where the decoding drops it, it is empty
+    result = val.
+    TRY.
+        DATA(lv_bom) = conv_get_string_by_xstring( CONV xstring( `EFBBBF` ) ).
+        IF lv_bom IS NOT INITIAL AND find( val = result
+                                           sub = lv_bom ) = 0.
+          result = substring( val = result
+                              off = strlen( lv_bom ) ).
+        ENDIF.
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+        " no codepage API: the text cannot have come through one either
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD csv_get_column_name.
+
+    DATA lv_pos TYPE i.
+
+    DATA(lv_name) = c_trim_upper( val ).
+    DATA(lv_len) = strlen( lv_name ).
+
+    WHILE lv_pos < lv_len.
+      DATA(lv_char) = substring( val = lv_name
+                                 off = lv_pos
+                                 len = 1 ).
+      IF lv_char CA `ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_`.
+        result = result && lv_char.
+      ELSE.
+        result = result && `_`.
+      ENDIF.
+      lv_pos = lv_pos + 1.
+    ENDWHILE.
+
+    IF result IS INITIAL.
+      result = |COL{ index }|.
+    ELSEIF result(1) CA `0123456789`.
+      result = `C_` && result.
+    ENDIF.
+    IF strlen( result ) > 30.
+      result = result(30).
+    ENDIF.
 
   ENDMETHOD.
 
