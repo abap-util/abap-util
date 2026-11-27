@@ -2725,6 +2725,11 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE abap_bool.
 
+    "! The user holding the lock of the ENQUEUE_ module val for the values
+    "! in t_param. The lock argument is matched from its start, each value
+    "! at its key field's width (a key that is not given matches any
+    "! value); where the module's interface cannot be read, the values are
+    "! looked for anywhere in the argument, as before.
     CLASS-METHODS lock_get_owner
       IMPORTING
         val           TYPE clike
@@ -4131,17 +4136,19 @@ CLASS zabaputil_cl_util_context DEFINITION
     " of the interfaces it implements (IF_...~NAME) - a dynamic call by the
     " bare name of an interface method only works where the class declares
     " an alias. result: a reference to the RETURNING value of the method,
-    " or to the attribute. arg: the value of the method's first mandatory
-    " importing parameter not in t_param, converted to its type (a table of
-    " object references is cast line by line), so its name need not be
-    " known. t_param: further parameters, passed as they are. A member the
-    " object does not have raises zabaputil_cx_util_error.
+    " or to the attribute. arg: the value of the importing parameter
+    " arg_name - without arg_name of the first mandatory one not in
+    " t_param, so its name need not be known - converted to its type (a
+    " table line by line: object references cast, structures by their
+    " component names). t_param: further parameters, passed as they are. A
+    " member the object does not have raises zabaputil_cx_util_error.
     CLASS-METHODS dyn_call
       IMPORTING
         obj           TYPE REF TO object OPTIONAL
         class_name    TYPE clike OPTIONAL
         name          TYPE clike
         arg           TYPE any OPTIONAL
+        arg_name      TYPE clike OPTIONAL
         t_param       TYPE abap_parmbind_tab OPTIONAL
       RETURNING
         VALUE(result) TYPE REF TO data.
@@ -4153,6 +4160,7 @@ CLASS zabaputil_cl_util_context DEFINITION
         class_name    TYPE clike OPTIONAL
         name          TYPE clike
         arg           TYPE any OPTIONAL
+        arg_name      TYPE clike OPTIONAL
         t_param       TYPE abap_parmbind_tab OPTIONAL
       RETURNING
         VALUE(result) TYPE REF TO object.
@@ -4266,7 +4274,11 @@ CLASS zabaputil_cl_util_context DEFINITION
     " calls a lock module by name: result = it succeeded. subrc: 0, 1 for
     " FOREIGN_LOCK of an ENQUEUE_ module, 4 for any other exception it
     " raised, 99 when the call itself failed (no such module, a parameter
-    " it does not have)
+    " it does not have). Each value is typed like the module's parameter
+    " (a STRING for a VBAK-VBELN parameter is a CALL_FUNCTION_CONFLICT_TYPE).
+    " ABAP Cloud: the lock object behind the name through
+    " CL_ABAP_LOCK_OBJECT_FACTORY, ENQUEUE or DEQUEUE with the values as
+    " parameters - CX_ABAP_FOREIGN_LOCK is subrc 1
     CLASS-METHODS lock_call_function
       IMPORTING
         val           TYPE clike
@@ -4275,6 +4287,16 @@ CLASS zabaputil_cl_util_context DEFINITION
         subrc         TYPE i
       RETURNING
         VALUE(result) TYPE abap_bool.
+
+    " the importing parameters of a lock module that make the lock
+    " argument (SEQG3-GARG), in their order: the client and the key
+    " fields, without MODE_, X_ and the _SCOPE / _WAIT / _COLLECT ones.
+    " Empty when the interface cannot be read
+    CLASS-METHODS lock_get_arg_params
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE ty_t_fm_param.
 
     CLASS-METHODS check_msg_container
       IMPORTING
@@ -12819,9 +12841,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                         value = result ) INTO TABLE lt_param.
 
       ELSEIF <ls_param>-parm_kind = cl_abap_objectdescr=>importing
-          AND <ls_param>-is_optional = abap_false
           AND arg IS SUPPLIED
-          AND lr_arg IS NOT BOUND.
+          AND lr_arg IS NOT BOUND
+          AND ( ( arg_name IS INITIAL AND <ls_param>-is_optional = abap_false )
+             OR <ls_param>-name = to_upper( arg_name ) ).
         lo_type = lo_owner->get_method_parameter_type( p_method_name    = <ls_method>-name
                                                        p_parameter_name = <ls_param>-name ).
         TRY.
@@ -12839,7 +12862,11 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                 LOOP AT <lt_in> ASSIGNING FIELD-SYMBOL(<ls_in>).
                   CREATE DATA lr_line TYPE HANDLE lo_line_type.
                   ASSIGN lr_line->* TO <line>.
-                  <line> ?= <ls_in>.
+                  IF lo_line_type->kind = cl_abap_typedescr=>kind_ref.
+                    <line> ?= <ls_in>.
+                  ELSE.
+                    MOVE-CORRESPONDING <ls_in> TO <line>.
+                  ENDIF.
                   INSERT <line> INTO TABLE <lt_arg>.
                 ENDLOOP.
               WHEN OTHERS.
@@ -12875,6 +12902,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                                  class_name = class_name
                                  name       = name
                                  arg        = arg
+                                 arg_name   = arg_name
                                  t_param    = t_param ).
     ELSE.
       lr_value = dyn_call( obj        = obj
@@ -13320,7 +13348,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             lv_fm = `ENQUE_SLEEP`.
             CALL FUNCTION lv_fm
               EXPORTING
-                seconds = lv_seconds.
+                seconds       = lv_seconds
+              EXCEPTIONS
+                error_message = 2
+                OTHERS        = 1.
           CATCH cx_root ##NO_HANDLER.
         ENDTRY.
       ENDIF.
@@ -13358,14 +13389,69 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD lock_get_owner.
 
+    DATA lr_value TYPE REF TO data.
+    FIELD-SYMBOLS <value> TYPE any.
+
     TRY.
         DATA(lt_locks) = lock_read( ).
 
-        " Build the lock argument from params for matching
+        " the lock argument SEQG3-GARG is the client and the key fields one
+        " after the other, each at its full width: `A`, `B` of two CHAR10
+        " keys are `A         B         `, which never contained `AB`, and
+        " a short `1` was found in every argument holding a 1. The pattern
+        " has each value at its width (a key not given: + per character)
+        " and is matched from the start
+        DATA(lv_pattern) = ``.
         DATA(lv_arg) = ``.
-        LOOP AT t_param INTO DATA(ls_param).
-          lv_arg = lv_arg && ls_param-value.
+        DATA(lt_arg_param) = lock_get_arg_params( val ).
+        DATA(lv_use_pattern) = xsdbool( lt_arg_param IS NOT INITIAL ).
+        LOOP AT lt_arg_param INTO DATA(ls_arg_param).
+          CLEAR lr_value.
+          TRY.
+              lr_value = sys_fm_create_param( ls_arg_param ).
+            CATCH cx_root ##NO_HANDLER.
+          ENDTRY.
+          IF lr_value IS NOT BOUND.
+            " a key of unknown width - the pattern cannot be built
+            lv_use_pattern = abap_false.
+            EXIT.
+          ENDIF.
+          ASSIGN lr_value->* TO <value>.
+          DATA(lo_type) = cl_abap_typedescr=>describe_by_data( <value> ).
+          DATA(lv_width) = lo_type->length / cv_char_util_charsize.
+          DATA(lv_given) = abap_false.
+          LOOP AT t_param INTO DATA(ls_param)
+               WHERE name = ls_arg_param-parameter.
+            <value> = ls_param-value.
+            lv_given = abap_true.
+            EXIT.
+          ENDLOOP.
+          IF lv_given = abap_false AND ls_arg_param-parameter = `MANDT`.
+            <value> = context_get_sy( )-mandt.
+            lv_given = abap_true.
+          ENDIF.
+          IF lv_given = abap_true.
+            DATA(lv_piece) = CONV string( <value> ).
+            lv_piece = replace( val = lv_piece sub = `#` with = `##` occ = 0 ).
+            lv_piece = replace( val = lv_piece sub = `*` with = `#*` occ = 0 ).
+            lv_piece = replace( val = lv_piece sub = `+` with = `#+` occ = 0 ).
+            DATA(lv_blanks) = lv_width - strlen( CONV string( <value> ) ).
+            lv_pattern = |{ lv_pattern }{ lv_piece }{ repeat( val = ` `
+                                                              occ = nmax( val1 = lv_blanks val2 = 0 ) ) }|.
+          ELSE.
+            lv_pattern = lv_pattern && repeat( val = `+`
+                                               occ = lv_width ).
+          ENDIF.
         ENDLOOP.
+        IF lv_use_pattern = abap_true.
+          lv_pattern = lv_pattern && `*`.
+        ELSE.
+          CLEAR lv_pattern.
+          " the module's interface could not be read: the values anywhere
+          LOOP AT t_param INTO ls_param.
+            lv_arg = lv_arg && ls_param-value.
+          ENDLOOP.
+        ENDIF.
 
         DATA(lv_name) = c_trim_upper( val ).
         lv_name = replace( val = lv_name sub = `ENQUEUE_` with = `` ).
@@ -13393,10 +13479,17 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           ELSEIF NOT line_exists( lt_tabname[ table_line = ls_lock-lock_object ] ).
             CONTINUE.
           ENDIF.
-          IF lv_arg IS INITIAL OR ls_lock-argument CS lv_arg.
-            result = ls_lock-user.
-            RETURN.
+          IF lv_pattern IS NOT INITIAL.
+            " the argument with its trailing blanks - a CP on the CHAR
+            " field would cut them
+            IF |{ ls_lock-argument }{ repeat( val = ` ` occ = 120 ) }| NP lv_pattern.
+              CONTINUE.
+            ENDIF.
+          ELSEIF lv_arg IS NOT INITIAL AND ls_lock-argument NS lv_arg.
+            CONTINUE.
           ENDIF.
+          result = ls_lock-user.
+          RETURN.
         ENDLOOP.
 
       CATCH cx_root ##NO_HANDLER.
@@ -13458,6 +13551,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         ls_param-value = REF #( <lt_enq> ).
         INSERT ls_param INTO TABLE lt_param.
 
+        ls_exception-name  = `ERROR_MESSAGE`.
+        ls_exception-value = 4.
+        INSERT ls_exception INTO TABLE lt_exception.
         ls_exception-name  = `OTHERS`.
         ls_exception-value = 4.
         INSERT ls_exception INTO TABLE lt_exception.
@@ -13601,6 +13697,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         ls_param-value = REF #( <lt_enq> ).
         INSERT ls_param INTO TABLE lt_param.
 
+        ls_exception-name  = `ERROR_MESSAGE`.
+        ls_exception-value = 4.
+        INSERT ls_exception INTO TABLE lt_exception.
         ls_exception-name  = `OTHERS`.
         ls_exception-value = 4.
         INSERT ls_exception INTO TABLE lt_exception.
@@ -14385,22 +14484,79 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA lt_param      TYPE abap_func_parmbind_tab.
     DATA ls_param      TYPE abap_func_parmbind.
     DATA ls_lock_param TYPE ty_s_lock_param.
-    DATA lr_value      TYPE REF TO string.
+    DATA lr_value      TYPE REF TO data.
     DATA lt_exception  TYPE abap_func_excpbind_tab.
     DATA ls_exception  TYPE abap_func_excpbind.
     DATA lv_function   TYPE string.
+    DATA lt_interface  TYPE ty_t_fm_param.
+    FIELD-SYMBOLS <value> TYPE any.
+
+    lv_function = c_trim_upper( val ).
+
+    IF check_abap_cloud( ) = abap_true.
+      " the function modules are not released - the lock object API is
+      TYPES:
+        BEGIN OF ty_s_cloud_param,
+          name  TYPE string,
+          value TYPE REF TO data,
+        END OF ty_s_cloud_param.
+      DATA lt_cloud_param TYPE STANDARD TABLE OF ty_s_cloud_param WITH EMPTY KEY.
+      TRY.
+          DATA(lv_lock_object) = substring( val = lv_function
+                                            off = 8 ).
+          LOOP AT t_param INTO ls_lock_param.
+            CREATE DATA lr_value TYPE string.
+            ASSIGN lr_value->* TO <value>.
+            <value> = ls_lock_param-value.
+            INSERT VALUE #( name  = c_trim_upper( ls_lock_param-name )
+                            value = lr_value ) INTO TABLE lt_cloud_param.
+          ENDLOOP.
+          DATA(lo_lock) = dyn_call_obj( class_name = `CL_ABAP_LOCK_OBJECT_FACTORY`
+                                        name       = `GET_INSTANCE`
+                                        arg        = lv_lock_object ).
+          dyn_call( obj      = lo_lock
+                    name     = COND #( WHEN lv_function CP `DEQUEUE_*` THEN `DEQUEUE` ELSE `ENQUEUE` )
+                    arg      = lt_cloud_param
+                    arg_name = `IT_PARAMETER` ).
+          subrc = 0.
+        CATCH cx_root INTO DATA(lx_cloud).
+          subrc = COND #( WHEN cl_abap_classdescr=>get_class_name( lx_cloud ) CS `FOREIGN_LOCK` THEN 1
+                          WHEN cl_abap_classdescr=>get_class_name( lx_cloud ) CS `LOCK` THEN 4
+                          ELSE 99 ).
+      ENDTRY.
+      result = xsdbool( subrc = 0 ).
+      RETURN.
+    ENDIF.
 
     TRY.
+        " the types of the module's parameters - where they cannot be read
+        " the values go as strings, as before
+        TRY.
+            lt_interface = sys_fm_get_interface( lv_function ).
+          CATCH cx_root ##NO_HANDLER.
+        ENDTRY.
+
         LOOP AT t_param INTO ls_lock_param.
-          ls_param-name = ls_lock_param-name.
+          ls_param-name = c_trim_upper( ls_lock_param-name ).
           ls_param-kind = abap_func_exporting.
-          CREATE DATA lr_value.
-          lr_value->* = ls_lock_param-value.
+          CLEAR lr_value.
+          LOOP AT lt_interface INTO DATA(ls_interface)
+               WHERE parameter = ls_param-name AND paramclass = `I`.
+            TRY.
+                lr_value = sys_fm_create_param( ls_interface ).
+              CATCH cx_root ##NO_HANDLER.
+            ENDTRY.
+            EXIT.
+          ENDLOOP.
+          IF lr_value IS NOT BOUND.
+            CREATE DATA lr_value TYPE string.
+          ENDIF.
+          ASSIGN lr_value->* TO <value>.
+          <value> = ls_lock_param-value.
           ls_param-value = lr_value.
           INSERT ls_param INTO TABLE lt_param.
         ENDLOOP.
 
-        lv_function = c_trim_upper( val ).
         " every generated ENQUEUE_ module has FOREIGN_LOCK - the one
         " failure that means "someone else holds it"
         IF lv_function CP `ENQUEUE_*`.
@@ -14408,6 +14564,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           ls_exception-value = 1.
           INSERT ls_exception INTO TABLE lt_exception.
         ENDIF.
+        " a MESSAGE TYPE E of the module would end the request
+        ls_exception-name  = `ERROR_MESSAGE`.
+        ls_exception-value = 4.
+        INSERT ls_exception INTO TABLE lt_exception.
         ls_exception-name  = `OTHERS`.
         ls_exception-value = 4.
         INSERT ls_exception INTO TABLE lt_exception.
@@ -14422,6 +14582,26 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       CATCH cx_root.
         subrc = 99.
         result = abap_false.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD lock_get_arg_params.
+
+    TRY.
+        DATA(lv_function) = c_trim_upper( val ).
+        IF lv_function NP `ENQUEUE_*`.
+          lv_function = |ENQUEUE_{ lv_function }|.
+        ENDIF.
+        LOOP AT sys_fm_get_interface( lv_function ) INTO DATA(ls_param)
+             WHERE paramclass = `I`.
+          IF ls_param-parameter CP `MODE_*` OR ls_param-parameter CP `X_*` OR ls_param-parameter CP `#_*`.
+            CONTINUE.
+          ENDIF.
+          INSERT ls_param INTO TABLE result.
+        ENDLOOP.
+      CATCH cx_root.
+        CLEAR result.
     ENDTRY.
 
   ENDMETHOD.
