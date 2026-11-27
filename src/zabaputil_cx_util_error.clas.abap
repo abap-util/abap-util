@@ -267,9 +267,11 @@ CLASS zabaputil_cx_util_error IMPLEMENTATION.
     " installations - while what a report actually needs is the release and
     " the time. A caller that legitimately wants the rest reads sy-* itself;
     " the server-side logs carry it anyway
+    " the system fields through the one reader of the context class
+    DATA(ls_sy) = zabaputil_cl_util_context=>sy_get( ).
     result = `--- context ---` && lv_nl &&
-             |    system   : { sy-sysid } / release { sy-saprl }| && lv_nl &&
-             |    time     : { sy-datum } { sy-uzeit }|.
+             |    system   : { ls_sy-sysid } / release { ls_sy-saprl }| && lv_nl &&
+             |    time     : { ls_sy-datum } { ls_sy-uzeit }|.
 
   ENDMETHOD.
 ENDCLASS.
