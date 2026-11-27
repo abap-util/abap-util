@@ -3912,10 +3912,14 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO data.
 
+    " adds `I <option> value [high]` to the range component comp of a
+    " BAL_S_LFIL filter - an initial value adds nothing
     CLASS-METHODS bal_std_filter_add
       IMPORTING
         comp   TYPE clike
         value  TYPE clike
+        option TYPE clike DEFAULT `EQ`
+        high   TYPE clike OPTIONAL
       CHANGING
         filter TYPE any.
 
@@ -10412,19 +10416,12 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       DATA lv_class  TYPE string.
 
       TRY.
-          lv_class = `CL_BALI_LOG_FILTER`.
-          CALL METHOD (lv_class)=>(`CREATE`)
-            RECEIVING
-              filter = lo_filter.
-
           DATA(lv_obj_f) = COND string( WHEN object IS NOT INITIAL THEN object ELSE `` ).
           DATA(lv_sub_f) = COND string( WHEN subobject IS NOT INITIAL THEN subobject ELSE `` ).
           DATA(lv_id_f)  = COND string( WHEN id IS NOT INITIAL THEN id ELSE `` ).
-          CALL METHOD lo_filter->(`SET_DESCRIPTOR`)
-            EXPORTING
-              object      = lv_obj_f
-              subobject   = lv_sub_f
-              external_id = lv_id_f.
+          lo_filter = bal_cloud_build_filter( object    = lv_obj_f
+                                              subobject = lv_sub_f
+                                              id        = lv_id_f ).
 
           IF date_from IS NOT INITIAL OR date_to IS NOT INITIAL.
             DATA(lv_from) = COND d( WHEN date_from IS NOT INITIAL THEN date_from ELSE '19000101' ).
@@ -10468,7 +10465,12 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             INSERT ls_hdr_c INTO TABLE result.
           ENDLOOP.
 
-        CATCH cx_root ##NO_HANDLER.
+        CATCH cx_root INTO DATA(lx_search_c).
+          " a failed search is no empty result - the on-premise branch and
+          " bal_read raise the same way
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = lx_search_c.
       ENDTRY.
       RETURN.
     ENDIF.
@@ -10478,69 +10480,27 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA lr_filter  TYPE REF TO data.
     DATA lr_headers TYPE REF TO data.
     FIELD-SYMBOLS <filter>  TYPE any.
-    FIELD-SYMBOLS <headers> TYPE STANDARD TABLE.
+    " generic: BALHDR_T is read by bal_std_load_handles the same way
+    FIELD-SYMBOLS <headers> TYPE ANY TABLE.
     FIELD-SYMBOLS <header>  TYPE any.
     FIELD-SYMBOLS <comp>    TYPE any.
-    FIELD-SYMBOLS <range>   TYPE STANDARD TABLE.
-    FIELD-SYMBOLS <rline>   TYPE any.
-    DATA lr_rline TYPE REF TO data.
 
     TRY.
-        CREATE DATA lr_filter TYPE ('BAL_S_LFIL').
+        lr_filter = bal_std_build_filter( object    = object
+                                          subobject = subobject
+                                          id        = id ).
         ASSIGN lr_filter->* TO <filter>.
 
-        IF object IS NOT INITIAL.
-          ASSIGN COMPONENT `OBJECT` OF STRUCTURE <filter> TO <range>.
-          CREATE DATA lr_rline LIKE LINE OF <range>.
-          ASSIGN lr_rline->* TO <rline>.
-          ASSIGN COMPONENT `SIGN` OF STRUCTURE <rline> TO <comp>. <comp> = `I`.
-          ASSIGN COMPONENT `OPTION` OF STRUCTURE <rline> TO <comp>. <comp> = `EQ`.
-          ASSIGN COMPONENT `LOW` OF STRUCTURE <rline> TO <comp>. <comp> = object.
-          INSERT <rline> INTO TABLE <range>.
-        ENDIF.
-
-        IF subobject IS NOT INITIAL.
-          ASSIGN COMPONENT `SUBOBJECT` OF STRUCTURE <filter> TO <range>.
-          CREATE DATA lr_rline LIKE LINE OF <range>.
-          ASSIGN lr_rline->* TO <rline>.
-          ASSIGN COMPONENT `SIGN` OF STRUCTURE <rline> TO <comp>. <comp> = `I`.
-          ASSIGN COMPONENT `OPTION` OF STRUCTURE <rline> TO <comp>. <comp> = `EQ`.
-          ASSIGN COMPONENT `LOW` OF STRUCTURE <rline> TO <comp>. <comp> = subobject.
-          INSERT <rline> INTO TABLE <range>.
-        ENDIF.
-
-        IF id IS NOT INITIAL.
-          ASSIGN COMPONENT `EXTNUMBER` OF STRUCTURE <filter> TO <range>.
-          CREATE DATA lr_rline LIKE LINE OF <range>.
-          ASSIGN lr_rline->* TO <rline>.
-          ASSIGN COMPONENT `SIGN` OF STRUCTURE <rline> TO <comp>. <comp> = `I`.
-          ASSIGN COMPONENT `OPTION` OF STRUCTURE <rline> TO <comp>. <comp> = `EQ`.
-          ASSIGN COMPONENT `LOW` OF STRUCTURE <rline> TO <comp>. <comp> = id.
-          INSERT <rline> INTO TABLE <range>.
-        ENDIF.
-
         IF date_from IS NOT INITIAL OR date_to IS NOT INITIAL.
-          ASSIGN COMPONENT `ALDATE` OF STRUCTURE <filter> TO <range>.
-          CREATE DATA lr_rline LIKE LINE OF <range>.
-          ASSIGN lr_rline->* TO <rline>.
-          ASSIGN COMPONENT `SIGN` OF STRUCTURE <rline> TO <comp>. <comp> = `I`.
-          ASSIGN COMPONENT `OPTION` OF STRUCTURE <rline> TO <comp>. <comp> = `BT`.
-          ASSIGN COMPONENT `LOW` OF STRUCTURE <rline> TO <comp>.
-          <comp> = COND d( WHEN date_from IS NOT INITIAL THEN date_from ELSE '19000101' ).
-          ASSIGN COMPONENT `HIGH` OF STRUCTURE <rline> TO <comp>.
-          <comp> = COND d( WHEN date_to IS NOT INITIAL THEN date_to ELSE sy-datum ).
-          INSERT <rline> INTO TABLE <range>.
+          bal_std_filter_add( EXPORTING comp   = `ALDATE`
+                                        value  = COND d( WHEN date_from IS NOT INITIAL THEN date_from ELSE '19000101' )
+                                        option = `BT`
+                                        high   = COND d( WHEN date_to IS NOT INITIAL THEN date_to ELSE sy-datum )
+                              CHANGING  filter = <filter> ).
         ENDIF.
-
-        IF user IS NOT INITIAL.
-          ASSIGN COMPONENT `ALUSER` OF STRUCTURE <filter> TO <range>.
-          CREATE DATA lr_rline LIKE LINE OF <range>.
-          ASSIGN lr_rline->* TO <rline>.
-          ASSIGN COMPONENT `SIGN` OF STRUCTURE <rline> TO <comp>. <comp> = `I`.
-          ASSIGN COMPONENT `OPTION` OF STRUCTURE <rline> TO <comp>. <comp> = `EQ`.
-          ASSIGN COMPONENT `LOW` OF STRUCTURE <rline> TO <comp>. <comp> = user.
-          INSERT <rline> INTO TABLE <range>.
-        ENDIF.
+        bal_std_filter_add( EXPORTING comp   = `ALUSER`
+                                      value  = user
+                            CHANGING  filter = <filter> ).
 
         CREATE DATA lr_headers TYPE ('BALHDR_T').
         ASSIGN lr_headers->* TO <headers>.
@@ -10552,8 +10512,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           IMPORTING
             e_t_log_header = <headers>
           EXCEPTIONS
+            error_message  = 2
             OTHERS         = 1.
         IF sy-subrc <> 0.
+          " LOG_NOT_FOUND: nothing matches the filter
           RETURN.
         ENDIF.
 
@@ -10576,7 +10538,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           INSERT ls_hdr INTO TABLE result.
         ENDLOOP.
 
-      CATCH cx_root ##NO_HANDLER.
+      CATCH cx_root INTO DATA(lx_search).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = lx_search.
     ENDTRY.
 
   ENDMETHOD.
@@ -10604,17 +10569,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       DATA lv_cls      TYPE string.
 
       TRY.
-          lv_cls = `CL_BALI_LOG_FILTER`.
-          CALL METHOD (lv_cls)=>(`CREATE`)
-            RECEIVING
-              filter = lo_filter_c.
-
           DATA(lv_sub_c) = COND string( WHEN subobject IS NOT INITIAL THEN subobject ELSE `` ).
-          CALL METHOD lo_filter_c->(`SET_DESCRIPTOR`)
-            EXPORTING
-              object      = object
-              subobject   = lv_sub_c
-              external_id = ``.
+          lo_filter_c = bal_cloud_build_filter( object    = object
+                                                subobject = lv_sub_c
+                                                id        = `` ).
 
           CALL METHOD lo_filter_c->(`SET_CREATE_DATE`)
             EXPORTING
@@ -10640,7 +10598,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
           COMMIT WORK AND WAIT.
 
-        CATCH cx_root ##NO_HANDLER.
+        CATCH cx_root INTO DATA(lx_delete_c).
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = lx_delete_c.
       ENDTRY.
       RETURN.
     ENDIF.
@@ -10649,53 +10610,42 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA lv_fm     TYPE string.
     DATA lr_filter TYPE REF TO data.
     FIELD-SYMBOLS <filter> TYPE any.
-    FIELD-SYMBOLS <range>  TYPE STANDARD TABLE.
-    FIELD-SYMBOLS <rline>  TYPE any.
-    FIELD-SYMBOLS <comp>   TYPE any.
-    DATA lr_rline TYPE REF TO data.
+
+    " the filter always restricted OBJECT - an initial object matched no
+    " log. bal_std_build_filter leaves an initial value out, which would
+    " delete the old logs of EVERY object instead
+    IF object IS INITIAL.
+      RETURN.
+    ENDIF.
 
     TRY.
-        CREATE DATA lr_filter TYPE ('BAL_S_LFIL').
+        lr_filter = bal_std_build_filter( object    = object
+                                          subobject = subobject
+                                          id        = `` ).
         ASSIGN lr_filter->* TO <filter>.
 
-        ASSIGN COMPONENT `OBJECT` OF STRUCTURE <filter> TO <range>.
-        CREATE DATA lr_rline LIKE LINE OF <range>.
-        ASSIGN lr_rline->* TO <rline>.
-        ASSIGN COMPONENT `SIGN` OF STRUCTURE <rline> TO <comp>. <comp> = `I`.
-        ASSIGN COMPONENT `OPTION` OF STRUCTURE <rline> TO <comp>. <comp> = `EQ`.
-        ASSIGN COMPONENT `LOW` OF STRUCTURE <rline> TO <comp>. <comp> = object.
-        INSERT <rline> INTO TABLE <range>.
-
-        IF subobject IS NOT INITIAL.
-          ASSIGN COMPONENT `SUBOBJECT` OF STRUCTURE <filter> TO <range>.
-          CREATE DATA lr_rline LIKE LINE OF <range>.
-          ASSIGN lr_rline->* TO <rline>.
-          ASSIGN COMPONENT `SIGN` OF STRUCTURE <rline> TO <comp>. <comp> = `I`.
-          ASSIGN COMPONENT `OPTION` OF STRUCTURE <rline> TO <comp>. <comp> = `EQ`.
-          ASSIGN COMPONENT `LOW` OF STRUCTURE <rline> TO <comp>. <comp> = subobject.
-          INSERT <rline> INTO TABLE <range>.
-        ENDIF.
-
-        ASSIGN COMPONENT `ALDATE` OF STRUCTURE <filter> TO <range>.
-        CREATE DATA lr_rline LIKE LINE OF <range>.
-        ASSIGN lr_rline->* TO <rline>.
-        ASSIGN COMPONENT `SIGN` OF STRUCTURE <rline> TO <comp>. <comp> = `I`.
-        ASSIGN COMPONENT `OPTION` OF STRUCTURE <rline> TO <comp>. <comp> = `BT`.
-        ASSIGN COMPONENT `LOW` OF STRUCTURE <rline> TO <comp>. <comp> = '19000101'.
-        ASSIGN COMPONENT `HIGH` OF STRUCTURE <rline> TO <comp>. <comp> = lv_cutoff.
-        INSERT <rline> INTO TABLE <range>.
+        bal_std_filter_add( EXPORTING comp   = `ALDATE`
+                                      value  = CONV d( '19000101' )
+                                      option = `BT`
+                                      high   = lv_cutoff
+                            CHANGING  filter = <filter> ).
 
         lv_fm = `BAL_DB_DELETE`.
         CALL FUNCTION lv_fm
           EXPORTING
             i_s_log_filter = <filter>
           EXCEPTIONS
+            error_message  = 2
             OTHERS         = 1.
+        " sy-subrc <> 0: no log older than the cutoff - nothing to delete
         IF sy-subrc = 0.
           COMMIT WORK AND WAIT.
         ENDIF.
 
-      CATCH cx_root ##NO_HANDLER.
+      CATCH cx_root INTO DATA(lx_delete).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = lx_delete.
     ENDTRY.
 
   ENDMETHOD.
@@ -10832,8 +10782,11 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
           ENDLOOP.
 
-        CATCH cx_root.
-          RETURN.
+        CATCH cx_root INTO DATA(lx_read_c).
+          " a failed read is no empty log - as in the on-premise branch
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = lx_read_c.
       ENDTRY.
 
     ELSE.
@@ -10843,10 +10796,12 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       DATA lr_single  TYPE REF TO data.
       DATA lr_msgh    TYPE REF TO data.
       DATA lr_msg     TYPE REF TO data.
-      FIELD-SYMBOLS <handles> TYPE STANDARD TABLE.
+      " generic: the table kinds of the DDIC types BAL_T_LOGH / BAL_T_MSGH
+      " are not ours to assume - a SORTED vs STANDARD mismatch is a dump
+      FIELD-SYMBOLS <handles> TYPE ANY TABLE.
       FIELD-SYMBOLS <handle>  TYPE any.
-      FIELD-SYMBOLS <single>  TYPE STANDARD TABLE.
-      FIELD-SYMBOLS <msgh>    TYPE STANDARD TABLE.
+      FIELD-SYMBOLS <single>  TYPE ANY TABLE.
+      FIELD-SYMBOLS <msgh>    TYPE ANY TABLE.
       FIELD-SYMBOLS <mh>      TYPE any.
       FIELD-SYMBOLS <msg>     TYPE any.
 
@@ -10879,6 +10834,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
               IMPORTING
                 e_t_msg_handle = <msgh>
               EXCEPTIONS
+                error_message  = 2
                 OTHERS         = 1.
             IF sy-subrc <> 0.
               CONTINUE.
@@ -10893,6 +10849,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                 IMPORTING
                   e_s_msg        = <msg>
                 EXCEPTIONS
+                  error_message  = 2
                   OTHERS         = 1.
               IF sy-subrc = 0.
                 INSERT bal_std_map_msg( <msg> ) INTO TABLE result.
@@ -10958,8 +10915,11 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
           COMMIT WORK AND WAIT.
 
-        CATCH cx_root.
-          RETURN.
+        CATCH cx_root INTO DATA(lx_create_c).
+          " the log was not written - the caller must not see a success
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = lx_create_c.
       ENDTRY.
 
     ELSE.
@@ -10971,7 +10931,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       DATA lr_handles TYPE REF TO data.
       FIELD-SYMBOLS <log>     TYPE any.
       FIELD-SYMBOLS <handle>  TYPE any.
-      FIELD-SYMBOLS <handles> TYPE STANDARD TABLE.
+      FIELD-SYMBOLS <handles> TYPE ANY TABLE.
       FIELD-SYMBOLS <comp>    TYPE any.
 
       TRY.
@@ -10994,9 +10954,12 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             IMPORTING
               e_log_handle = <handle>
             EXCEPTIONS
-              OTHERS       = 1.
+              error_message = 2
+              OTHERS        = 1.
           IF sy-subrc <> 0.
-            RETURN.
+            RAISE EXCEPTION TYPE zabaputil_cx_util_error
+              EXPORTING
+                val = |BAL_LOG_CREATE failed (sy-subrc { sy-subrc })|.
           ENDIF.
 
           bal_std_msg_add( handle = <handle>
@@ -11011,10 +10974,14 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             EXPORTING
               i_t_log_handle = <handles>
             EXCEPTIONS
+              error_message  = 2
               OTHERS         = 1.
-          IF sy-subrc = 0.
-            COMMIT WORK AND WAIT.
+          IF sy-subrc <> 0.
+            RAISE EXCEPTION TYPE zabaputil_cx_util_error
+              EXPORTING
+                val = |BAL_DB_SAVE failed (sy-subrc { sy-subrc })|.
           ENDIF.
+          COMMIT WORK AND WAIT.
 
         CATCH cx_root INTO DATA(lx_create).
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -11084,7 +11051,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       " Append the given messages to an already persisted log; create a new one if none exists.
       DATA lv_fm      TYPE string.
       DATA lr_handles TYPE REF TO data.
-      FIELD-SYMBOLS <handles> TYPE STANDARD TABLE.
+      FIELD-SYMBOLS <handles> TYPE INDEX TABLE.
       FIELD-SYMBOLS <handle>  TYPE any.
 
       TRY.
@@ -11117,10 +11084,14 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             EXPORTING
               i_t_log_handle = <handles>
             EXCEPTIONS
+              error_message  = 2
               OTHERS         = 1.
-          IF sy-subrc = 0.
-            COMMIT WORK AND WAIT.
+          IF sy-subrc <> 0.
+            RAISE EXCEPTION TYPE zabaputil_cx_util_error
+              EXPORTING
+                val = |BAL_DB_SAVE failed (sy-subrc { sy-subrc })|.
           ENDIF.
+          COMMIT WORK AND WAIT.
 
         CATCH cx_root INTO DATA(lx_update).
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -11165,8 +11136,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
           COMMIT WORK AND WAIT.
 
-        CATCH cx_root.
-          RETURN.
+        CATCH cx_root INTO DATA(lx_delete_c).
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = lx_delete_c.
       ENDTRY.
 
     ELSE.
@@ -11186,6 +11159,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             EXPORTING
               i_s_log_filter = <filter>
             EXCEPTIONS
+              error_message  = 2
               OTHERS         = 1.
           IF sy-subrc = 0.
             COMMIT WORK AND WAIT.
@@ -11935,7 +11909,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             i_log_handle = handle
             i_s_msg      = <msg>
           EXCEPTIONS
-            OTHERS       = 1.
+            error_message = 2
+            OTHERS        = 1.
 
       ELSE.
 
@@ -11948,7 +11923,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             i_msgty      = lv_msgty
             i_text       = lv_text
           EXCEPTIONS
-            OTHERS       = 1.
+            error_message = 2
+            OTHERS        = 1.
 
       ENDIF.
 
@@ -11962,8 +11938,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA lr_filter  TYPE REF TO data.
     DATA lr_headers TYPE REF TO data.
     FIELD-SYMBOLS <filter>  TYPE any.
-    FIELD-SYMBOLS <headers> TYPE SORTED TABLE.
-    FIELD-SYMBOLS <handles> TYPE SORTED TABLE.
+    " generic: BALHDR_T and BAL_T_LOGH are typed STANDARD in bal_search and
+    " bal_read - with SORTED here one of the two sides could only dump
+    FIELD-SYMBOLS <headers> TYPE ANY TABLE.
+    FIELD-SYMBOLS <handles> TYPE ANY TABLE.
 
     lr_filter = bal_std_build_filter( object    = object
                                       subobject = subobject
@@ -11980,6 +11958,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       IMPORTING
         e_t_log_header = <headers>
       EXCEPTIONS
+        error_message  = 2
         OTHERS         = 1.
     IF sy-subrc <> 0 OR <headers> IS INITIAL.
       RETURN.
@@ -11995,6 +11974,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       IMPORTING
         e_t_log_handle = <handles>
       EXCEPTIONS
+        error_message  = 2
         OTHERS         = 1.
 
   ENDMETHOD.
@@ -12039,9 +12019,13 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ASSIGN COMPONENT `SIGN` OF STRUCTURE <line> TO <comp>.
     <comp> = `I`.
     ASSIGN COMPONENT `OPTION` OF STRUCTURE <line> TO <comp>.
-    <comp> = `EQ`.
+    <comp> = option.
     ASSIGN COMPONENT `LOW` OF STRUCTURE <line> TO <comp>.
     <comp> = value.
+    IF high IS NOT INITIAL.
+      ASSIGN COMPONENT `HIGH` OF STRUCTURE <line> TO <comp>.
+      <comp> = high.
+    ENDIF.
     INSERT <line> INTO TABLE <range>.
 
   ENDMETHOD.
