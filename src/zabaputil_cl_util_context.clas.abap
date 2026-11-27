@@ -3229,6 +3229,10 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE string.
 
+    "! tz: an SAP time zone key (TTZZ, at most six characters: `UTC`,
+    "! `CET`, `EST`) - not an IANA name like Europe/Berlin. A zone that is
+    "! no key, or a conversion that fails, raises zabaputil_cx_util_error;
+    "! it returned an empty or wrong date and time.
     CLASS-METHODS time_stampl_to_tz
       IMPORTING
         val  TYPE timestampl
@@ -3237,6 +3241,7 @@ CLASS zabaputil_cl_util_context DEFINITION
         date TYPE d
         time TYPE t.
 
+    "! tz as in time_stampl_to_tz
     CLASS-METHODS time_stampl_from_tz
       IMPORTING
         date          TYPE d
@@ -4205,6 +4210,14 @@ CLASS zabaputil_cl_util_context DEFINITION
         factor    TYPE decfloat34
         additive  TYPE decfloat34
         dimension TYPE string.
+
+    " the zone trimmed - raises when it is longer than the six characters
+    " of an SAP time zone key: `Europe/Berlin` was cut to `Europe`
+    CLASS-METHODS time_check_zone
+      IMPORTING
+        tz            TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
 
     CLASS-METHODS bal_cloud_add_items
       IMPORTING
@@ -5765,7 +5778,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     IF time_zone IS INITIAL.
       result = |{ val TIMESTAMP = ISO }|.
     ELSE.
-      lv_zone = time_zone.
+      lv_zone = time_check_zone( time_zone ).
       result = |{ val TIMESTAMP = ISO TIMEZONE = lv_zone }|.
     ENDIF.
 
@@ -16306,18 +16319,45 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
   METHOD time_stampl_to_tz.
 
     DATA lv_tz TYPE c LENGTH 6.
-    lv_tz = tz.
 
+    CLEAR date.
+    CLEAR time.
+    lv_tz = time_check_zone( tz ).
+
+    " 8: the zone is not in TTZZ, 12: the time stamp is no valid one
     CONVERT TIME STAMP val TIME ZONE lv_tz INTO DATE date TIME time.
+    IF sy-subrc >= 8.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |TIME_STAMPL_TO_TZ: { val } cannot be converted to time zone { lv_tz } (sy-subrc { sy-subrc })|.
+    ENDIF.
 
   ENDMETHOD.
 
   METHOD time_stampl_from_tz.
 
     DATA lv_tz TYPE c LENGTH 6.
-    lv_tz = tz.
 
+    lv_tz = time_check_zone( tz ).
+
+    " 8: the zone is not in TTZZ, 12: date or time is no valid one
     CONVERT DATE date TIME time INTO TIME STAMP result TIME ZONE lv_tz.
+    IF sy-subrc >= 8.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |TIME_STAMPL_FROM_TZ: { date } { time } cannot be converted from time zone { lv_tz } (sy-subrc { sy-subrc })|.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD time_check_zone.
+
+    result = c_trim( tz ).
+    IF strlen( result ) > 6.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |{ result } is no SAP time zone key (TTZZ, at most six characters)|.
+    ENDIF.
 
   ENDMETHOD.
 

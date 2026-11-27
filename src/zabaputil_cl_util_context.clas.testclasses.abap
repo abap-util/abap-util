@@ -2274,6 +2274,8 @@ CLASS ltcl_time_ops DEFINITION FINAL
     METHODS get_timestamp_short            FOR TESTING.
     METHODS text_by_stampl_fraction        FOR TESTING.
     METHODS text_by_stampl_utc_zone        FOR TESTING.
+    METHODS stampl_tz_roundtrip            FOR TESTING.
+    METHODS stampl_tz_no_sap_key           FOR TESTING.
 
 ENDCLASS.
 
@@ -2306,6 +2308,29 @@ CLASS ltcl_time_ops IMPLEMENTATION.
         exp = zabaputil_cl_util_context=>time_get_text_by_stampl( CONV timestampl( `20261123140509` ) )
         act = zabaputil_cl_util_context=>time_get_text_by_stampl( val       = CONV timestampl( `20261123140509` )
                                                                   time_zone = `UTC` ) ).
+  ENDMETHOD.
+
+  METHOD stampl_tz_roundtrip.
+    zabaputil_cl_util_context=>time_stampl_to_tz( EXPORTING val  = CONV timestampl( `20261123140509` )
+                                                  IMPORTING date = DATA(lv_date)
+                                                            time = DATA(lv_time) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV d( `20261123` ) act = lv_date ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV t( `140509` ) act = lv_time ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = CONV timestampl( `20261123140509` )
+        act = zabaputil_cl_util_context=>time_stampl_from_tz( date = lv_date
+                                                              time = lv_time ) ).
+  ENDMETHOD.
+
+  METHOD stampl_tz_no_sap_key.
+    " an IANA name was cut to `Europe` and gave an empty date and time
+    TRY.
+        zabaputil_cl_util_context=>time_stampl_to_tz( EXPORTING val  = CONV timestampl( `20261123140509` )
+                                                                tz   = `Europe/Berlin`
+                                                      IMPORTING date = DATA(lv_date) ).
+        cl_abap_unit_assert=>fail( |no exception, date { lv_date }| ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
   ENDMETHOD.
 
   METHOD get_timestampl.
