@@ -3557,6 +3557,12 @@ CLASS zabaputil_cl_util_context DEFINITION
 
   PRIVATE SECTION.
 
+    " SAP language key : ISO 639-1 code of the common languages, read by
+    " lang_sap_to_iso and lang_iso_to_sap before T002 is asked. The SAP key
+    " is case-sensitive - lower-case keys are other languages (c Catalan,
+    " i Indonesian, ...) and must never be upper-cased onto this list
+    CONSTANTS cv_lang_map TYPE string VALUE `0:sr;1:zh;2:th;3:ko;4:ro;5:sl;6:hr;7:ms;8:uk;9:et;A:ar;B:he;C:cs;D:de;E:en;F:fr;G:el;H:hu;I:it;J:ja;K:da;L:pl;M:zf;N:nl;O:no;P:pt;Q:sk;R:ru;S:es;T:tr;U:fi;V:sv;W:bg;X:lt;Y:lv`.
+
     " one message of the message model as a new row of a BAPIRET-like
     " table, iv_type in place of the message's own type when given
     CLASS-METHODS bapi_msg_add
@@ -14247,11 +14253,11 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD lang_sap_to_iso.
 
-    CONSTANTS lc_map TYPE string VALUE `0:sr;1:zh;2:th;3:ko;4:ro;5:sl;6:hr;7:ms;8:uk;9:et;A:ar;B:he;C:cs;D:de;E:en;F:fr;G:el;H:hu;I:it;J:ja;K:da;L:pl;M:zf;N:nl;O:no;P:pt;Q:sk;R:ru;S:es;T:tr;U:fi;V:sv;W:bg;X:lt;Y:lv`.
+    " not upper-cased: SAP language keys are case-sensitive (c is Catalan,
+    " C Czech) - the lookup and the T002 read use the key as given
+    DATA(lv_sap) = c_trim( val ).
 
-    DATA(lv_sap) = to_upper( c_trim( val ) ).
-
-    SPLIT lc_map AT `;` INTO TABLE DATA(lt_pairs).
+    SPLIT cv_lang_map AT `;` INTO TABLE DATA(lt_pairs).
     LOOP AT lt_pairs INTO DATA(lv_pair).
       SPLIT lv_pair AT `:` INTO DATA(lv_key) DATA(lv_iso).
       IF lv_key = lv_sap.
@@ -14276,11 +14282,11 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD lang_iso_to_sap.
 
-    CONSTANTS lc_map TYPE string VALUE `0:sr;1:zh;2:th;3:ko;4:ro;5:sl;6:hr;7:ms;8:uk;9:et;A:ar;B:he;C:cs;D:de;E:en;F:fr;G:el;H:hu;I:it;J:ja;K:da;L:pl;M:zf;N:nl;O:no;P:pt;Q:sk;R:ru;S:es;T:tr;U:fi;V:sv;W:bg;X:lt;Y:lv`.
-
+    " ISO 639-1 codes are case-insensitive, the SAP key comes back as T002
+    " or the map has it
     DATA(lv_iso) = to_lower( c_trim( val ) ).
 
-    SPLIT lc_map AT `;` INTO TABLE DATA(lt_pairs).
+    SPLIT cv_lang_map AT `;` INTO TABLE DATA(lt_pairs).
     LOOP AT lt_pairs INTO DATA(lv_pair).
       SPLIT lv_pair AT `:` INTO DATA(lv_key) DATA(lv_map_iso).
       IF lv_map_iso = lv_iso.

@@ -3399,9 +3399,14 @@ CLASS ltcl_mimetype_lang IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD lang_sap_to_iso_lowercase.
-    cl_abap_unit_assert=>assert_equals(
+    " SAP language keys are case-sensitive - a lower-case key is another
+    " language than its upper-case twin (c Catalan vs C Czech), never English
+    cl_abap_unit_assert=>assert_differs(
         act = zabaputil_cl_util_context=>lang_sap_to_iso( `e` )
         exp = `en` ).
+    cl_abap_unit_assert=>assert_differs(
+        act = zabaputil_cl_util_context=>lang_sap_to_iso( `c` )
+        exp = `cs` ).
   ENDMETHOD.
 
   METHOD lang_iso_to_sap_english.
