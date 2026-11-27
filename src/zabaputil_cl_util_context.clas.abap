@@ -8624,7 +8624,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
               RECEIVING
                 uuid = lv_uuid.
 
-          CATCH cx_sy_dyn_call_illegal_class.
+          CATCH cx_root.
+            " as in uuid_get_c32: any failure of the class - not only its
+            " absence - falls back to the function module
 
             lv_fm = `GUID_CREATE`.
             " error_message: a message the module sends would otherwise end
@@ -8645,8 +8647,13 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
         result = lv_uuid.
 
-      CATCH cx_root.
-        ASSERT 1 = 0.
+      CATCH cx_root INTO DATA(lx_uuid).
+        " both mechanisms failed - a catchable error, not the uncatchable
+        " ASSERTION_FAILED. No re-entrancy guard as in uuid_get_c32: the
+        " error report reads a c32, never a c22
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = lx_uuid.
     ENDTRY.
 
     result = replace( val  = result
