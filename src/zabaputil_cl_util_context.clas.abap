@@ -2957,6 +2957,19 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE string.
 
+    "! The text of an XML text node or attribute value with its references
+    "! resolved: the five named entities (&lt; &gt; &amp; &quot; &apos;)
+    "! and every character reference, decimal (&#10;) or hex (&#xA;) - the
+    "! counterpart of c_escape_xml. One pass from left to right, so an
+    "! escaped reference stays what it was (`&amp;lt;` is `&lt;`). A
+    "! reference it does not know, or one that names no character XML
+    "! allows, stays as it is written.
+    CLASS-METHODS c_unescape_xml
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string.
+
     "! The characters of val that occur in allowed, in their order - an
     "! allow-list strip for a value that is reflected back somewhere.
     CLASS-METHODS c_filter_chars
@@ -4290,6 +4303,14 @@ CLASS zabaputil_cl_util_context DEFINITION
         val           TYPE string
       RETURNING
         VALUE(result) TYPE xstring.
+
+    " the character one reference of c_unescape_xml stands for - name is
+    " what stands between `&` and `;` - empty when it names none
+    CLASS-METHODS c_unescape_xml_reference
+      IMPORTING
+        name          TYPE string
+      RETURNING
+        VALUE(result) TYPE string.
 
     " a run of percent escapes of url_decode as text: the bytes as UTF-8,
     " or the escapes as they were written (raw) when they are no UTF-8
@@ -14032,6 +14053,140 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                       sub  = |\r|
                       with = `\r`
                       occ  = 0 ).
+
+  ENDMETHOD.
+
+  METHOD c_unescape_xml.
+
+    DATA lv_pos TYPE i.
+
+    DATA(lv_val) = CONV string( val ).
+    IF lv_val NS `&`.
+      result = lv_val.
+      RETURN.
+    ENDIF.
+
+    DATA(lv_len) = strlen( lv_val ).
+    WHILE lv_pos < lv_len.
+      DATA(lv_amp) = find( val = lv_val
+                           sub = `&`
+                           off = lv_pos ).
+      IF lv_amp < 0.
+        result = result && substring( val = lv_val
+                                      off = lv_pos ).
+        RETURN.
+      ENDIF.
+      result = result && substring( val = lv_val
+                                    off = lv_pos
+                                    len = lv_amp - lv_pos ).
+
+      " a reference is short: `&#x10FFFF;` is the longest one there is
+      DATA(lv_semi) = find( val = lv_val
+                            sub = `;`
+                            off = lv_amp ).
+      DATA(lv_char) = ``.
+      IF lv_semi > lv_amp + 1 AND lv_semi - lv_amp <= 10.
+        lv_char = c_unescape_xml_reference( substring( val = lv_val
+                                                       off = lv_amp + 1
+                                                       len = lv_semi - lv_amp - 1 ) ).
+      ENDIF.
+      IF lv_char IS INITIAL.
+        result = result && `&`.
+        lv_pos = lv_amp + 1.
+      ELSE.
+        result = result && lv_char.
+        lv_pos = lv_semi + 1.
+      ENDIF.
+    ENDWHILE.
+
+  ENDMETHOD.
+
+  METHOD c_unescape_xml_reference.
+
+    DATA lv_code   TYPE i.
+    DATA lv_digits TYPE string.
+    DATA lv_hex    TYPE string.
+    DATA lv_byte   TYPE i.
+    DATA lv_x      TYPE x LENGTH 1.
+    DATA lt_byte   TYPE STANDARD TABLE OF i WITH EMPTY KEY.
+
+    CASE name.
+      WHEN `lt`.
+        result = `<`.
+        RETURN.
+      WHEN `gt`.
+        result = `>`.
+        RETURN.
+      WHEN `amp`.
+        result = `&`.
+        RETURN.
+      WHEN `quot`.
+        result = `"`.
+        RETURN.
+      WHEN `apos`.
+        result = `'`.
+        RETURN.
+    ENDCASE.
+
+    IF strlen( name ) < 2 OR name(1) <> `#`.
+      RETURN.
+    ENDIF.
+    IF name+1(1) = `x` OR name+1(1) = `X`.
+      lv_digits = to_upper( substring( val = name
+                                       off = 2 ) ).
+      IF lv_digits IS INITIAL OR lv_digits CN `0123456789ABCDEF` OR strlen( lv_digits ) > 6.
+        RETURN.
+      ENDIF.
+      DATA(lv_i) = 0.
+      WHILE lv_i < strlen( lv_digits ).
+        lv_code = lv_code * 16 + find( val = `0123456789ABCDEF`
+                                       sub = lv_digits+lv_i(1) ).
+        lv_i = lv_i + 1.
+      ENDWHILE.
+    ELSE.
+      lv_digits = substring( val = name
+                             off = 1 ).
+      IF lv_digits CN `0123456789` OR strlen( lv_digits ) > 7.
+        RETURN.
+      ENDIF.
+      lv_code = lv_digits.
+    ENDIF.
+
+    " what XML 1.0 allows: tab, LF, CR, from U+0020 on - no surrogate
+    " halves, no U+FFFE and U+FFFF, nothing above U+10FFFF
+    IF lv_code < 32 AND lv_code <> 9 AND lv_code <> 10 AND lv_code <> 13.
+      RETURN.
+    ENDIF.
+    IF ( lv_code >= 55296 AND lv_code <= 57343 ) OR lv_code = 65534 OR lv_code = 65535 OR lv_code > 1114111.
+      RETURN.
+    ENDIF.
+
+    " the code point as UTF-8 bytes, decoded by the codepage API
+    IF lv_code < 128.
+      INSERT lv_code INTO TABLE lt_byte.
+    ELSEIF lv_code < 2048.
+      INSERT 192 + lv_code DIV 64 INTO TABLE lt_byte.
+      INSERT 128 + lv_code MOD 64 INTO TABLE lt_byte.
+    ELSEIF lv_code < 65536.
+      INSERT 224 + lv_code DIV 4096 INTO TABLE lt_byte.
+      INSERT 128 + ( lv_code DIV 64 ) MOD 64 INTO TABLE lt_byte.
+      INSERT 128 + lv_code MOD 64 INTO TABLE lt_byte.
+    ELSE.
+      INSERT 240 + lv_code DIV 262144 INTO TABLE lt_byte.
+      INSERT 128 + ( lv_code DIV 4096 ) MOD 64 INTO TABLE lt_byte.
+      INSERT 128 + ( lv_code DIV 64 ) MOD 64 INTO TABLE lt_byte.
+      INSERT 128 + lv_code MOD 64 INTO TABLE lt_byte.
+    ENDIF.
+    LOOP AT lt_byte INTO lv_byte.
+      lv_x = lv_byte.
+      lv_hex = |{ lv_hex }{ lv_x }|.
+    ENDLOOP.
+    TRY.
+        result = conv_get_string_by_xstring( CONV xstring( lv_hex ) ).
+      CATCH zabaputil_cx_util_error.
+        " no codepage API: the reference stays as it is written
+        CLEAR result.
+    ENDTRY.
 
   ENDMETHOD.
 

@@ -7001,6 +7001,7 @@ CLASS ltcl_fixes DEFINITION FINAL
     METHODS data_uri_percent         FOR TESTING.
     METHODS data_uri_mime_by_name    FOR TESTING.
     METHODS file_name_by_path        FOR TESTING.
+    METHODS xml_unescape             FOR TESTING.
     METHODS csv_quotes_special_cells FOR TESTING.
     METHODS csv_reads_own_output     FOR TESTING.
     METHODS csv_reads_quoted_cells   FOR TESTING.
@@ -7231,6 +7232,28 @@ CLASS ltcl_fixes IMPLEMENTATION.
                                                                     file_name = `notes.txt` ).
     cl_abap_unit_assert=>assert_equals( exp = `image/png`
                                         act = ls_file-mime_type ).
+  ENDMETHOD.
+
+  METHOD xml_unescape.
+    cl_abap_unit_assert=>assert_equals(
+        exp = `<a href="x">'&'</a>`
+        act = zabaputil_cl_util_context=>c_unescape_xml( `&lt;a href=&quot;x&quot;&gt;&apos;&amp;&apos;&lt;/a&gt;` ) ).
+    " an escaped reference stays a reference
+    cl_abap_unit_assert=>assert_equals( exp = `&lt;`
+                                        act = zabaputil_cl_util_context=>c_unescape_xml( `&amp;lt;` ) ).
+    " character references, decimal and hex, as c_escape_xml writes them
+    cl_abap_unit_assert=>assert_equals( exp = |a\nb\tc\rd A|
+                                        act = zabaputil_cl_util_context=>c_unescape_xml( `a&#xA;b&#9;c&#xD;d&#32;&#x41;` ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `C3A9E282AC` ) )
+        act = zabaputil_cl_util_context=>c_unescape_xml( `&#xE9;&#8364;` ) ).
+    " what is no reference, or names no character XML allows, stays
+    cl_abap_unit_assert=>assert_equals( exp = `a & b &unknown; &lt &#0; &#xZZ; &#;`
+                                        act = zabaputil_cl_util_context=>c_unescape_xml( `a & b &unknown; &lt &#0; &#xZZ; &#;` ) ).
+    " the round trip of c_escape_xml
+    cl_abap_unit_assert=>assert_equals(
+        exp = |x < "y" & z\nnext|
+        act = zabaputil_cl_util_context=>c_unescape_xml( zabaputil_cl_util_context=>c_escape_xml( |x < "y" & z\nnext| ) ) ).
   ENDMETHOD.
 
   METHOD file_name_by_path.
