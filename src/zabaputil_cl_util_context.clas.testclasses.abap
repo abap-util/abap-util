@@ -2616,8 +2616,10 @@ ENDCLASS.
 "! ================================================================
 "! Z2UI5_CL_UTIL_EXT - Comprehensive Unit Tests for JS Transpilation
 "! ================================================================
-"! BAL tests removed: bal_search has ASSIGN_TYPE_CONFLICT bug in
-"! production code (runtime error at line ~142). Fix BAL impl first.
+"! No BAL tests: the BAL function modules and CL_BALI_* do not exist in
+"! the transpiled runtime, and every bal_* method raises when they fail.
+"! (The ASSIGN_TYPE_CONFLICT of bal_search is fixed - the BAL tables are
+"! typed generically.)
 "! ================================================================
 
 "! ================================================================
