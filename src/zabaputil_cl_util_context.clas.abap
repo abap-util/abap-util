@@ -4363,6 +4363,18 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDIF.
     DATA(lv_length) = strlen( lv_value ).
 
+    " `!(...)`: the negated token filter_get_token_t_by_range_t renders for
+    " an excluding row and for NE / NB / NP - the inner token with the sign
+    " flipped (I NE x comes back as the equivalent E EQ x, E NE x as I EQ x)
+    IF lv_length > 3 AND lv_value(2) = `!(` AND substring( val = lv_value
+                                                           off = lv_length - 1 ) = `)`.
+      result = filter_get_range_by_token( substring( val = lv_value
+                                                     off = 2
+                                                     len = lv_length - 3 ) ).
+      result-sign = COND #( WHEN result-sign = `E` THEN `I` ELSE `E` ).
+      RETURN.
+    ENDIF.
+
     result-sign = `I`.
 
     IF lv_length >= 2 AND ( lv_value(2) = `<=` OR lv_value(2) = `>=` ).

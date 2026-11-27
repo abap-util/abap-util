@@ -3562,6 +3562,7 @@ CLASS ltcl_sync_back DEFINITION FINAL
     " filter tokens / url params
     METHODS token_excluding_is_negated     FOR TESTING.
     METHODS token_including_unchanged      FOR TESTING.
+    METHODS token_negated_roundtrip        FOR TESTING.
     METHODS url_lower_case_encoded_equals  FOR TESTING.
     METHODS url_startup_params_first       FOR TESTING.
     METHODS url_encoded_value_survives     FOR TESTING.
@@ -3864,6 +3865,30 @@ CLASS ltcl_sync_back IMPLEMENTATION.
     DATA(lt_token) = zabaputil_cl_util_context=>filter_get_token_t_by_range_t( lt_range ).
     cl_abap_unit_assert=>assert_equals( act = lt_token[ 1 ]-text
                                         exp = `!(=4711)` ).
+  ENDMETHOD.
+
+  METHOD token_negated_roundtrip.
+    " every negated token comes back as the range it was rendered from (or
+    " its equivalent: I NE x is E EQ x)
+    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
+                             ( sign = `E` option = `EQ` low = `4711` )
+                             ( sign = `I` option = `NE` low = `4711` )
+                             ( sign = `I` option = `NB` low = `1` high = `9` )
+                             ( sign = `I` option = `NP` low = `ab*` )
+                             ( sign = `E` option = `NE` low = `5` ) ).
+    DATA(lt_token) = zabaputil_cl_util_context=>filter_get_token_t_by_range_t( lt_range ).
+    DATA(lt_back) = zabaputil_cl_util_context=>filter_get_range_t_by_token_t( lt_token ).
+
+    cl_abap_unit_assert=>assert_equals( exp = VALUE zabaputil_cl_util_context=>ty_s_range( sign = `E` option = `EQ` low = `4711` )
+                                        act = lt_back[ 1 ] ).
+    cl_abap_unit_assert=>assert_equals( exp = VALUE zabaputil_cl_util_context=>ty_s_range( sign = `E` option = `EQ` low = `4711` )
+                                        act = lt_back[ 2 ] ).
+    cl_abap_unit_assert=>assert_equals( exp = VALUE zabaputil_cl_util_context=>ty_s_range( sign = `E` option = `BT` low = `1` high = `9` )
+                                        act = lt_back[ 3 ] ).
+    cl_abap_unit_assert=>assert_equals( exp = VALUE zabaputil_cl_util_context=>ty_s_range( sign = `E` option = `CP` low = `ab*` )
+                                        act = lt_back[ 4 ] ).
+    cl_abap_unit_assert=>assert_equals( exp = VALUE zabaputil_cl_util_context=>ty_s_range( sign = `I` option = `EQ` low = `5` )
+                                        act = lt_back[ 5 ] ).
   ENDMETHOD.
 
   METHOD token_including_unchanged.
