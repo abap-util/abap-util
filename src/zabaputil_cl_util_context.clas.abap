@@ -4409,24 +4409,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD filter_itab.
 
-    DATA ref TYPE REF TO data.
-
-    LOOP AT val REFERENCE INTO ref.
-
-      LOOP AT filter INTO DATA(ls_filter).
-
-        ASSIGN ref->(ls_filter-name) TO FIELD-SYMBOL(<field>).
-        IF sy-subrc <> 0.
-          CONTINUE.
-        ENDIF.
-        IF <field> NOT IN ls_filter-t_range.
-          DELETE val.
-          EXIT.
-        ENDIF.
-
-      ENDLOOP.
-
-    ENDLOOP.
+    " the same filter as itab_filter_by_t_range - a field whose range is
+    " empty keeps every row there too
+    itab_filter_by_t_range( EXPORTING val = filter
+                            CHANGING  tab = val ).
 
   ENDMETHOD.
 
@@ -4440,20 +4426,14 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD filter_get_range_by_value.
 
-    DATA ls_range TYPE ty_s_range.
-
     IF val IS INITIAL.
       RETURN.
     ENDIF.
 
-    ls_range-sign = `I`.
-    ls_range-low  = val.
-    IF ls_range-low CA `*`.
-      ls_range-option = `CP`.
-    ELSE.
-      ls_range-option = `EQ`.
-    ENDIF.
-    INSERT ls_range INTO TABLE result.
+    " one value is a list of one - CP for a pattern, EQ otherwise
+    DATA lv_val TYPE string.
+    lv_val = val.
+    result = filter_get_range_t_by_value_t( VALUE #( ( lv_val ) ) ).
 
   ENDMETHOD.
 
@@ -6732,9 +6712,6 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     DATA(lv_val) = CONV string( val ).
     DATA(lv_fmt) = CONV string( format ).
-    DATA(lv_yyyy_off) = find( val = lv_fmt sub = `YYYY` ).
-    DATA(lv_mm_off)   = find( val = lv_fmt sub = `MM` ).
-    DATA(lv_dd_off)   = find( val = lv_fmt sub = `DD` ).
 
     DATA(lv_clean) = ``.
     DATA(lv_i) = 0.
@@ -8006,10 +7983,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD time_measure_stop.
 
-    DATA(lv_now) = time_get_timestampl( ).
-    DATA(lv_diff) = cl_abap_tstmp=>subtract( tstmp1 = lv_now
-                                              tstmp2 = start_time ).
-    result = lv_diff * 1000.  " convert seconds to milliseconds
+    " cl_abap_tstmp=>subtract gave whole seconds on the transpiled runtime,
+    " so every measurement below a second came back as 0
+    result = time_diff_milliseconds( time_from = start_time
+                                     time_to   = time_get_timestampl( ) ).
 
   ENDMETHOD.
 
@@ -8297,64 +8274,20 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD conv_get_string_by_xstring.
 
-    DATA conv          TYPE REF TO object.
-    DATA conv_codepage TYPE c LENGTH 21.
-    DATA conv_in_class TYPE c LENGTH 18.
-    DATA lx_first      TYPE REF TO cx_root.
+    DATA lv_invalid TYPE abap_bool.
 
-    TRY.
-
-        conv_codepage = `CL_ABAP_CONV_CODEPAGE`.
-        CALL METHOD (conv_codepage)=>create_in
-          RECEIVING
-            instance = conv.
-
-        CALL METHOD conv->(`IF_ABAP_CONV_IN~CONVERT`)
-          EXPORTING
-            source = val
-          RECEIVING
-            result = result.
-        RETURN.
-
-      CATCH cx_root INTO lx_first ##NO_HANDLER.
-        " deliberate: capturing the cause IS the handling - it is chained into
-        " UNSUPPORTED_CODEPAGE_API below if the classic API fails too. Falling
-        " through is the point; the modern class is absent on older releases,
-        " which is the whole reason both paths exist
-    ENDTRY.
-
-    " The classic API. Guarded by its own TRY since 2026-09: it used to be the
-    " BODY of the CATCH above, so when it failed too the dynamic-call
-    " exception left this method raw. On a release that has neither class -
-    " and in any runtime that is not an SAP system, where a dynamic
-    " CALL METHOD resolves nothing - that reached the caller as
-    " CX_SY_DYN_CALL_ILLEGAL_CLASS, which nothing here catches by name.
-    " The view builder is one of those callers and builds its
-    " control-character set through this method, so a missing codepage class
-    " took down every view render with an exception that named a kernel
-    " class rather than the framework.
-    TRY.
-
-        conv_in_class = `CL_ABAP_CONV_IN_CE`.
-        CALL METHOD (conv_in_class)=>create
-          EXPORTING
-            encoding = `UTF-8`
-          RECEIVING
-            conv     = conv.
-
-        CALL METHOD conv->(`CONVERT`)
-          EXPORTING
-            input = val
-          IMPORTING
-            data  = result.
-
-      CATCH cx_root.
-        RAISE EXCEPTION TYPE zabaputil_cx_util_error
-          EXPORTING
-            val      = |UNSUPPORTED_CODEPAGE_API - neither CL_ABAP_CONV_CODEPAGE | &&
-                       |nor CL_ABAP_CONV_IN_CE could convert here|
-            previous = lx_first.
-    ENDTRY.
+    " UTF-8 through the code-page method: one implementation of the two
+    " conversion APIs and their fallback, not two
+    conv_get_string_by_xstring_cp( EXPORTING val      = val
+                                             codepage = `UTF-8`
+                                             encoding = `UTF-8`
+                                   IMPORTING result   = result
+                                             invalid  = lv_invalid ).
+    IF lv_invalid = abap_true.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = `INVALID_UTF8 - the bytes are no valid UTF-8`.
+    ENDIF.
 
   ENDMETHOD.
 
