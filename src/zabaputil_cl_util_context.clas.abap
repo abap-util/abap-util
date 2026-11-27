@@ -8764,6 +8764,12 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     "DATA(tenant_info) = xco_cp=>current->tenant( ).
     "DATA(account_id) = tenant_info->get_global_account_id( ).
 
+    " not implemented: the result was silently empty, which reads like
+    " a success - the XCO calls above are the template
+    RAISE EXCEPTION TYPE zabaputil_cx_util_error
+      EXPORTING
+        val = `CONTEXT_GET_TENANT is not implemented`.
+
   ENDMETHOD.
 
   METHOD context_get_callstack.
@@ -13184,6 +13190,12 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 *               )->execute( ).
 *    result = write_access->get_file_content( ).
 
+    " not implemented: the result was silently empty, which reads like
+    " a success - the XCO version above is the template
+    RAISE EXCEPTION TYPE zabaputil_cx_util_error
+      EXPORTING
+        val = `CONV_GET_XLSX_BY_ITAB is not implemented`.
+
   ENDMETHOD.
 
   METHOD conv_get_itab_by_xlsx.
@@ -13197,6 +13209,12 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 *            )->operation->write_to( REF #( result )
 *            )->set_value_transformation( xco_cp_xlsx_read_access=>value_transformation->string_value
 *            )->execute( ).
+
+    " not implemented: the result was silently empty, which reads like
+    " a success - the XCO version above is the template
+    RAISE EXCEPTION TYPE zabaputil_cx_util_error
+      EXPORTING
+        val = `CONV_GET_ITAB_BY_XLSX is not implemented`.
 
   ENDMETHOD.
 

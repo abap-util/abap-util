@@ -3011,14 +3011,23 @@ CLASS ltcl_xlsx_ops IMPLEMENTATION.
     TYPES: BEGIN OF ty_row, col1 TYPE string, col2 TYPE string, END OF ty_row.
     DATA lt_tab TYPE STANDARD TABLE OF ty_row WITH EMPTY KEY.
     lt_tab = VALUE #( ( col1 = `A` col2 = `B` ) ).
-    DATA(lv_result) = zabaputil_cl_util_context=>conv_get_xlsx_by_itab( lt_tab ) ##NEEDED.
+    " not implemented - it says so instead of returning nothing
+    TRY.
+        DATA(lv_result) = zabaputil_cl_util_context=>conv_get_xlsx_by_itab( lt_tab ) ##NEEDED.
+        cl_abap_unit_assert=>fail( `not implemented - must raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
   ENDMETHOD.
 
   METHOD itab_by_xlsx_empty.
     DATA lv_xstring TYPE xstring.
     DATA lr_result TYPE REF TO data.
-    zabaputil_cl_util_context=>conv_get_itab_by_xlsx( EXPORTING val = lv_xstring
-                                              IMPORTING result = lr_result ) ##NEEDED.
+    TRY.
+        zabaputil_cl_util_context=>conv_get_itab_by_xlsx( EXPORTING val    = lv_xstring
+                                                          IMPORTING result = lr_result ) ##NEEDED.
+        cl_abap_unit_assert=>fail( `not implemented - must raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
   ENDMETHOD.
 
 ENDCLASS.
