@@ -2348,6 +2348,7 @@ CLASS ltcl_edge_cases DEFINITION FINAL
 
     " conv_string_to_date edge cases
     METHODS date_short_input               FOR TESTING.
+    METHODS date_single_digit_parts        FOR TESTING.
 
     " check_is_email edge cases
     METHODS email_with_plus                FOR TESTING.
@@ -2526,6 +2527,26 @@ CLASS ltcl_edge_cases IMPLEMENTATION.
     DATA(lv_result) = zabaputil_cl_util_context=>conv_string_to_date( val    = `24`
                                                                       format = `YYYY-MM-DD` ).
     cl_abap_unit_assert=>assert_initial( lv_result ).
+  ENDMETHOD.
+
+  METHOD date_single_digit_parts.
+    " a day or a month written with one digit is read by its part, not
+    " digit by digit - `5.3.2024` was an initial date, with a time behind
+    " it the year 2410
+    cl_abap_unit_assert=>assert_equals( exp = CONV d( `20240305` )
+                                        act = zabaputil_cl_util_context=>conv_string_to_date( val    = `5.3.2024`
+                                                                                              format = `DD.MM.YYYY` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV d( `20240305` )
+                                        act = zabaputil_cl_util_context=>conv_string_to_date( val    = `5.3.2024 10:30`
+                                                                                              format = `DD.MM.YYYY` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV d( `20240105` )
+                                        act = zabaputil_cl_util_context=>conv_string_to_date( `2024-1-5` ) ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>check_is_date_valid( `2024-1-5` ) ).
+    " a part longer than the format allows, or a year that is too short
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>conv_string_to_date( val    = `15.003.2024`
+                                                                                         format = `DD.MM.YYYY` ) ).
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>conv_string_to_date( val    = `5.3.24`
+                                                                                         format = `DD.MM.YYYY` ) ).
   ENDMETHOD.
 
   METHOD email_with_plus.

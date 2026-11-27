@@ -6719,38 +6719,101 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD conv_string_to_date.
 
+    DATA lt_val_groups TYPE string_table.
+    DATA lt_fmt_groups TYPE string_table.
+    DATA lv_group      TYPE string.
+    DATA lv_index      TYPE i.
+
     DATA(lv_val) = CONV string( val ).
     DATA(lv_fmt) = CONV string( format ).
 
+    " the digits of the value, all of them and in their runs
     DATA(lv_clean) = ``.
     DATA(lv_i) = 0.
     WHILE lv_i < strlen( lv_val ).
       DATA(lv_c) = lv_val+lv_i(1).
       IF lv_c >= `0` AND lv_c <= `9`.
         lv_clean = lv_clean && lv_c.
+        lv_group = lv_group && lv_c.
+      ELSEIF lv_group IS NOT INITIAL.
+        INSERT lv_group INTO TABLE lt_val_groups.
+        CLEAR lv_group.
       ENDIF.
       lv_i = lv_i + 1.
     ENDWHILE.
+    IF lv_group IS NOT INITIAL.
+      INSERT lv_group INTO TABLE lt_val_groups.
+      CLEAR lv_group.
+    ENDIF.
 
+    " the letters of the format, all of them and in runs of one letter
     DATA(lv_fmt_clean) = ``.
     lv_i = 0.
     WHILE lv_i < strlen( lv_fmt ).
       lv_c = lv_fmt+lv_i(1).
       IF lv_c = `Y` OR lv_c = `M` OR lv_c = `D`.
         lv_fmt_clean = lv_fmt_clean && lv_c.
+        IF lv_group IS NOT INITIAL AND lv_group(1) <> lv_c.
+          INSERT lv_group INTO TABLE lt_fmt_groups.
+          CLEAR lv_group.
+        ENDIF.
+        lv_group = lv_group && lv_c.
+      ELSEIF lv_group IS NOT INITIAL.
+        INSERT lv_group INTO TABLE lt_fmt_groups.
+        CLEAR lv_group.
       ENDIF.
       lv_i = lv_i + 1.
     ENDWHILE.
+    IF lv_group IS NOT INITIAL.
+      INSERT lv_group INTO TABLE lt_fmt_groups.
+    ENDIF.
+
+    DATA(lv_year)  = ``.
+    DATA(lv_month) = ``.
+    DATA(lv_day)   = ``.
+
+    " a value written with separators is read by its parts, in the order
+    " the format names them: `5.3.2024` is the 5th of March, and a time
+    " behind the date (`5.3.2024 10:30`) is left out. Read digit by digit,
+    " the first value came out as an initial date and the second as the
+    " year 2410. A day or a month may have one digit, a year its full
+    " length; a part longer than the format allows is no date
+    IF lines( lt_val_groups ) > 1 AND lines( lt_val_groups ) >= lines( lt_fmt_groups ).
+      LOOP AT lt_fmt_groups REFERENCE INTO DATA(lr_fmt).
+        lv_index = lv_index + 1.
+        lv_group = lt_val_groups[ lv_index ].
+        DATA(lv_len) = strlen( lr_fmt->* ).
+        IF strlen( lv_group ) > lv_len OR ( lr_fmt->*(1) = `Y` AND strlen( lv_group ) < lv_len ).
+          RETURN.
+        ENDIF.
+        WHILE strlen( lv_group ) < lv_len.
+          lv_group = `0` && lv_group.
+        ENDWHILE.
+        " a letter the format names twice (`DD.MM.YYYY HH:MM`) counts once
+        CASE lr_fmt->*(1).
+          WHEN `Y`.
+            IF lv_year IS INITIAL.
+              lv_year = lv_group.
+            ENDIF.
+          WHEN `M`.
+            IF lv_month IS INITIAL.
+              lv_month = lv_group.
+            ENDIF.
+          WHEN `D`.
+            IF lv_day IS INITIAL.
+              lv_day = lv_group.
+            ENDIF.
+        ENDCASE.
+      ENDLOOP.
+      result = lv_year && lv_month && lv_day.
+      RETURN.
+    ENDIF.
 
     " fewer digits than the format asks for: no date, instead of reading
     " behind the end of the value
     IF strlen( lv_clean ) < strlen( lv_fmt_clean ).
       RETURN.
     ENDIF.
-
-    DATA(lv_year)  = ``.
-    DATA(lv_month) = ``.
-    DATA(lv_day)   = ``.
 
     DATA(lv_pos) = 0.
     lv_i = 0.
