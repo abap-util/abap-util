@@ -10048,7 +10048,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       DATA(fb1) = 'TR_APPEND_TO_COMM_OBJS_KEYS'.
       CALL FUNCTION fb1
         EXPORTING
-          wi_trkorr     = is_transport-transport
+          " the task: the keys belong to it, E071/E071K carry its number
+          wi_trkorr     = is_transport-task
           iv_dialog     = abap_false
         TABLES
           wt_e071       = <t_e071>
@@ -10300,7 +10301,13 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         ENDIF.
       CATCH cx_root ##NO_HANDLER.
     ENDTRY.
+    IF <table> IS NOT ASSIGNED.
+      RETURN.
+    ENDIF.
 
+    " the rows are TASKS (TRFUNCTION Q): TRKORR is the task, STRKORR the
+    " request it belongs to - the other way round, as it was, bus_tr_add
+    " wrote the keys under the request number
     LOOP AT <table> INTO <line>.
 
       UNASSIGN <value>.
@@ -10308,7 +10315,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       IF <value> IS NOT ASSIGNED.
         CONTINUE.
       ELSE.
-        ls_data-transport = <value>.
+        ls_data-task = <value>.
       ENDIF.
 
       UNASSIGN <value>.
@@ -10317,7 +10324,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       IF <value> IS NOT ASSIGNED.
         CONTINUE.
       ELSE.
-        ls_data-task = <value>.
+        ls_data-transport = <value>.
       ENDIF.
 
       UNASSIGN <value>.
@@ -10376,6 +10383,10 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       FIELD-SYMBOLS <value> TYPE any.
 
       _read_e070( CHANGING mt_data = mt_data ).
+      " no task - an empty dynamic WHERE would read every text of E07T
+      IF mt_data IS INITIAL.
+        RETURN.
+      ENDIF.
 
       DATA(table_name) = 'E07T'.
 
@@ -10395,12 +10406,13 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
           DATA(index) = 0.
 
+          " the description shown is the one of the request
           LOOP AT mt_data INTO DATA(line).
             index = index + 1.
             IF index = 1.
-              DATA(where) = |TRKORR EQ '{ line-task }'|.
+              DATA(where) = |TRKORR EQ { filter_sql_quote( line-transport ) }|.
             ELSE.
-              where = |{ where } OR TRKORR EQ '{ line-task }'|.
+              where = |{ where } OR TRKORR EQ { filter_sql_quote( line-transport ) }|.
             ENDIF.
             where = |( { where } )|.
           ENDLOOP.
@@ -10418,30 +10430,36 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         CATCH cx_root ##NO_HANDLER.
       ENDTRY.
 
+      IF <table> IS NOT ASSIGNED.
+        RETURN.
+      ENDIF.
+
+      " every task of a request gets its text - the logon language wins,
+      " another language only fills a text that is still empty
       LOOP AT <table> INTO <line>.
 
         UNASSIGN <value>.
         ASSIGN COMPONENT 'TRKORR' OF STRUCTURE <line> TO <value>.
         IF <value> IS NOT ASSIGNED.
           CONTINUE.
-        ELSE.
-
-          ASSIGN mt_data[ task = <value> ] TO FIELD-SYMBOL(<ls_data>).
-          IF sy-subrc = 0.
-
-            UNASSIGN <value>.
-            ASSIGN COMPONENT 'AS4TEXT' OF STRUCTURE <line> TO <value>.
-            IF <value> IS NOT ASSIGNED.
-              CONTINUE.
-            ELSE.
-
-              <ls_data>-short_description = <value>.
-
-            ENDIF.
-
-          ENDIF.
-
         ENDIF.
+        DATA(lv_trkorr) = CONV sxco_transport( <value> ).
+
+        UNASSIGN <value>.
+        ASSIGN COMPONENT 'LANGU' OF STRUCTURE <line> TO <value>.
+        DATA(lv_logon_langu) = xsdbool( <value> IS ASSIGNED AND <value> = sy-langu ).
+
+        UNASSIGN <value>.
+        ASSIGN COMPONENT 'AS4TEXT' OF STRUCTURE <line> TO <value>.
+        IF <value> IS NOT ASSIGNED.
+          CONTINUE.
+        ENDIF.
+
+        LOOP AT mt_data ASSIGNING FIELD-SYMBOL(<ls_data>) WHERE transport = lv_trkorr.
+          IF <ls_data>-short_description IS INITIAL OR lv_logon_langu = abap_true.
+            <ls_data>-short_description = <value>.
+          ENDIF.
+        ENDLOOP.
 
       ENDLOOP.
 
