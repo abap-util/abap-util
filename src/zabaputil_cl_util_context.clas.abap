@@ -4682,6 +4682,12 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           EXIT.
         ENDIF.
         lv_index = lv_index + 1.
+        " a table, a structure or a reference has no text - in a string
+        " template it is a runtime error, so its cell stays empty
+        IF cl_abap_typedescr=>describe_by_data( <field> )->kind <> cl_abap_typedescr=>kind_elem.
+          INSERT `` INTO TABLE lt_cells.
+          CONTINUE.
+        ENDIF.
         " the value as it is - a separator, a quote or a line break inside
         " it is quoted, not replaced
         INSERT csv_escape_cell( |{ <field> }| ) INTO TABLE lt_cells.

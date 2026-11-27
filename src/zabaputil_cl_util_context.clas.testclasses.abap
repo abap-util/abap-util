@@ -1523,6 +1523,8 @@ CLASS ltcl_itab_ops DEFINITION FINAL
 
     METHODS csv_roundtrip                  FOR TESTING.
 
+    METHODS csv_deep_column                FOR TESTING.
+
     METHODS json_roundtrip                 FOR TESTING.
 
 ENDCLASS.
@@ -1714,6 +1716,17 @@ CLASS ltcl_itab_ops IMPLEMENTATION.
     " CSV should contain header and data
     cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>c_contains( val = lv_csv sub = `COL1` ) ).
     cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>c_contains( val = lv_csv sub = `A` ) ).
+  ENDMETHOD.
+
+  METHOD csv_deep_column.
+    " a table inside a row has no text - its cell stays empty instead of
+    " ending the call
+    TYPES: BEGIN OF ty, col1 TYPE string, sub TYPE string_table, col2 TYPE string, END OF ty.
+    DATA lt_tab TYPE STANDARD TABLE OF ty WITH EMPTY KEY.
+    lt_tab = VALUE #( ( col1 = `A` sub = VALUE #( ( `x` ) ) col2 = `B` ) ).
+
+    DATA(lv_csv) = zabaputil_cl_util_context=>itab_get_csv_by_itab( lt_tab ).
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>c_contains( val = lv_csv sub = `A;;B` ) ).
   ENDMETHOD.
 
   METHOD json_roundtrip.
