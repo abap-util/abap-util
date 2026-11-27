@@ -2785,6 +2785,10 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE abap_bool.
 
+    "! The text of a message with its variables. langu: the language of
+    "! the text on-premise (read from T100); on ABAP Cloud the text is the
+    "! one of the logon language whatever langu says. A message that has
+    "! no text comes back as `ID NO: v1 v2 v3 v4`.
     CLASS-METHODS text_get
       IMPORTING
         msgid         TYPE clike
@@ -13188,8 +13192,6 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD bal_std_map_msg.
 
-    DATA lv_fm   TYPE string.
-    DATA lv_text TYPE c LENGTH 200.
     FIELD-SYMBOLS <comp> TYPE any.
 
     ASSIGN COMPONENT `MSGTY` OF STRUCTURE msg TO <comp>.
@@ -13225,22 +13227,18 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       result-timestampl = <comp>.
     ENDIF.
 
-    TRY.
-        lv_fm = `MESSAGE_TEXT_BUILD`.
-        CALL FUNCTION lv_fm
-          EXPORTING
-            msgid               = result-id
-            msgnr               = result-no
-            msgv1               = result-v1
-            msgv2               = result-v2
-            msgv3               = result-v3
-            msgv4               = result-v4
-          IMPORTING
-            message_text_output = lv_text.
-        result-text = lv_text.
-      CATCH cx_root.
-        result-text = result-v1.
-    ENDTRY.
+    " text_get types the variables as the message needs them - the
+    " module got the strings of ty_s_msg
+    IF result-id IS INITIAL.
+      result-text = result-v1.
+    ELSE.
+      result-text = text_get( msgid = result-id
+                              msgno = result-no
+                              v1    = result-v1
+                              v2    = result-v2
+                              v3    = result-v3
+                              v4    = result-v4 ).
+    ENDIF.
 
   ENDMETHOD.
 
@@ -13602,7 +13600,8 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA lv_msgv2 TYPE c LENGTH 50.
     DATA lv_msgv3 TYPE c LENGTH 50.
     DATA lv_msgv4 TYPE c LENGTH 50.
-    DATA lv_text  TYPE c LENGTH 200.
+    DATA lv_langu TYPE c LENGTH 1.
+    DATA lv_text  TYPE c LENGTH 73.
 
     lv_msgid = msgid.
     lv_msgno = msgno.
@@ -13610,23 +13609,52 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     lv_msgv2 = v2.
     lv_msgv3 = v3.
     lv_msgv4 = v4.
+    lv_langu = langu.
 
+    " another language than the logon one: the text from T100, the
+    " variables put in as MESSAGE does (&1..&4, or & in their order)
+    IF lv_langu IS NOT INITIAL AND lv_langu <> sy-langu AND check_abap_cloud( ) = abap_false.
+      TRY.
+          DATA(lv_tab) = `T100`.
+          SELECT SINGLE text FROM (lv_tab)
+            WHERE sprsl = @lv_langu AND arbgb = @lv_msgid AND msgnr = @lv_msgno
+            INTO @lv_text.
+          IF sy-subrc = 0.
+            result = lv_text.
+            DATA(lt_var) = VALUE string_table( ( condense( lv_msgv1 ) ) ( condense( lv_msgv2 ) )
+                                               ( condense( lv_msgv3 ) ) ( condense( lv_msgv4 ) ) ).
+            IF result CS `&1` OR result CS `&2` OR result CS `&3` OR result CS `&4`.
+              LOOP AT lt_var INTO DATA(lv_var).
+                result = replace( val  = result
+                                  sub  = |&{ sy-tabix }|
+                                  with = lv_var
+                                  occ  = 0 ).
+              ENDLOOP.
+            ELSE.
+              LOOP AT lt_var INTO lv_var.
+                result = replace( val  = result
+                                  sub  = `&`
+                                  with = lv_var ).
+              ENDLOOP.
+            ENDIF.
+            RETURN.
+          ENDIF.
+        CATCH cx_root ##NO_HANDLER.
+      ENDTRY.
+    ENDIF.
+
+    " MESSAGE ... INTO builds the text on every release and on ABAP Cloud,
+    " where MESSAGE_TEXT_BUILD is not released
     TRY.
-        DATA(lv_fm) = `MESSAGE_TEXT_BUILD`.
-        CALL FUNCTION lv_fm
-          EXPORTING
-            msgid               = lv_msgid
-            msgnr               = lv_msgno
-            msgv1               = lv_msgv1
-            msgv2               = lv_msgv2
-            msgv3               = lv_msgv3
-            msgv4               = lv_msgv4
-          IMPORTING
-            message_text_output = lv_text.
-        result = lv_text.
-      CATCH cx_root.
-        result = |{ lv_msgid } { lv_msgno }: { lv_msgv1 } { lv_msgv2 } { lv_msgv3 } { lv_msgv4 }|.
+        MESSAGE ID lv_msgid TYPE `I` NUMBER lv_msgno
+                WITH lv_msgv1 lv_msgv2 lv_msgv3 lv_msgv4
+                INTO result.
+      CATCH cx_root ##NO_HANDLER.
     ENDTRY.
+
+    IF result IS INITIAL.
+      result = |{ lv_msgid } { lv_msgno }: { lv_msgv1 } { lv_msgv2 } { lv_msgv3 } { lv_msgv4 }|.
+    ENDIF.
 
   ENDMETHOD.
 
