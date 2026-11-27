@@ -3245,6 +3245,11 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE timestampl.
 
+    "! Name, e-mail, language, time zone and formats of a user - initial
+    "! uname is the current one. On-premise every field is the given
+    "! user's (USR01, USR02, USER_ADDR, ADR6). ABAP Cloud only answers for
+    "! the current user: another uname raises zabaputil_cx_util_error -
+    "! the fields were the caller's under the other user's name.
     CLASS-METHODS context_get_user_info
       IMPORTING
         uname         TYPE clike OPTIONAL
@@ -16252,11 +16257,20 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
                                   THEN to_upper( c_trim( uname ) )
                                   ELSE CONV string( sy-uname ) ).
 
-    result-uname    = lv_uname.
-    result-langu    = sy-langu.
-    result-timezone = time_get_user_timezone( ).
+    result-uname = lv_uname.
+    DATA(lv_current) = xsdbool( lv_uname = sy-uname ).
+    IF lv_current = abap_true.
+      result-langu    = sy-langu.
+      result-timezone = time_get_user_timezone( ).
+    ENDIF.
 
     IF check_abap_cloud( ) = abap_true.
+
+      IF lv_current = abap_false.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |CONTEXT_GET_USER_INFO: on ABAP Cloud only for the current user, not { lv_uname }|.
+      ENDIF.
 
       lv_class = `CL_ABAP_CONTEXT_INFO`.
       TRY.
@@ -16292,6 +16306,21 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           SELECT SINGLE dcpfm FROM (lv_tab) WHERE bname = @lv_uname INTO @result-decimal_format.
         CATCH cx_root ##NO_HANDLER.
       ENDTRY.
+
+      " another user's language and time zone, not the caller's
+      IF lv_current = abap_false.
+        TRY.
+            DATA lv_langu TYPE c LENGTH 1.
+            DATA lv_tzone TYPE c LENGTH 6.
+            lv_tab = `USR01`.
+            SELECT SINGLE langu FROM (lv_tab) WHERE bname = @lv_uname INTO @lv_langu.
+            result-langu = lv_langu.
+            lv_tab = `USR02`.
+            SELECT SINGLE tzone FROM (lv_tab) WHERE bname = @lv_uname INTO @lv_tzone.
+            result-timezone = lv_tzone.
+          CATCH cx_root ##NO_HANDLER.
+        ENDTRY.
+      ENDIF.
 
       TRY.
           DATA lv_persnumber TYPE c LENGTH 10.
