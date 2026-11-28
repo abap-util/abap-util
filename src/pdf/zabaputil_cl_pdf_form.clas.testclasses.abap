@@ -109,6 +109,12 @@ CLASS ltcl_form DEFINITION FINAL
     METHODS absolute_table_pages    FOR TESTING.
     METHODS absolute_pushed_over    FOR TESTING.
     METHODS absolute_every_page     FOR TESTING.
+    METHODS to_absolute_places      FOR TESTING.
+    METHODS to_absolute_with_data   FOR TESTING.
+    METHODS to_absolute_unchanged   FOR TESTING.
+    METHODS barcode_fixed           FOR TESTING.
+    METHODS barcode_in_the_flow     FOR TESTING.
+    METHODS barcode_absolute        FOR TESTING.
 
     "! the table of the test data with as many rows as asked for
     METHODS items
@@ -496,8 +502,8 @@ CLASS ltcl_form IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD unknown_type_is_skipped.
-    ms_form-t_element = VALUE #( ( type = `BARCODE` fixed = abap_false text = `x` )
-                                 ( type = `BARCODE` fixed = abap_true  text = `x` )
+    ms_form-t_element = VALUE #( ( type = `CHART` fixed = abap_false text = `x` )
+                                 ( type = `CHART` fixed = abap_true  text = `x` )
                                  ( type = ``        fixed = abap_false text = `x` ) ).
     DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( ms_form ).
     cl_abap_unit_assert=>assert_equals( exp = 1 act = lo_pdf->page_count( ) ).
@@ -855,6 +861,133 @@ CLASS ltcl_form IMPLEMENTATION.
                                                        page = sy-index
                                                        text = `Letterhead` ) ).
     ENDDO.
+  ENDMETHOD.
+
+  METHOD to_absolute_places.
+    " the flow laid out once more: each element where it began, as wide as
+    " the margins leave, as high as it was; a space is the distance between
+    " two, a page break begins the page again at its top margin
+    ms_form-t_element = VALUE #( ( type = zabaputil_cl_pdf_form=>cs_type-text       name = `a` text = `a` )
+                                 ( type = zabaputil_cl_pdf_form=>cs_type-space      h = 30 )
+                                 ( type = zabaputil_cl_pdf_form=>cs_type-text       name = `b` text = `b` align = `R` )
+                                 ( type = zabaputil_cl_pdf_form=>cs_type-line       name = `rule` )
+                                 ( type = zabaputil_cl_pdf_form=>cs_type-rect       name = `box` x = 5 y = 6 w = 7 h = 8 )
+                                 ( type = zabaputil_cl_pdf_form=>cs_type-page_break )
+                                 ( type = zabaputil_cl_pdf_form=>cs_type-text       name = `c` text = `c` ) ).
+    DATA(ls_absolute) = zabaputil_cl_pdf_form=>to_absolute( ms_form ).
+
+    cl_abap_unit_assert=>assert_true( ls_absolute-absolute ).
+    cl_abap_unit_assert=>assert_equals( exp = 5
+                                        act = lines( ls_absolute-t_element ) ).
+    DATA(ls_a) = ls_absolute-t_element[ 1 ].
+    DATA(ls_b) = ls_absolute-t_element[ 2 ].
+    DATA(ls_rule) = ls_absolute-t_element[ 3 ].
+    DATA(ls_box) = ls_absolute-t_element[ 4 ].
+    DATA(ls_c) = ls_absolute-t_element[ 5 ].
+
+    " one line of 10 points is 12.5 points high: 4.41 mm
+    cl_abap_unit_assert=>assert_equals( exp = `a 20.00 20.00 170.00 4.41`
+                                        act = |{ ls_a-name } { ls_a-x } { ls_a-y } { ls_a-w } { ls_a-h }| ).
+    cl_abap_unit_assert=>assert_equals( exp = `b 20.00 54.41 170.00 4.41 R`
+                                        act = |{ ls_b-name } { ls_b-x } { ls_b-y } { ls_b-w } { ls_b-h } { ls_b-align }| ).
+    cl_abap_unit_assert=>assert_equals( exp = abap_false
+                                        act = ls_b-fixed ).
+    " a line of no height across the margins, below b
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_rule-y > ls_b-y + ls_b-h AND ls_rule-y < ls_b-y + ls_b-h + 5 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `rule 20.00 170.00 0.00`
+                                        act = |{ ls_rule-name } { ls_rule-x } { ls_rule-w } { ls_rule-h }| ).
+    " what had a position keeps it
+    cl_abap_unit_assert=>assert_equals( exp = `box 5.00 6.00 7.00 8.00`
+                                        act = |{ ls_box-name } { ls_box-x } { ls_box-y } { ls_box-w } { ls_box-h }| ).
+    " c is the first line of page 2
+    cl_abap_unit_assert=>assert_equals( exp = `c 20.00 20.00`
+                                        act = |{ ls_c-name } { ls_c-x } { ls_c-y }| ).
+  ENDMETHOD.
+
+  METHOD to_absolute_with_data.
+    " a table is as high as its rows with the data, the text below follows
+    ms_form-t_element = VALUE #(
+        ( type     = zabaputil_cl_pdf_form=>cs_type-table
+          name     = `items`
+          source   = `t_items`
+          t_column = VALUE #( ( name = `pos`  title = `Pos`  width = 20 align = `R` )
+                              ( name = `text` title = `Item` width = 0  align = `L` ) ) )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text name = `below` text = `Total {NUMBER}` ) ).
+
+    DATA(ls_one) = zabaputil_cl_pdf_form=>to_absolute( val  = ms_form
+                                                       data = ms_data ).
+    DATA(ls_more) = ms_data.
+    INSERT LINES OF ms_data-t_items INTO TABLE ls_more-t_items.
+    DATA(ls_two) = zabaputil_cl_pdf_form=>to_absolute( val  = ms_form
+                                                       data = ls_more ).
+
+    DATA(ls_table) = ls_one-t_element[ 1 ].
+    DATA(ls_below) = ls_one-t_element[ 2 ].
+    cl_abap_unit_assert=>assert_equals( exp = `items T_ITEMS`
+                                        act = |{ ls_table-name } { to_upper( ls_table-source ) }| ).
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = lines( ls_table-t_column ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_table-h > 0 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = ls_table-y + ls_table-h
+                                        act = ls_below-y ).
+    " twice the rows: a higher table
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_two-t_element[ 1 ]-h > ls_table-h ) ).
+  ENDMETHOD.
+
+  METHOD to_absolute_unchanged.
+    ms_form-absolute = abap_true.
+    ms_form-t_element = VALUE #( ( type = zabaputil_cl_pdf_form=>cs_type-text x = 10 y = 30 text = `Here` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = ms_form
+                                        act = zabaputil_cl_pdf_form=>to_absolute( ms_form ) ).
+  ENDMETHOD.
+
+  METHOD barcode_fixed.
+    " the bars of the resolved text, 40 mm wide, and the text below them
+    ms_form-t_element = VALUE #( ( type  = zabaputil_cl_pdf_form=>cs_type-barcode
+                                   fixed = abap_true
+                                   x     = 20
+                                   y     = 30
+                                   w     = 40
+                                   h     = 20
+                                   size  = 8
+                                   text  = `{NUMBER}` ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                 data = ms_data ).
+    DATA(lv_content) = lo_pdf->page( 1 )->content( ).
+    cl_abap_unit_assert=>assert_equals( exp = 16
+                                        act = count( val = lv_content
+                                                     sub = ` re f` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = shown( pdf  = lo_pdf
+                                                     page = 1
+                                                     text = `4711` ) ).
+    " the first bar at the left edge: two of 57 modules of 40 mm
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS `56.693 ` ) ).
+  ENDMETHOD.
+
+  METHOD barcode_in_the_flow.
+    " 0.33 mm a module without a width, 15 mm high without a height: the
+    " text behind it starts 15 mm lower
+    ms_form-t_element = VALUE #( ( type = zabaputil_cl_pdf_form=>cs_type-barcode text = `4711` )
+                                 ( type = zabaputil_cl_pdf_form=>cs_type-text    name = `after` text = `after` ) ).
+    DATA(ls_absolute) = zabaputil_cl_pdf_form=>to_absolute( ms_form ).
+    DATA(ls_bar) = ls_absolute-t_element[ 1 ].
+    cl_abap_unit_assert=>assert_equals( exp = `20.00 20.00 18.81 15.00`
+                                        act = |{ ls_bar-x } { ls_bar-y } { ls_bar-w } { ls_bar-h }| ).
+    cl_abap_unit_assert=>assert_equals( exp = `35.00`
+                                        act = |{ ls_absolute-t_element[ 2 ]-y }| ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = 16
+        act = count( val = zabaputil_cl_pdf_form=>build( ms_form )->page( 1 )->content( )
+                     sub = ` re f` ) ).
+  ENDMETHOD.
+
+  METHOD barcode_absolute.
+    ms_form-absolute = abap_true.
+    ms_form-t_element = VALUE #( ( type = zabaputil_cl_pdf_form=>cs_type-barcode x = 100 y = 50 h = 10 text = `(00)340123450000000018` ) ).
+    DATA(lv_content) = zabaputil_cl_pdf_form=>build( ms_form )->page( 1 )->content( ).
+    cl_abap_unit_assert=>assert_true( xsdbool( count( val = lv_content
+                                                      sub = ` re f` ) > 20 ) ).
   ENDMETHOD.
 
   METHOD sample_by_type.

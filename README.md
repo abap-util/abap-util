@@ -652,7 +652,8 @@ DATA(li_sample) = zabaputil_cl_pdf_form=>data_sample( `ZABAPUTIL_CL_PDF_DATA_DEM
 | `zabaputil_cl_pdf_font_std` | the standard fonts (Helvetica, Times, Courier) with their metrics - Western European text, nothing embedded |
 | `zabaputil_cl_pdf_font_ttf` | an embedded TrueType font (`lo_pdf->font_ttf( lv_ttf )`) - any script the font has glyphs for |
 | `zabaputil_cl_pdf_image` | JPEG and PNG images, PNG with transparency |
-| `zabaputil_cl_pdf_form` | a form as data - elements in the flow or at fixed positions, `{NAME}` placeholders for the components of the data - and its printout; an absolute form (`ty_s_form-absolute`) places every element at its x, y, w, h, as a designer with a canvas draws it, and moves what stands below a table to where the table ends |
+| `zabaputil_cl_pdf_barcode` | Code 128 - the barcode of delivery notes, pick lists and bin labels - and GS1-128 for data in the notation `(00)340123450000000018` (an SSCC); drawn as bars on a page |
+| `zabaputil_cl_pdf_form` | a form as data - elements in the flow or at fixed positions, `{NAME}` placeholders for the components of the data - and its printout; an absolute form (`ty_s_form-absolute`) places every element at its x, y, w, h, as a designer with a canvas draws it, and moves what stands below a table to where the table ends; `to_absolute( )` turns a flow form into an absolute one with every element where the flow put it; an element `BARCODE` prints a Code 128 symbol of its text |
 | `zabaputil_if_pdf_data`, `zabaputil_cl_pdf_data_demo` | a form as one class - its public attributes are the data, `get( )` returns the form as text - and one by example |
 | `zabaputil_cl_pdf_writer` | the file format: objects, streams, cross-reference table |
 

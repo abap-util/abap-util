@@ -53,6 +53,9 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         rect       TYPE string VALUE `RECT`,
         "! a JPEG or PNG file
         image      TYPE string VALUE `IMAGE`,
+        "! a Code 128 barcode of the text - GS1-128 for data in the notation
+        "! (00)340123450000000018 - and the text below it when size is set
+        barcode    TYPE string VALUE `BARCODE`,
         "! empty space of the height h (flow)
         space      TYPE string VALUE `SPACE`,
         "! the flow goes on on a new page
@@ -94,7 +97,8 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         text       TYPE string,
         "! a standard font: Helvetica, Times-Roman, Courier and their cuts
         font       TYPE string,
-        "! the font size in points; the width of a line or outline in points
+        "! the font size in points; the width of a line or outline in points;
+        "! of a barcode the size of the text below the bars, 0 for none
         size       TYPE ty_length,
         "! the colour of the text, the line or the outline, RRGGBB
         color      TYPE string,
@@ -161,6 +165,27 @@ CLASS zabaputil_cl_pdf_form DEFINITION
 
     "! An empty form: A4 portrait, 20 mm margins
     CLASS-METHODS new_form
+      RETURNING
+        VALUE(result) TYPE ty_s_form.
+
+    "! The same form in the absolute layout: every element of the flow at the
+    "! place and of the size the flow gives it, as an editor shows a form that
+    "! is switched over to a canvas. A space and a page break are gone - their
+    "! place is the distance between the others -, a fixed element keeps its
+    "! position, and a form that is absolute already comes back as it is.
+    "!
+    "! The flow is laid out as build( ) lays it out. What the flow puts on a
+    "! later page keeps the place it has there - an absolute form has one page
+    "! to draw on, so it lands on the elements of the first one; a table that
+    "! goes on over a page break is as high as its part on its first page.
+    "! @parameter val  | the form
+    "! @parameter data | the data the flow is laid out with - a text is as high
+    "!                   as its lines with these values are. Without it, with
+    "!                   the placeholders
+    CLASS-METHODS to_absolute
+      IMPORTING
+        val           TYPE ty_s_form
+        data          TYPE any OPTIONAL
       RETURNING
         VALUE(result) TYPE ty_s_form.
 
@@ -270,6 +295,11 @@ CLASS zabaputil_cl_pdf_form DEFINITION
     CONSTANTS c_font  TYPE string VALUE `Helvetica`.
     CONSTANTS c_color TYPE string VALUE `000000`.
     CONSTANTS c_size  TYPE f VALUE 10.
+    "! the module of a barcode without a width, in mm: 0.33, what a
+    "! scanner reads from arm's length
+    CONSTANTS c_module TYPE f VALUE '0.33'.
+    "! the height of a barcode without one, in mm
+    CONSTANTS c_bar_height TYPE f VALUE 15.
 
     "! The value of a component of the data as text
     "! @parameter path  | NAME, or HEADER-NAME for a component of a component
@@ -436,6 +466,26 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         data      TYPE any
         with_data TYPE abap_bool.
 
+    "! A barcode at x, y: its height comes back
+    CLASS-METHODS draw_barcode
+      IMPORTING
+        pdf           TYPE REF TO zabaputil_cl_pdf
+        page          TYPE REF TO zabaputil_cl_pdf_page
+        element       TYPE ty_s_element
+        text          TYPE string
+        x             TYPE numeric
+        y             TYPE numeric
+      RETURNING
+        VALUE(result) TYPE f.
+
+    "! The width of a barcode: the element's, or 0.33 mm a module
+    CLASS-METHODS barcode_width
+      IMPORTING
+        element       TYPE ty_s_element
+        text          TYPE string
+      RETURNING
+        VALUE(result) TYPE f.
+
     CLASS-METHODS fixed_text
       IMPORTING
         pdf       TYPE REF TO zabaputil_cl_pdf
@@ -580,6 +630,117 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
         ENDIF.
         lv_number = lv_number + 1.
       ENDWHILE.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD to_absolute.
+
+    DATA lv_with_data TYPE abap_bool.
+    DATA lv_format    TYPE string.
+    DATA ls_element   TYPE ty_s_element.
+    DATA lv_page      TYPE i.
+    DATA lv_top       TYPE f.
+    DATA lv_bottom    TYPE f.
+    DATA lv_width     TYPE f.
+    DATA lv_height    TYPE f.
+
+    FIELD-SYMBOLS <data> TYPE any.
+
+    result = val.
+    IF val-absolute = abap_true.
+      RETURN.
+    ENDIF.
+    result-absolute = abap_true.
+    CLEAR result-t_element.
+
+    lv_with_data = xsdbool( data IS SUPPLIED ).
+    IF lv_with_data = abap_true.
+      ASSIGN data TO <data>.
+    ELSE.
+      ASSIGN val-name TO <data>.
+    ENDIF.
+
+    " the document and the layout of build( ): the same page, the same
+    " margins and the same font to start with
+    lv_format = val-format.
+    IF lv_format IS INITIAL.
+      lv_format = `A4`.
+    ENDIF.
+    DATA(lo_pdf) = zabaputil_cl_pdf=>create( unit        = `mm`
+                                             format      = lv_format
+                                             orientation = val-orientation ).
+    DATA(lo_layout) = NEW zabaputil_cl_pdf_layout( lo_pdf ).
+    lo_layout->set_margins( left   = val-margin_left
+                            top    = val-margin_top
+                            right  = val-margin_right
+                            bottom = val-margin_bottom ).
+    lo_layout->set_font( font = lo_pdf->font( c_font )
+                         size = c_size ).
+    DATA(lo_page) = lo_layout->page( ).
+    lv_width = lo_page->width( ) - val-margin_left - val-margin_right.
+    lv_height = lo_page->height( ).
+
+    LOOP AT val-t_element ASSIGNING FIELD-SYMBOL(<element>).
+      ls_element = <element>.
+      ls_element-fixed = abap_false.
+
+      " what stands at a position already stays there
+      IF <element>-fixed = abap_true OR <element>-type = cs_type-rect.
+        INSERT ls_element INTO TABLE result-t_element.
+        CONTINUE.
+      ENDIF.
+
+      lv_page = lo_pdf->page_count( ).
+      lv_top = lo_layout->y( ).
+      flow_element( pdf       = lo_pdf
+                    layout    = lo_layout
+                    element   = <element>
+                    left      = val-margin_left
+                    data      = <data>
+                    with_data = lv_with_data ).
+      lv_bottom = lo_layout->y( ).
+
+      IF <element>-type = cs_type-space OR <element>-type = cs_type-page_break.
+        CONTINUE.
+      ENDIF.
+
+      IF lo_pdf->page_count( ) > lv_page.
+        IF <element>-type = cs_type-table.
+          " went on over the page break: as high as its part on the page
+          " it began on
+          lv_bottom = lv_height - val-margin_bottom.
+        ELSE.
+          " did not fit and began the next page
+          lv_top = val-margin_top.
+        ENDIF.
+      ENDIF.
+
+      ls_element-x = val-margin_left.
+      ls_element-y = lv_top.
+      CASE <element>-type.
+        WHEN cs_type-line.
+          " the rule of the flow lies in the middle of the space it takes
+          ls_element-y = ( lv_top + lv_bottom ) / 2.
+          ls_element-w = lv_width.
+          ls_element-h = 0.
+        WHEN cs_type-image.
+          ls_element-h = lv_bottom - lv_top.
+          IF ls_element-w <= 0.
+            ls_element-w = lv_width.
+          ENDIF.
+        WHEN cs_type-barcode.
+          ls_element-h = lv_bottom - lv_top.
+          ls_element-w = barcode_width( element = <element>
+                                        text    = COND #( WHEN lv_with_data = abap_true
+                                                          THEN resolve( val  = <element>-text
+                                                                        data = <data> )
+                                                          ELSE <element>-text ) ).
+        WHEN OTHERS.
+          ls_element-w = lv_width.
+          ls_element-h = lv_bottom - lv_top.
+      ENDCASE.
+      INSERT ls_element INTO TABLE result-t_element.
     ENDLOOP.
 
   ENDMETHOD.
@@ -1388,7 +1549,7 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
         CONTINUE.
       ENDIF.
       CASE ls_element-type.
-        WHEN cs_type-text OR cs_type-table OR cs_type-line OR cs_type-rect OR cs_type-image.
+        WHEN cs_type-text OR cs_type-table OR cs_type-line OR cs_type-rect OR cs_type-image OR cs_type-barcode.
           INSERT ls_element INTO TABLE lt_element.
       ENDCASE.
     ENDLOOP.
@@ -1501,6 +1662,21 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
       WHEN cs_type-page_break.
         layout->page_break( ).
+
+      WHEN cs_type-barcode.
+        " at the left margin, where the flow is, as an image is
+        lv_text = element-text.
+        IF with_data = abap_true.
+          lv_text = resolve( val  = lv_text
+                             data = data ).
+        ENDIF.
+        lv_height = draw_barcode( pdf     = pdf
+                                  page    = layout->page( )
+                                  element = element
+                                  text    = lv_text
+                                  x       = left
+                                  y       = layout->y( ) ).
+        layout->set_y( layout->y( ) + lv_height ).
 
       WHEN cs_type-image.
         DATA(lo_image) = element_image( pdf       = pdf
@@ -1637,6 +1813,19 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
                       style = `DF` ).
         ENDIF.
 
+      WHEN cs_type-barcode.
+        lv_text = element-text.
+        IF with_data = abap_true.
+          lv_text = resolve( val  = lv_text
+                             data = data ).
+        ENDIF.
+        draw_barcode( pdf     = pdf
+                      page    = page
+                      element = element
+                      text    = lv_text
+                      x       = element-x
+                      y       = element-y ).
+
       WHEN cs_type-image.
         DATA(lo_image) = element_image( pdf       = pdf
                                         element   = element
@@ -1651,6 +1840,60 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
         ENDIF.
 
     ENDCASE.
+
+  ENDMETHOD.
+
+  METHOD draw_barcode.
+
+    DATA lv_bars TYPE f.
+    DATA lv_text TYPE f.
+
+    DATA(lv_modules) = zabaputil_cl_pdf_barcode=>code128( text ).
+    DATA(lv_width) = barcode_width( element = element
+                                    text    = text ).
+    result = element-h.
+    IF result <= 0.
+      result = c_bar_height.
+    ENDIF.
+
+    " the text below the bars takes a line of its size from the height
+    lv_bars = result.
+    IF element-size > 0.
+      lv_text = element-size * 5 / 4 / pdf->scale( ).
+      lv_bars = result - lv_text.
+      IF lv_bars < result / 2.
+        lv_bars = result / 2.
+      ENDIF.
+    ENDIF.
+
+    page->set_fill_color( element_color( element ) ).
+    zabaputil_cl_pdf_barcode=>draw( page    = page
+                                    modules = lv_modules
+                                    x       = x
+                                    y       = y
+                                    w       = lv_width
+                                    h       = lv_bars ).
+
+    IF element-size > 0.
+      DATA(lo_font) = element_font( pdf     = pdf
+                                    element = element ).
+      page->set_font( font = lo_font
+                      size = element-size ).
+      page->set_text_color( element_color( element ) ).
+      page->text( x     = x + lv_width / 2
+                  y     = y + lv_bars + lo_font->ascent( element-size ) / pdf->scale( )
+                  val   = text
+                  align = `C` ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD barcode_width.
+
+    result = element-w.
+    IF result <= 0.
+      result = strlen( zabaputil_cl_pdf_barcode=>code128( text ) ) * c_module.
+    ENDIF.
 
   ENDMETHOD.
 
