@@ -94,8 +94,8 @@ src/
 ├── zabaputil_cl_util_xml.clas.abap       # Fluent XML builder
 ├── zabaputil_cx_util_error.clas.abap     # THE exception (no-check): text chain, full diagnostic report
 ├── 00/
-│   ├── 01/                               # ajson mirror — DO NOT MODIFY (synced from upstream)
-│   └── 02/                               # S-RTTI mirror — DO NOT MODIFY (synced from upstream)
+│   ├── 01/                               # ajson — DO NOT MODIFY (copied from abap-util/mirror-ajson)
+│   └── 02/                               # S-RTTI — DO NOT MODIFY (copied from abap-util/mirror-srtti)
 └── pdf/                                  # PDF files in plain ABAP (see "The PDF classes")
 ```
 
@@ -155,7 +155,7 @@ A consumer that vendors a class of this catalog without a manifest is compared b
 
 ## Rules for AI Assistants
 
-1. **Do not modify `src/00/01/` (ajson) and `src/00/02/` (S-RTTI)** — mirrored from external projects.
+1. **Do not modify `src/00/01/` (ajson) and `src/00/02/` (S-RTTI)** — copied by `vendor-mirror.yaml` from this organization's mirror repositories ([mirror-ajson](https://github.com/abap-util/mirror-ajson), [mirror-srtti](https://github.com/abap-util/mirror-srtti)), which rename the upstream projects to `zabaputil_` and apply their local patches. A change belongs there (upstream, or the mirror's `.github/scripts/patch.mjs`); abap2UI5 vendors from the same two mirrors and renames on its side.
 2. **Never break the master-catalog contract** (see above): this repository must remain the superset of all utility methods across all consumers — for *every* vendored class, not only the context class. Methods added downstream are merged back here by the periodic AI sync, and unit tests live here.
 3. **Always run `npx abaplint`** before considering changes complete.
 4. **Multi-environment compatibility** — code must work on NW 7.02, Standard ABAP, and ABAP Cloud. No direct use of on-premise-only or cloud-only APIs without a dynamic-call branch.

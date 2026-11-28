@@ -61,7 +61,7 @@ CLASS ltcl_test_mappers IMPLEMENTATION.
     li_mapping = zabaputil_cl_ajson_mapping=>create_camel_case( ).
 
     lo_ajson = zabaputil_cl_ajson=>parse( iv_json = '{"FieldData":"field_value"}'
-                                      ii_custom_mapping = li_mapping ).
+                                          ii_custom_mapping = li_mapping ).
 
     lo_ajson->to_abap( IMPORTING ev_container = ls_result ).
 
@@ -390,7 +390,7 @@ CLASS ltcl_fields IMPLEMENTATION.
 
     lo_ajson =
         zabaputil_cl_ajson=>parse( iv_json = '{"field":"value","json.field":"field_value"}'
-                               ii_custom_mapping = li_mapping ).
+                                   ii_custom_mapping = li_mapping ).
 
     lo_ajson->to_abap( IMPORTING ev_container = ls_result ).
 

@@ -1,0 +1,61 @@
+name: vendor-mirror
+
+# Refreshes the vendored ajson (src/00/01) and S-RTTI (src/00/02) from the
+# two mirror repositories of this organization and opens a pull request with
+# the diff - one per mirror, none when nothing changed.
+#
+#   abap-util/mirror-ajson   sbcgua/ajson renamed to zabaputil_, plus patches
+#   abap-util/mirror-srtti   sandraros/S-RTTI renamed to zabaputil_, plus patches
+#
+# The mirrors already carry this repository's prefix, so the copy is taken as
+# it is. Every change to the code belongs in the mirror (its upstream, or its
+# .github/scripts/patch.mjs) - a hand edit here is gone with the next run.
+# abap2UI5 vendors from the same two mirrors and renames on its side.
+
+on:
+  schedule:
+    - cron: '41 5 * * 1'   # Mondays, after the mirrors' own weekly build
+  workflow_dispatch:
+
+concurrency:
+  group: vendor-mirror
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    if: github.repository == 'abap-util/abap-util'
+    permissions:
+      contents: write       # create-pull-request pushes its branch
+      pull-requests: write  # and opens the pull request
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: mirror-ajson
+            path: src/00/01
+            pr: mirror-ajson-update
+          - repo: mirror-srtti
+            path: src/00/02
+            pr: mirror-srtti-update
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: copy
+      env:
+        MIRROR_REPO: ${{ matrix.repo }}
+        TARGET_PATH: ${{ matrix.path }}
+      run: |
+        git clone --depth 1 "https://github.com/abap-util/$MIRROR_REPO.git" "$RUNNER_TEMP/mirror"
+        rm "$TARGET_PATH"/z*
+        cp "$RUNNER_TEMP/mirror"/src/z* "$TARGET_PATH"/
+        git status
+    - name: Open PR
+      uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+      with:
+        title: ${{ matrix.pr }}
+        branch: ${{ matrix.pr }}
+        commit-message: "Refresh ${{ matrix.path }} from abap-util/${{ matrix.repo }}"
+        body: "Automated copy of `src/` of abap-util/${{ matrix.repo }} into `${{ matrix.path }}`."
