@@ -45,6 +45,15 @@ CLASS zabaputil_cl_util_context DEFINITION
     CLASS-DATA cv_typedescr_typekind_time    TYPE c LENGTH 1 READ-ONLY.
     CLASS-DATA cv_typedescr_typekind_packed  TYPE c LENGTH 1 READ-ONLY.
 
+    " the elementary kinds a caller has to tell apart to write a value into
+    " a file and to read it back (the XLSX reader and writer): text, a
+    " NUMC with its leading zeros, bytes
+    CLASS-DATA cv_typedescr_typekind_char    TYPE c LENGTH 1 READ-ONLY.
+    CLASS-DATA cv_typedescr_typekind_num     TYPE c LENGTH 1 READ-ONLY.
+    CLASS-DATA cv_typedescr_typekind_string  TYPE c LENGTH 1 READ-ONLY.
+    CLASS-DATA cv_typedescr_typekind_hex     TYPE c LENGTH 1 READ-ONLY.
+    CLASS-DATA cv_typedescr_typekind_xstring TYPE c LENGTH 1 READ-ONLY.
+
     CLASS-DATA cv_typedescr_kind_struct      TYPE c LENGTH 1 READ-ONLY.
     CLASS-DATA cv_typedescr_kind_elem        TYPE c LENGTH 1 READ-ONLY.
     CLASS-DATA cv_typedescr_kind_ref         TYPE c LENGTH 1 READ-ONLY.
@@ -733,6 +742,17 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO data.
 
+    "! A standard table whose line has one string component per name - the
+    "! table for a file whose columns are only known when it is read (CSV,
+    "! XLSX). The names have to be valid and unique component names.
+    "! @parameter val    | the component names, in the order of the columns
+    "! @parameter result | a reference to the new, empty table
+    CLASS-METHODS rtti_create_tab_by_names
+      IMPORTING
+        val           TYPE string_table
+      RETURNING
+        VALUE(result) TYPE REF TO data.
+
     "! Whether a type of that name exists - a DDIC object, a class, an
     "! interface. Never raises.
     CLASS-METHODS rtti_check_type_exists
@@ -988,6 +1008,16 @@ CLASS zabaputil_cl_util_context DEFINITION
     CLASS-METHODS rtti_check_numeric
       IMPORTING
         val           TYPE any
+      RETURNING
+        VALUE(result) TYPE abap_bool.
+
+    "! whether a type kind is a number: i, int1, int2, int8, p, f,
+    "! decfloat16, decfloat34 - the one list the number checks share. int8
+    "! by its value `8`, a constant lower releases do not have. Public for
+    "! a caller that holds the type kind of a component, not its value
+    CLASS-METHODS rtti_check_typekind_number
+      IMPORTING
+        val           TYPE clike
       RETURNING
         VALUE(result) TYPE abap_bool.
 
@@ -2997,9 +3027,9 @@ CLASS zabaputil_cl_util_context DEFINITION
       END OF ty_s_xml_attribute.
     TYPES ty_t_xml_attribute TYPE STANDARD TABLE OF ty_s_xml_attribute WITH EMPTY KEY.
 
-    "! the kinds of node xml_reader_next( ) hands out - `end` (initial) when
-    "! the document is read to its end
     CONSTANTS:
+      "! the kinds of node xml_reader_next( ) hands out - `end` (initial) when
+      "! the document is read to its end
       BEGIN OF cs_xml_node,
         open  TYPE string VALUE `O` ##NO_TEXT,
         close TYPE string VALUE `C` ##NO_TEXT,
@@ -4023,15 +4053,6 @@ CLASS zabaputil_cl_util_context DEFINITION
       END OF ty_s_class_impl_intf.
     CLASS-DATA gt_class_impl_intf TYPE HASHED TABLE OF ty_s_class_impl_intf WITH UNIQUE KEY name intf.
 
-    " whether a type kind is a number: i, int1, int2, int8, p, f,
-    " decfloat16, decfloat34 - the one list the number checks share. int8
-    " by its value `8`, a constant lower releases do not have
-    CLASS-METHODS rtti_check_typekind_number
-      IMPORTING
-        val           TYPE clike
-      RETURNING
-        VALUE(result) TYPE abap_bool.
-
     " the json_kind of one elementary type (see ty_s_flat_comp)
     CLASS-METHODS rtti_get_json_kind
       IMPORTING
@@ -4605,6 +4626,11 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     cv_typedescr_typekind_date       = cl_abap_typedescr=>typekind_date.
     cv_typedescr_typekind_time       = cl_abap_typedescr=>typekind_time.
     cv_typedescr_typekind_packed     = cl_abap_typedescr=>typekind_packed.
+    cv_typedescr_typekind_char       = cl_abap_typedescr=>typekind_char.
+    cv_typedescr_typekind_num        = cl_abap_typedescr=>typekind_num.
+    cv_typedescr_typekind_string     = cl_abap_typedescr=>typekind_string.
+    cv_typedescr_typekind_hex        = cl_abap_typedescr=>typekind_hex.
+    cv_typedescr_typekind_xstring    = cl_abap_typedescr=>typekind_xstring.
     cv_typedescr_kind_struct         = cl_abap_typedescr=>kind_struct.
     cv_typedescr_kind_elem           = cl_abap_typedescr=>kind_elem.
     cv_typedescr_kind_ref            = cl_abap_typedescr=>kind_ref.
@@ -7069,6 +7095,19 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ENDWHILE.
 
     result = xsdbool( lv_depth = 0 AND lv_quote IS INITIAL ).
+
+  ENDMETHOD.
+
+  METHOD rtti_create_tab_by_names.
+
+    DATA lt_comp TYPE abap_component_tab.
+
+    LOOP AT val INTO DATA(lv_name).
+      " a string per column - a fixed length would cut every longer value
+      INSERT VALUE #( name = lv_name
+                      type = cl_abap_elemdescr=>get_string( ) ) INTO TABLE lt_comp.
+    ENDLOOP.
+    result = rtti_create_tab_by_comps( lt_comp ).
 
   ENDMETHOD.
 
@@ -14975,7 +15014,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 *            )->execute( ).
 
     " not implemented: the result was silently empty, which reads like
-    " a success - the XCO version above is the template
+    " a success - the XCO version above is the template. The reader of
+    " this catalog is zabaputil_cl_util_xlsx (get_table, get_table_ref),
+    " which calls this class and so cannot be called from here
     RAISE EXCEPTION TYPE zabaputil_cx_util_error
       EXPORTING
         val = `CONV_GET_ITAB_BY_XLSX is not implemented`.
@@ -15073,6 +15114,7 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   METHOD zip_unpack.
 
+    CONSTANTS lc_signature TYPE x LENGTH 2 VALUE '504B'.
     DATA lo_zip    TYPE REF TO object.
     DATA lv_name   TYPE string.
     DATA ls_result LIKE LINE OF result.
@@ -15083,10 +15125,30 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
     TRY.
 
+        " every ZIP archive starts with PK. Checked here, for the same
+        " answer on every runtime: what the ZIP class does with other
+        " bytes differs, and the transpiled one takes them without a word
+        IF xstrlen( val ) < 4 OR val(2) <> lc_signature.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = `ZIP_PARSE_ERROR - the data is no ZIP archive`.
+        ENDIF.
+
         CREATE OBJECT lo_zip TYPE ('CL_ABAP_ZIP').
+        " LOAD and GET report a broken archive with a classic exception -
+        " not taken here, it ends the program with a dump, and a file a
+        " user uploads is broken often enough (cut off, or damaged)
         CALL METHOD lo_zip->('LOAD')
           EXPORTING
-            zip = val.
+            zip             = val
+          EXCEPTIONS
+            zip_parse_error = 1
+            OTHERS          = 2.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = `ZIP_PARSE_ERROR - the data is no ZIP archive`.
+        ENDIF.
 
         ASSIGN lo_zip->('FILES') TO <files>.
         LOOP AT <files> ASSIGNING <file>.
@@ -15096,12 +15158,24 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
           ls_result = VALUE #( name = lv_name ).
           CALL METHOD lo_zip->('GET')
             EXPORTING
-              name    = lv_name
+              name                    = lv_name
             IMPORTING
-              content = ls_result-content.
+              content                 = ls_result-content
+            EXCEPTIONS
+              zip_index_error         = 1
+              zip_decompression_error = 2
+              OTHERS                  = 3.
+          IF sy-subrc <> 0.
+            RAISE EXCEPTION TYPE zabaputil_cx_util_error
+              EXPORTING
+                val = |ZIP_PARSE_ERROR - the file { lv_name } of the archive cannot be unpacked|.
+          ENDIF.
           INSERT ls_result INTO TABLE result.
         ENDLOOP.
 
+      CATCH zabaputil_cx_util_error INTO DATA(lx_own).
+        " raised above, with its text - not wrapped once more
+        RAISE EXCEPTION lx_own.
       CATCH cx_root INTO DATA(x).
         RAISE EXCEPTION TYPE zabaputil_cx_util_error EXPORTING val = x.
     ENDTRY.

@@ -235,15 +235,39 @@ DATA(lr_itab) = zabaputil_cl_util_context=>itab_get_itab_by_csv( lv_csv ).
 ```
 
 ###### XLSX / Excel
+`zabaputil_cl_util_xlsx` writes and reads `.xlsx` workbooks in plain ABAP - no abap2xlsx, no XCO, the same code on ABAP Cloud, Standard ABAP and 7.02.
 ```abap
-" Internal table to Excel
-DATA(lv_xlsx) = zabaputil_cl_util_context=>conv_get_xlsx_by_itab( lt_flights ).
+" Internal table to Excel and back, in one call each
+DATA(lv_xlsx) = zabaputil_cl_util_xlsx=>xlsx_by_itab( lt_flights ).
 
-" Excel to internal table
-zabaputil_cl_util_context=>conv_get_itab_by_xlsx(
+zabaputil_cl_util_xlsx=>itab_by_xlsx(
     EXPORTING val    = lv_xlsx
-    IMPORTING result = lr_data ).
+    IMPORTING result = lt_flights ).   " by the header row, every value in the type of its component
+
+" Several sheets, with a layout
+DATA(lv_book) = zabaputil_cl_util_xlsx=>factory(
+    )->add_sheet( val  = lt_flights
+                  name = `Flights`
+    )->add_sheet( val    = lt_bookings
+                  name   = `Bookings`
+                  layout = VALUE #( freeze_header = abap_true
+                                    table_style   = `TableStyleMedium2`
+                                    t_column      = VALUE #( ( name = `BOOKID` header = `Booking` )
+                                                             ( name = `PRICE`  header = `Price` format = `#,##0.00` )
+                                                             ( name = `FLDATE` header = `Date` width = 14 ) ) )
+    )->get_xlsx( ).
+
+" Reading: the sheets, a sheet as a typed table, as a table of strings, cell by cell
+DATA(lo_book)  = zabaputil_cl_util_xlsx=>factory_by_xlsx( lv_book ).
+DATA(lt_names) = lo_book->get_sheet_names( ).                 " => ( 'Flights' 'Bookings' )
+lo_book->get_table( EXPORTING sheet  = `Flights`
+                    IMPORTING result = lt_flights ).
+DATA(lr_any)   = lo_book->get_table_ref( index = 2 ).         " columns named after the header row
+DATA(lt_cells) = lo_book->get_cells( sheet = `Bookings` ).    " row, col, kind, value
 ```
+A number is written as a number, a date as a date, a time as a time, a timestamp as a date with its time, a flag as a boolean; a NUMC keeps its leading zeros. Reading tells a date from a number by the format of its cell and hands it back as `YYYY-MM-DD`. Not covered: formatting cell by cell, formulas (a formula cell is read with its last value), merged cells, charts, images, `.xls` files, workbooks with a password.
+
+`zabaputil_cl_util_context=>conv_get_xlsx_by_itab( lt_flights )` stays the one-sheet writer inside the context class, for a copy that does not carry the XLSX class.
 
 ###### Internal Tables
 ```abap

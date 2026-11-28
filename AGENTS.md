@@ -92,6 +92,7 @@ src/
 ├── zabaputil_cl_util_msg.clas.abap       # Message handling
 ├── zabaputil_cl_util_range.clas.abap     # Select-option range builders
 ├── zabaputil_cl_util_xml.clas.abap       # Fluent XML builder
+├── zabaputil_cl_util_xlsx.clas.abap      # XLSX workbooks: internal tables to sheets and back
 ├── zabaputil_cx_util_error.clas.abap     # THE exception (no-check): text chain, full diagnostic report
 └── 00/
     ├── 01/                               # ajson mirror — DO NOT MODIFY (synced from upstream)
@@ -116,6 +117,17 @@ npm run downport              # rewrites src/ to 7.02 syntax - never commit the 
 CI runs on every pull request and on every push to `main`: the lints for Standard ABAP and ABAP Cloud (`ABAP_STANDARD.yaml`, `ABAP_CLOUD.yaml`), the rename check (`test_rename.yaml`) - consumers vendor renamed copies, so every class must still lint under another prefix - and the transpiled unit tests **twice** (`test_unit.yaml`): on the source as `main` ships it and on the same source after the downport, linted at v702. `auto_downport.yaml` pushes that downport to the branch `702` on every push to `main`, `ABAP_702.yaml` lints the branch. All must stay green — they guarantee that any subset of methods can be vendored into any consumer on any release.
 
 Every action in `.github/workflows/` is pinned to a commit sha with the tag as a comment; `bump-deps.yaml` moves the pins and the npm dependencies once a month, in one pull request.
+
+## XLSX: one class, the system behind the context class
+
+`zabaputil_cl_util_xlsx` writes and reads `.xlsx` workbooks and names no SAP class itself: ZIP (`zip_pack`, `zip_unpack`), UTF-8 (`conv_get_xstring_by_string`), the XML reader (`xml_reader_create`, `xml_reader_next` - the sXML reader, token by token, no tree), escaping (`c_escape_xml`), RTTI (`rtti_get_t_attri_by_any`, `rtti_get_type_kind`, the `cv_typedescr_typekind_*` constants, `rtti_create_tab_by_names`) and the data element texts all come from `zabaputil_cl_util_context`. Keep it that way - it is what makes the class run unchanged on 7.02, Standard ABAP, ABAP Cloud and the transpiled runtime, and what a consumer copies along when it vendors the class.
+
+- **No regex, no XSLT, no DDIC object.** Format codes, cell addresses and numbers are read character by character.
+- **A sheet is rendered in `add_sheet( )`**, not kept as a reference to the caller's table - the table may be gone by `get_xlsx( )`.
+- **Reading goes row by row** (`sheet_read_row`) and never builds the whole sheet in memory for `get_table( )`.
+- **`xml_reader_create` sets no option on the sXML reader**: as it comes it reports a text of blanks only where it is all an element holds and leaves out the indentation between elements, and the transpiled runtime implements no `set_option`.
+- **The reading tests are slow in the transpiled runtime by its XML parser** (it searches the document from the start for every token) - keep the workbooks of the tests small; a system parses in the kernel.
+- `zabaputil_cl_util_context=>conv_get_xlsx_by_itab` stays as the one-sheet writer of a trimmed context copy; `conv_get_itab_by_xlsx` stays a stub that raises, because the context class cannot call the class that calls it.
 
 ## One class per purpose
 
