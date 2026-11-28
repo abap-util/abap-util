@@ -94,6 +94,14 @@ CLASS ltcl_form DEFINITION FINAL
     METHODS data_sample_of_a_class  FOR TESTING.
     METHODS data_sample_refused     FOR TESTING.
     METHODS form_with_its_data_class FOR TESTING.
+    METHODS sample_by_type          FOR TESTING.
+    METHODS sample_keeps_what_is_set FOR TESTING.
+    METHODS text_of_a_form          FOR TESTING.
+    METHODS text_without_initial    FOR TESTING.
+    METHODS text_read_tolerantly    FOR TESTING.
+    METHODS text_that_is_none       FOR TESTING.
+    METHODS form_of_a_data_class    FOR TESTING.
+    METHODS print_a_data_class      FOR TESTING.
     METHODS absolute_text_position  FOR TESTING.
     METHODS absolute_has_no_flow    FOR TESTING.
     METHODS absolute_table_position FOR TESTING.
@@ -534,7 +542,12 @@ CLASS ltcl_form IMPLEMENTATION.
 
   METHOD object_table_rows.
     DATA(lo_demo) = NEW zabaputil_cl_pdf_data_demo( ).
-    lo_demo->zabaputil_if_pdf_data~fill_sample( ).
+    lo_demo->vbeln = `80004711`.
+    lo_demo->address-city = `Bonn`.
+    lo_demo->t_items = VALUE #( ( posnr = 10 arktx = `Hex nut M8` )
+                                ( posnr = 20 arktx = `Hex bolt M8 x 40` )
+                                ( posnr = 30 arktx = `Washer 8.4 mm` )
+                                ( posnr = 40 arktx = `Thread locking fluid` ) ).
     ms_form-t_element = VALUE #(
         ( type     = zabaputil_cl_pdf_form=>cs_type-text
           text     = `Delivery {VBELN} to {ADDRESS-CITY}` )
@@ -616,9 +629,15 @@ CLASS ltcl_form IMPLEMENTATION.
     DATA lo_demo TYPE REF TO zabaputil_cl_pdf_data_demo.
     DATA(li_data) = zabaputil_cl_pdf_form=>data_sample( zabaputil_cl_util_context=>rtti_get_ref_type_name( lo_demo ) ).
     cl_abap_unit_assert=>assert_bound( li_data ).
-    cl_abap_unit_assert=>assert_equals( exp = `Ada Lovelace`
-                                        act = zabaputil_cl_pdf_form=>resolve( val  = `{NAME}`
+    " the class sets nothing: a text shows its name, a table has three rows
+    cl_abap_unit_assert=>assert_equals( exp = `NAME in CITY`
+                                        act = zabaputil_cl_pdf_form=>resolve( val  = `{NAME} in {ADDRESS-CITY}`
                                                                               data = li_data ) ).
+    lo_demo ?= li_data.
+    cl_abap_unit_assert=>assert_equals( exp = 3 act = lines( lo_demo->t_items ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 20 act = lo_demo->t_items[ 2 ]-posnr ).
+    cl_abap_unit_assert=>assert_equals( exp = `MATNR 2` act = lo_demo->t_items[ 2 ]-matnr ).
+    cl_abap_unit_assert=>assert_equals( exp = `37.50` act = |{ lo_demo->t_items[ 3 ]-lfimg }| ).
   ENDMETHOD.
 
   METHOD data_sample_refused.
@@ -650,7 +669,7 @@ CLASS ltcl_form IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( exp = 1
                                         act = shown( pdf  = lo_pdf
                                                      page = 1
-                                                     text = `Order PO-2026-118` ) ).
+                                                     text = `Order BSTNK` ) ).
   ENDMETHOD.
 
   METHOD items.
@@ -836,6 +855,196 @@ CLASS ltcl_form IMPLEMENTATION.
                                                        page = sy-index
                                                        text = `Letterhead` ) ).
     ENDDO.
+  ENDMETHOD.
+
+  METHOD sample_by_type.
+    TYPES:
+      BEGIN OF ty_s_inner,
+        text TYPE string,
+      END OF ty_s_inner.
+    TYPES:
+      BEGIN OF ty_s_row,
+        key  TYPE i,
+        text TYPE c LENGTH 10,
+      END OF ty_s_row.
+    TYPES:
+      BEGIN OF ty_s_sample,
+        name     TYPE string,
+        code     TYPE c LENGTH 3,
+        number   TYPE n LENGTH 4,
+        day      TYPE d,
+        time     TYPE t,
+        count    TYPE i,
+        amount   TYPE p LENGTH 8 DECIMALS 2,
+        digit    TYPE p LENGTH 1 DECIMALS 0,
+        bytes    TYPE xstring,
+        inner    TYPE ty_s_inner,
+        t_text   TYPE string_table,
+        t_sorted TYPE SORTED TABLE OF ty_s_row WITH UNIQUE KEY key,
+      END OF ty_s_sample.
+    DATA ls_sample TYPE ty_s_sample.
+
+    zabaputil_cl_pdf_form=>sample( CHANGING data = ls_sample ).
+    cl_abap_unit_assert=>assert_equals( exp = `NAME` act = ls_sample-name ).
+    " a short field takes what fits of its name
+    cl_abap_unit_assert=>assert_equals( exp = `COD` act = ls_sample-code ).
+    cl_abap_unit_assert=>assert_equals( exp = `0001` act = ls_sample-number ).
+    cl_abap_unit_assert=>assert_equals( exp = `20260131` act = ls_sample-day ).
+    cl_abap_unit_assert=>assert_equals( exp = `120000` act = ls_sample-time ).
+    cl_abap_unit_assert=>assert_equals( exp = 10 act = ls_sample-count ).
+    cl_abap_unit_assert=>assert_equals( exp = `12.50` act = |{ ls_sample-amount }| ).
+    " 12.5 does not fit one digit: the field stays empty rather than wrong
+    cl_abap_unit_assert=>assert_initial( ls_sample-digit ).
+    cl_abap_unit_assert=>assert_initial( ls_sample-bytes ).
+    cl_abap_unit_assert=>assert_equals( exp = `TEXT` act = ls_sample-inner-text ).
+    " a table: three rows, each field with the number of its row
+    cl_abap_unit_assert=>assert_equals( exp = VALUE string_table( ( `T_TEXT 1` ) ( `T_TEXT 2` ) ( `T_TEXT 3` ) )
+                                        act = ls_sample-t_text ).
+    cl_abap_unit_assert=>assert_equals( exp = 3 act = lines( ls_sample-t_sorted ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `TEXT 2` act = ls_sample-t_sorted[ key = 20 ]-text ).
+  ENDMETHOD.
+
+  METHOD sample_keeps_what_is_set.
+    " an object: its public attributes, and only the ones that are initial
+    DATA(lo_data) = NEW lcl_data( ).
+    zabaputil_cl_pdf_form=>sample( CHANGING data = lo_data ).
+    cl_abap_unit_assert=>assert_equals( exp = `visible` act = lo_data->shown ).
+    cl_abap_unit_assert=>assert_equals( exp = `Bonn` act = lo_data->head-city ).
+    cl_abap_unit_assert=>assert_equals( exp = 3 act = lines( lo_data->t_rows ) ).
+    cl_abap_unit_assert=>assert_not_bound( lo_data->other ).
+    cl_abap_unit_assert=>assert_equals( exp = `{HIDDEN}`
+                                        act = zabaputil_cl_pdf_form=>resolve( val  = `{HIDDEN}`
+                                                                              data = lo_data ) ).
+  ENDMETHOD.
+
+  METHOD text_of_a_form.
+    " a form comes back from its text as it went in - with everything a
+    " text can hold that XML or an ABAP literal has a meaning for
+    ms_form-name = `NOTE`.
+    ms_form-absolute = abap_true.
+    ms_form-margin_left = `12.5`.
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text name = `Odd` x = 20 y = `95.25` size = 16
+          text = |a < b & c > d, <FILL/> "quoted" `tick` 'single' \{X\}\nsecond line\r\n\ttab, &#10; end| )
+        ( type = zabaputil_cl_pdf_form=>cs_type-table source = `T_ITEMS` every_page = abap_true
+          t_column = VALUE #( ( name = `POS` title = `Pos` width = 20 align = `R` )
+                              ( name = `TEXT` ) ) )
+        ( type = zabaputil_cl_pdf_form=>cs_type-image image = image_rgb( ) )
+        ( type = zabaputil_cl_pdf_form=>cs_type-page_break ) ).
+    DATA(lv_text) = zabaputil_cl_pdf_form=>stringify( ms_form ).
+    cl_abap_unit_assert=>assert_equals( exp = ms_form
+                                        act = zabaputil_cl_pdf_form=>parse( lv_text ) ).
+    " one line of printable characters: it is kept in ABAP literals
+    cl_abap_unit_assert=>assert_false( xsdbool( lv_text CA |\n\r\t| ) ).
+  ENDMETHOD.
+
+  METHOD text_without_initial.
+    " what is initial is not written: the text is kept in a source code
+    ms_form-t_element = VALUE #( ( type = zabaputil_cl_pdf_form=>cs_type-text text = `Hello` ) ).
+    DATA(lv_text) = zabaputil_cl_pdf_form=>stringify( ms_form ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_text CS `<TEXT>Hello</TEXT>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_text CS `<FORMAT>A4</FORMAT>` ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( lv_text CS `<FILL` ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( lv_text CS `<T_COLUMN` ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( lv_text CS `<HEADER` ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( lv_text CS `/>` ) ).
+    " the whole text: the page, and the one thing the element has
+    cl_abap_unit_assert=>assert_equals(
+        exp = `<form version="1"><FORMAT>A4</FORMAT><ORIENTATION>P</ORIENTATION>` &&
+              `<MARGIN_LEFT>20.00</MARGIN_LEFT><MARGIN_TOP>20.00</MARGIN_TOP>` &&
+              `<MARGIN_RIGHT>20.00</MARGIN_RIGHT><MARGIN_BOTTOM>20.00</MARGIN_BOTTOM>` &&
+              `<T_ELEMENT><item><TYPE>TEXT</TYPE><TEXT>Hello</TEXT></item></T_ELEMENT></form>`
+        act = lv_text ).
+  ENDMETHOD.
+
+  METHOD text_read_tolerantly.
+    " written by hand, or by another release: line breaks between the
+    " elements, an empty element, a component and a whole table the form
+    " does not have, a row without anything
+    DATA(lv_text) = |<form version="9">\n  <FORMAT>A5</FORMAT>\n  <HEADER/>\n  <LATER>new</LATER>\n| &&
+                    |  <T_LATER><item><A>1</A><T_B><item>2</item></T_B></item></T_LATER>\n| &&
+                    |  <MARGIN_TOP>-7.5</MARGIN_TOP>\n| &&
+                    |  <T_ELEMENT>\n    <item><TYPE>TEXT</TYPE><TEXT>a &lt; b &amp;amp; c</TEXT><X>12</X></item>\n| &&
+                    |    <item/>\n    <item></item>\n  </T_ELEMENT>\n</form>\n|.
+    DATA(ls_form) = zabaputil_cl_pdf_form=>parse( lv_text ).
+    cl_abap_unit_assert=>assert_equals( exp = `A5` act = ls_form-format ).
+    cl_abap_unit_assert=>assert_initial( ls_form-header ).
+    cl_abap_unit_assert=>assert_equals( exp = `-7.50` act = |{ ls_form-margin_top }| ).
+    " what the text does not name is initial - not the 20 mm of a new form
+    cl_abap_unit_assert=>assert_initial( ls_form-margin_left ).
+    cl_abap_unit_assert=>assert_equals( exp = 3 act = lines( ls_form-t_element ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `a < b &amp; c` act = ls_form-t_element[ 1 ]-text ).
+    cl_abap_unit_assert=>assert_equals( exp = 12 act = ls_form-t_element[ 1 ]-x ).
+    cl_abap_unit_assert=>assert_initial( ls_form-t_element[ 3 ] ).
+    " a negative number is written with its sign in front, and read again
+    cl_abap_unit_assert=>assert_true(
+        xsdbool( zabaputil_cl_pdf_form=>stringify( ls_form ) CS `<MARGIN_TOP>-7.50</MARGIN_TOP>` ) ).
+  ENDMETHOD.
+
+  METHOD text_that_is_none.
+    " no text is a form to start on
+    cl_abap_unit_assert=>assert_equals( exp = zabaputil_cl_pdf_form=>new_form( )
+                                        act = zabaputil_cl_pdf_form=>parse( `` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = zabaputil_cl_pdf_form=>new_form( )
+                                        act = zabaputil_cl_pdf_form=>parse( `   ` ) ).
+    " no XML, another document, one that ends too early, a tag left open,
+    " a text where a number belongs
+    DATA(lt_text) = VALUE string_table(
+        ( `this is no form` )
+        ( `<asx:abap><FORMAT>A4</FORMAT></asx:abap>` )
+        ( `<form><FORMAT>A4` )
+        ( `<form><FORMAT>A4</FORMAT` )
+        ( `<form><T_ELEMENT><item><TYPE>TEXT</TYPE>` )
+        ( `<form><MARGIN_LEFT>wide</MARGIN_LEFT></form>` ) ).
+    LOOP AT lt_text INTO DATA(lv_text).
+      TRY.
+          zabaputil_cl_pdf_form=>parse( lv_text ).
+          cl_abap_unit_assert=>fail( lv_text ).
+        CATCH zabaputil_cx_util_error ##NO_HANDLER.
+      ENDTRY.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD form_of_a_data_class.
+    " the demo carries a form: a delivery note with a table of five columns
+    DATA lo_name TYPE REF TO zabaputil_cl_pdf_data_demo.
+    DATA(lo_demo) = NEW zabaputil_cl_pdf_data_demo( ).
+    DATA(ls_form) = zabaputil_cl_pdf_form=>form_of( lo_demo ).
+    cl_abap_unit_assert=>assert_equals( exp = zabaputil_cl_util_context=>rtti_get_ref_type_name( lo_name )
+                                        act = ls_form-data_class ).
+    cl_abap_unit_assert=>assert_equals( exp = `A4` act = ls_form-format ).
+    cl_abap_unit_assert=>assert_equals( exp = 11 act = lines( ls_form-t_element ) ).
+    DATA(ls_table) = ls_form-t_element[ type = zabaputil_cl_pdf_form=>cs_type-table ].
+    cl_abap_unit_assert=>assert_equals( exp = `T_ITEMS` act = ls_table-source ).
+    cl_abap_unit_assert=>assert_equals( exp = 5 act = lines( ls_table-t_column ) ).
+    " what the class returns is what stringify( ) writes of it
+    cl_abap_unit_assert=>assert_equals( exp = zabaputil_cl_pdf_form=>parse( lo_demo->zabaputil_if_pdf_data~get( ) )
+                                        act = zabaputil_cl_pdf_form=>parse(
+                                                  zabaputil_cl_pdf_form=>stringify(
+                                                      zabaputil_cl_pdf_form=>parse(
+                                                          lo_demo->zabaputil_if_pdf_data~get( ) ) ) ) ).
+
+    DATA li_none TYPE REF TO zabaputil_if_pdf_data.
+    TRY.
+        zabaputil_cl_pdf_form=>form_of( li_none ).
+        cl_abap_unit_assert=>fail( ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD print_a_data_class.
+    " one object is the whole form: its attributes and its layout
+    DATA(lo_demo) = NEW zabaputil_cl_pdf_data_demo( ).
+    lo_demo->vbeln = `80004711`.
+    DATA(lv_file) = zabaputil_cl_pdf_form=>print( lo_demo ).
+    cl_abap_unit_assert=>assert_equals( exp = `255044462D` act = |{ lv_file(5) }| ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( val  = zabaputil_cl_pdf_form=>form_of( lo_demo )
+                                                 data = lo_demo ).
+    " the header line of the page and the headline
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = shown( pdf  = lo_pdf
+                                                     page = 1
+                                                     text = `Delivery note 80004711` ) ).
   ENDMETHOD.
 
 ENDCLASS.

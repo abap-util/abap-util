@@ -629,12 +629,19 @@ ls_form-t_element = VALUE #(
 DATA(lv_pdf) = zabaputil_cl_pdf_form=>render( val = ls_form data = ls_delivery ).
 
 " The data may be an object instead: its public attributes are what the form prints.
-" A class that implements zabaputil_if_pdf_data is a form's data class - an editor
-" reads its fields and creates a sample instance for its preview
-DATA(lt_fields) = zabaputil_cl_pdf_form=>fields( NEW zabaputil_cl_pdf_data_demo( ) ).
-DATA(lv_sample) = zabaputil_cl_pdf_form=>render(
-                      val  = ls_form
-                      data = zabaputil_cl_pdf_form=>data_sample( `ZABAPUTIL_CL_PDF_DATA_DEMO` ) ).
+" A class that implements zabaputil_if_pdf_data is a whole form: the attributes are its
+" data, and its method get( ) returns the form as text - what an editor shows to copy
+DATA(lo_note) = NEW zabaputil_cl_pdf_data_demo( ).
+lo_note->vbeln = `80004711`.
+lv_pdf = zabaputil_cl_pdf_form=>print( lo_note ).
+
+" What an editor works with: the fields of the class, the form as data and as text,
+" and an instance with sample values in everything the class leaves initial
+DATA(lt_fields) = zabaputil_cl_pdf_form=>fields( lo_note ).
+ls_form = zabaputil_cl_pdf_form=>form_of( lo_note ).
+DATA(lv_text) = zabaputil_cl_pdf_form=>stringify( ls_form ).   " <form version="1"><FORMAT>A4</FORMAT>...
+ls_form = zabaputil_cl_pdf_form=>parse( lv_text ).
+DATA(li_sample) = zabaputil_cl_pdf_form=>data_sample( `ZABAPUTIL_CL_PDF_DATA_DEMO` ).
 ```
 
 | Class | Purpose |
@@ -646,7 +653,7 @@ DATA(lv_sample) = zabaputil_cl_pdf_form=>render(
 | `zabaputil_cl_pdf_font_ttf` | an embedded TrueType font (`lo_pdf->font_ttf( lv_ttf )`) - any script the font has glyphs for |
 | `zabaputil_cl_pdf_image` | JPEG and PNG images, PNG with transparency |
 | `zabaputil_cl_pdf_form` | a form as data - elements in the flow or at fixed positions, `{NAME}` placeholders for the components of the data - and its printout; an absolute form (`ty_s_form-absolute`) places every element at its x, y, w, h, as a designer with a canvas draws it, and moves what stands below a table to where the table ends |
-| `zabaputil_if_pdf_data`, `zabaputil_cl_pdf_data_demo` | the data class of a form - its public attributes are the form's interface - and one by example |
+| `zabaputil_if_pdf_data`, `zabaputil_cl_pdf_data_demo` | a form as one class - its public attributes are the data, `get( )` returns the form as text - and one by example |
 | `zabaputil_cl_pdf_writer` | the file format: objects, streams, cross-reference table |
 
 Not there yet: font subsetting (a TrueType font is embedded whole), OpenType/CFF fonts, text shaping (ligatures, right-to-left scripts), several fonts within one line, interlaced PNG files.
