@@ -2105,10 +2105,11 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
             val = |XLSX_SHEET_UNKNOWN - the workbook has no sheet { sheet }|.
       ENDIF.
     ELSE.
-      IF index < 1 OR index > lines( mt_sheet ).
+      DATA(lv_sheets) = lines( mt_sheet ).
+      IF index < 1 OR index > lv_sheets.
         RAISE EXCEPTION TYPE zabaputil_cx_util_error
           EXPORTING
-            val = |XLSX_SHEET_UNKNOWN - the workbook has { lines( mt_sheet ) } sheets, none at { index }|.
+            val = |XLSX_SHEET_UNKNOWN - the workbook has { lv_sheets } sheets, none at { index }|.
       ENDIF.
       lv_path = mt_sheet[ index ]-path.
     ENDIF.
@@ -2235,7 +2236,8 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
         kind = cs_kind-text.
         IF text IS NOT INITIAL AND text CO cv_digits.
           DATA(lv_index) = CONV i( text ) + 1.
-          IF lv_index <= lines( mt_shared ).
+          DATA(lv_texts) = lines( mt_shared ).
+          IF lv_index <= lv_texts.
             value = mt_shared[ lv_index ].
           ENDIF.
         ENDIF.
@@ -2296,7 +2298,8 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     DATA(lv_format) = ``.
     IF style IS NOT INITIAL AND style CO cv_digits.
       DATA(lv_index) = CONV i( style ) + 1.
-      IF lv_index <= lines( mt_style_kind ).
+      DATA(lv_styles) = lines( mt_style_kind ).
+      IF lv_index <= lv_styles.
         lv_format = mt_style_kind[ lv_index ].
       ENDIF.
     ENDIF.
@@ -2598,8 +2601,9 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
 
       CLEAR <line>.
       lv_any = abap_false.
+      DATA(lv_columns) = lines( lt_map ).
       LOOP AT lt_row ASSIGNING <cell>.
-        IF <cell>-col > lines( lt_map ).
+        IF <cell>-col > lv_columns.
           CONTINUE.
         ENDIF.
         ASSIGN lt_map[ <cell>-col ] TO <map>.

@@ -628,6 +628,12 @@ CLASS ltcl_roundtrip DEFINITION FINAL
       RETURNING
         VALUE(result) TYPE ty_t_row.
 
+    "! a text with umlauts, blanks around it and what XML escapes - built
+    "! from the bytes, so that this source stays 7-bit ASCII
+    METHODS text_with_umlauts
+      RETURNING
+        VALUE(result) TYPE string.
+
     METHODS typed_table        FOR TESTING RAISING cx_static_check.
     METHODS two_sheets         FOR TESTING RAISING cx_static_check.
     METHODS cells              FOR TESTING RAISING cx_static_check.
@@ -645,8 +651,14 @@ ENDCLASS.
 
 CLASS ltcl_roundtrip IMPLEMENTATION.
 
+  METHOD text_with_umlauts.
+    DATA(lv_ue) = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `C3BC` ) ).
+    DATA(lv_oe) = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `C3B6` ) ).
+    result = |  M{ lv_ue }ller & S{ lv_oe }hne <GmbH>  |.
+  ENDMETHOD.
+
   METHOD rows.
-    result = VALUE #( ( text = `  Müller & Söhne <GmbH>  ` code = `AB` num = -5 amount = `-1234.5` ratio = `0.25`
+    result = VALUE #( ( text = text_with_umlauts( ) code = `AB` num = -5 amount = `-1234.5` ratio = `0.25`
                         date = `20240315` time = `103000` numc = `0042` flag = abap_true bytes = `00FF` )
                       ( )
                       ( text = |line 1{ cl_abap_char_utilities=>newline }line 2| num = 2147483647
@@ -712,7 +724,7 @@ CLASS ltcl_roundtrip IMPLEMENTATION.
         exp = VALUE zabaputil_cl_util_xlsx=>ty_s_cell( row = 1 col = 1 kind = `S` value = `TEXT` )
         act = lt_cell[ 1 ] ).
     cl_abap_unit_assert=>assert_equals(
-        exp = VALUE zabaputil_cl_util_xlsx=>ty_s_cell( row = 2 col = 1 kind = `S` value = `  Müller & Söhne <GmbH>  ` )
+        exp = VALUE zabaputil_cl_util_xlsx=>ty_s_cell( row = 2 col = 1 kind = `S` value = text_with_umlauts( ) )
         act = lt_cell[ row = 2 col = 1 ] ).
     cl_abap_unit_assert=>assert_equals(
         exp = VALUE zabaputil_cl_util_xlsx=>ty_s_cell( row = 2 col = 3 kind = `N` value = `-5` )
@@ -792,7 +804,7 @@ CLASS ltcl_roundtrip IMPLEMENTATION.
                                         act = lines( lt_back ) ).
     cl_abap_unit_assert=>assert_equals( exp = -5
                                         act = lt_back[ 1 ]-num ).
-    cl_abap_unit_assert=>assert_equals( exp = `  Müller & Söhne <GmbH>  `
+    cl_abap_unit_assert=>assert_equals( exp = text_with_umlauts( )
                                         act = lt_back[ 1 ]-text ).
     cl_abap_unit_assert=>assert_initial( lt_back[ 1 ]-amount ).
 

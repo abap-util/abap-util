@@ -3042,8 +3042,8 @@ CLASS zabaputil_cl_util_context DEFINITION
     "! handle goes to xml_reader_next( ); it is the sXML reader, which is
     "! there on every release down to 7.02 and released on ABAP Cloud, and
     "! this class is the only one that names it. A text of blanks only
-    "! arrives where it is all an element holds (`<t>  </t>`); the
-    "! indentation between two elements is not reported
+    "! arrives where it is all an element holds; the indentation between
+    "! two elements is not reported
     CLASS-METHODS xml_reader_create
       IMPORTING
         val           TYPE xstring
@@ -8352,7 +8352,9 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     DATA lv_comma_count TYPE i.
     DATA lv_decimal     TYPE string.
     DATA(lv_i) = 0.
-    WHILE lv_i < strlen( lv_val ).
+    DATA(lv_len) = strlen( lv_val ).
+    DATA(lv_last) = lv_len - 1.
+    WHILE lv_i < lv_len.
       CASE lv_val+lv_i(1).
         WHEN `.`.
           lv_dot_count = lv_dot_count + 1.
@@ -8364,22 +8366,20 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       lv_i = lv_i + 1.
     ENDWHILE.
     " lv_decimal holds the last separator - right when both kinds occur
-    IF lv_dot_count = 0 OR lv_comma_count = 0.
-      IF lv_dot_count > 1 OR lv_comma_count > 1.
-        CLEAR lv_decimal.
-      ENDIF.
+    IF ( lv_dot_count = 0 OR lv_comma_count = 0 ) AND ( lv_dot_count > 1 OR lv_comma_count > 1 ).
+      CLEAR lv_decimal.
     ENDIF.
 
     " Normalize: keep only digits, minus, and the decimal separator as `.`
     DATA(lv_clean) = ``.
     lv_i = 0.
-    WHILE lv_i < strlen( lv_val ).
+    WHILE lv_i < lv_len.
       DATA(lv_c) = lv_val+lv_i(1).
       IF lv_c >= `0` AND lv_c <= `9`.
         lv_clean = lv_clean && lv_c.
       ELSEIF lv_c = `-` AND lv_i = 0.
         lv_clean = lv_clean && lv_c.
-      ELSEIF lv_c = `-` AND lv_i = strlen( lv_val ) - 1 AND lv_val(1) <> `-`.
+      ELSEIF lv_c = `-` AND lv_i = lv_last AND lv_val(1) <> `-`.
         " the sign behind the number, as a MOVE and WRITE put it
         lv_clean = `-` && lv_clean.
       ELSEIF lv_c = lv_decimal.
