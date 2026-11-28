@@ -120,6 +120,7 @@ CLASS ltcl_form DEFINITION FINAL
     METHODS markup_text             FOR TESTING.
     METHODS justified_fixed_text    FOR TESTING.
     METHODS paragraph_options       FOR TESTING.
+    METHODS watermark_and_corners   FOR TESTING.
 
     "! the table of the test data with as many rows as asked for
     METHODS items
@@ -1254,6 +1255,23 @@ CLASS ltcl_form IMPLEMENTATION.
                                   ( type = zabaputil_cl_pdf_form=>cs_type-text text = `c` ) ).
     cl_abap_unit_assert=>assert_equals( exp = zabaputil_cl_pdf_form=>build( ls_plain )->page( 1 )->content( )
                                         act = lo_pdf->page( 1 )->content( ) ).
+  ENDMETHOD.
+
+  METHOD watermark_and_corners.
+    " a watermark on every page, turned and see-through; a rectangle with
+    " rounded corners
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text fixed = abap_true every_page = abap_true
+          x = 40 y = 200 size = 60 angle = 45 opacity = `0.2` color = `CC0000` text = `DRAFT` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-rect fixed = abap_true x = 20 y = 20 w = 50 h = 20 radius = 3 ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( ms_form ).
+    DATA(lv_content) = lo_pdf->page( 1 )->content( ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS |q\n/GS200_200 gs\n0.707 0.707 -0.707 0.707 | ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 1 text = `DRAFT` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 4 act = count( val = lv_content sub = | c\n| ) ).
+    " the rectangle is not inside the graphics state of the watermark
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS |Q\n| ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = count( val = lv_content sub = `/GS200_200 gs` ) ).
   ENDMETHOD.
 
   METHOD absolute_pushed_over.

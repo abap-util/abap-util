@@ -29,6 +29,13 @@ CLASS ltcl_page DEFINITION FINAL
     METHODS link_annotation         FOR TESTING.
     METHODS raw_and_order           FOR TESTING.
     METHODS fluent                  FOR TESTING.
+    METHODS rotate_around_point     FOR TESTING.
+    METHODS clip_and_state          FOR TESTING.
+    METHODS alpha_states            FOR TESTING.
+    METHODS alpha_in_resources      FOR TESTING.
+    METHODS rounded_rectangle       FOR TESTING.
+    METHODS free_path               FOR TESTING.
+    METHODS rotated_text            FOR TESTING.
 
     " a PNG file of 2 x 2 pixels
     METHODS image_rgb
@@ -349,6 +356,106 @@ CLASS ltcl_page IMPLEMENTATION.
                                                    y  = 5
                                                    rx = 1 )->raw( `q Q` ).
     cl_abap_unit_assert=>assert_true( xsdbool( lo_same = mo_page ) ).
+  ENDMETHOD.
+
+  METHOD rotate_around_point.
+    " a quarter turn around 100, 100 - 100, 700 with y upwards
+    mo_page->save( )->rotate( angle = 90
+                              x     = 100
+                              y     = 100 )->restore( ).
+    cl_abap_unit_assert=>assert_equals( exp = |q\n0 1 -1 0 800 600 cm\nQ|
+                                        act = mo_page->content( ) ).
+  ENDMETHOD.
+
+  METHOD clip_and_state.
+    mo_page->save( )->clip_rect( x = 10
+                                 y = 60
+                                 w = 100
+                                 h = 50 )->restore( ).
+    cl_abap_unit_assert=>assert_equals( exp = |q\n10 690 100 50 re W n\nQ|
+                                        act = mo_page->content( ) ).
+  ENDMETHOD.
+
+  METHOD alpha_states.
+    " one graphics state per pair of values, named after them
+    mo_page->set_alpha( `0.5` ).
+    mo_page->set_alpha( fill   = `0.25`
+                        stroke = 1 ).
+    mo_page->set_alpha( `0.5` ).
+    mo_page->set_alpha( 3 ).
+    cl_abap_unit_assert=>assert_equals( exp = |/GS500_500 gs\n/GS250_1000 gs\n/GS500_500 gs\n/GS1000_1000 gs|
+                                        act = mo_page->content( ) ).
+    cl_abap_unit_assert=>assert_equals( exp = VALUE string_table( ( `GS500_500 0.5 0.5` )
+                                                                  ( `GS250_1000 0.25 1` )
+                                                                  ( `GS1000_1000 1 1` ) )
+                                        act = mo_page->alphas( ) ).
+  ENDMETHOD.
+
+  METHOD alpha_in_resources.
+    " the file in hex: its first bytes are no UTF-8
+    DATA lv_hex TYPE string.
+    DATA(lo_pdf) = zabaputil_cl_pdf=>create( compress = abap_false ).
+    lo_pdf->add_page( )->set_alpha( `0.3` ).
+    lv_hex = lo_pdf->render( ).
+    cl_abap_unit_assert=>assert_true(
+        xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( `<< /Type /ExtGState /ca 0.3 /CA 0.3 >>` ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( `/ExtGState << /GS300_300 ` ) ) ).
+    " without transparency the resources have no graphics states
+    lo_pdf = zabaputil_cl_pdf=>create( compress = abap_false ).
+    lo_pdf->add_page( ).
+    lv_hex = lo_pdf->render( ).
+    cl_abap_unit_assert=>assert_false( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( `ExtGState` ) ) ).
+  ENDMETHOD.
+
+  METHOD rounded_rectangle.
+    " four straight edges and four quarter circles, closed and filled
+    mo_page->rounded_rect( x     = 10
+                           y     = 10
+                           w     = 100
+                           h     = 50
+                           r     = 10
+                           style = `F` ).
+    DATA(lv_content) = mo_page->content( ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CP |20 790 m*| ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 4 act = count( val = lv_content sub = ` c` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 4 act = count( val = lv_content sub = ` l` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS |100 790 l\n105.523 790 110 785.523 110 780 c| ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS |h\nf| ) ).
+    " no radius: a rectangle
+    fresh_page( ).
+    mo_page->rounded_rect( x = 10
+                           y = 10
+                           w = 100
+                           h = 50
+                           r = 0 ).
+    cl_abap_unit_assert=>assert_equals( exp = `10 740 100 50 re S` act = mo_page->content( ) ).
+  ENDMETHOD.
+
+  METHOD free_path.
+    mo_page->move_to( x = 10
+                      y = 10 )->line_to( x = 50
+                                         y = 10 )->curve_to( x1 = 60
+                                                             y1 = 10
+                                                             x2 = 60
+                                                             y2 = 30
+                                                             x3 = 50
+                                                             y3 = 30 )->close_path( )->draw_path( `DF` ).
+    cl_abap_unit_assert=>assert_equals( exp = |10 790 m\n50 790 l\n60 790 60 770 50 770 c\nh\nB|
+                                        act = mo_page->content( ) ).
+  ENDMETHOD.
+
+  METHOD rotated_text.
+    " up the page, centred: the start is moved back by half of its 12
+    " points along its direction
+    mo_page->set_font( font = mo_font
+                       size = 10 ).
+    mo_page->text_rotated( x     = 100
+                           y     = 100
+                           val   = `AB`
+                           angle = 90
+                           align = `C` ).
+    cl_abap_unit_assert=>assert_equals( exp = |BT /F1 10 Tf 0 1 -1 0 100 694 Tm { mo_font->encode( `AB` ) } Tj ET|
+                                        act = mo_page->content( ) ).
   ENDMETHOD.
 
 ENDCLASS.

@@ -450,8 +450,27 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
       lv_id = lo_image->write( lo_writer ).
       lv_images = lv_images && | /{ lo_image->resource( ) } { lv_id } 0 R|.
     ENDLOOP.
+    " the transparencies of all pages, a graphics state each
+    DATA lt_alpha TYPE string_table.
+    DATA lv_states TYPE string.
+    LOOP AT mt_page INTO DATA(lo_alpha_page).
+      LOOP AT lo_alpha_page->alphas( ) INTO DATA(lv_alpha).
+        IF NOT line_exists( lt_alpha[ table_line = lv_alpha ] ).
+          INSERT lv_alpha INTO TABLE lt_alpha.
+        ENDIF.
+      ENDLOOP.
+    ENDLOOP.
+    LOOP AT lt_alpha INTO lv_alpha.
+      SPLIT lv_alpha AT ` ` INTO DATA(lv_state) DATA(lv_ca) DATA(lv_stroke_ca).
+      lv_id = lo_writer->add_object( |<< /Type /ExtGState /ca { lv_ca } /CA { lv_stroke_ca } >>| ).
+      lv_states = lv_states && | /{ lv_state } { lv_id } 0 R|.
+    ENDLOOP.
+    IF lv_states IS NOT INITIAL.
+      lv_states = | /ExtGState <<{ lv_states } >>|.
+    ENDIF.
+
     DATA(lv_resources) = lo_writer->add_object(
-        |<< /ProcSet [/PDF /Text /ImageB /ImageC /ImageI] /Font <<{ lv_fonts } >> /XObject <<{ lv_images } >> >>| ).
+        |<< /ProcSet [/PDF /Text /ImageB /ImageC /ImageI] /Font <<{ lv_fonts } >> /XObject <<{ lv_images } >>{ lv_states } >>| ).
 
     DATA(lv_pages) = lo_writer->reserve( ).
     LOOP AT mt_page INTO DATA(lo_page).

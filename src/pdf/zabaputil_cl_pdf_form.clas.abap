@@ -130,6 +130,13 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         "! the text has markup: <b>bold</b>, <i>italic</i>, <u>underlined</u>,
         "! <color=CC0000>red</color> - of the font of the element, its cuts
         markup     TYPE abap_bool,
+        "! at a fixed position: turned counter-clockwise around x, y, in
+        "! degrees - a watermark across the page
+        angle      TYPE ty_length,
+        "! at a fixed position: how opaque, between 0 and 1; 0 for opaque
+        opacity    TYPE ty_length,
+        "! the radius of the corners of a rectangle
+        radius     TYPE ty_length,
         "! of a table: the components that are added up (a total row, a
         "! subtotal row per group, a carry-over at a page break), zebra
         "! stripes and the lines of the cells
@@ -2084,6 +2091,20 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     DATA lv_text  TYPE string.
     DATA lv_width TYPE f.
 
+    " turned or see-through: in a graphics state of its own
+    DATA(lv_state) = xsdbool( element-angle <> 0 OR ( element-opacity > 0 AND element-opacity < 1 ) ).
+    IF lv_state = abap_true.
+      page->save( ).
+      IF element-opacity > 0 AND element-opacity < 1.
+        page->set_alpha( element-opacity ).
+      ENDIF.
+      IF element-angle <> 0.
+        page->rotate( angle = element-angle
+                      x     = element-x
+                      y     = element-y ).
+      ENDIF.
+    ENDIF.
+
     CASE element-type.
 
       WHEN cs_type-text.
@@ -2112,17 +2133,19 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
                       x2 = element-x + element-w
                       y2 = element-y + element-h ).
         ELSEIF element-fill IS INITIAL.
-          page->rect( x = element-x
-                      y = element-y
-                      w = element-w
-                      h = element-h ).
+          page->rounded_rect( x = element-x
+                              y = element-y
+                              w = element-w
+                              h = element-h
+                              r = element-radius ).
         ELSE.
           page->set_fill_color( element-fill ).
-          page->rect( x     = element-x
-                      y     = element-y
-                      w     = element-w
-                      h     = element-h
-                      style = `DF` ).
+          page->rounded_rect( x     = element-x
+                              y     = element-y
+                              w     = element-w
+                              h     = element-h
+                              r     = element-radius
+                              style = `DF` ).
         ENDIF.
 
       WHEN cs_type-image.
@@ -2139,6 +2162,10 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
         ENDIF.
 
     ENDCASE.
+
+    IF lv_state = abap_true.
+      page->restore( ).
+    ENDIF.
 
   ENDMETHOD.
 

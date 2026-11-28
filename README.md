@@ -611,6 +611,14 @@ lo_page->set_font( font = lo_pdf->font( `Helvetica-Bold` ) size = 16 ).
 lo_page->text( x = 20 y = 30 val = `Delivery note 4711` ).
 lo_page->set_fill_color( `E8E8E8` )->rect( x = 20 y = 35 w = 170 h = 10 style = `DF` ).
 lo_page->image( image = lo_pdf->image( lv_logo_png ) x = 150 y = 10 w = 40 ).
+lo_page->rounded_rect( x = 20 y = 50 w = 80 h = 30 r = 5 style = `DF` ).
+lo_page->move_to( x = 20 y = 90 )->line_to( x = 60 y = 90 )->curve_to( x1 = 70 y1 = 90 x2 = 70 y2 = 110 x3 = 60 y3 = 110 )->close_path( )->draw_path( `D` ).
+" a watermark: see-through and turned; save( ) / restore( ) keep it to itself
+lo_page->save( )->set_alpha( `0.2` ).
+lo_page->set_font( font = lo_pdf->font( `Helvetica-Bold` ) size = 80 ).
+lo_page->text_rotated( x = 105 y = 170 val = `DRAFT` angle = 45 align = `C` ).
+lo_page->restore( ).
+" rotate( ) turns everything that follows, clip_rect( ) cuts it off
 DATA(lv_file) = lo_pdf->render( ). " => xstring
 
 " Flow text and tables over pages
@@ -683,7 +691,7 @@ DATA(lv_sample) = zabaputil_cl_pdf_form=>render(
 | Class | Purpose |
 |---|---|
 | `zabaputil_cl_pdf` | the document: pages, fonts, images, properties, `render( )` |
-| `zabaputil_cl_pdf_page` | one page: text, lines, rectangles, ellipses, images, links at fixed positions |
+| `zabaputil_cl_pdf_page` | one page: text (also turned), lines, rectangles (also with rounded corners), ellipses, free paths, images, links at fixed positions; rotation, clipping and transparency |
 | `zabaputil_cl_pdf_layout` | flowing content: wrapped paragraphs, tables over several pages (sums, subtotals, carry-over, zebra stripes, line styles; a row higher than a page is cut between its lines), header and footer |
 | `zabaputil_cl_pdf_font_std` | the standard fonts (Helvetica, Times, Courier) with their metrics - Western European text, nothing embedded; other characters in a fallback font (`lo_pdf->set_fallback_font( lo_pdf->font_ttf( lv_ttf ) )`), `lo_pdf->missing_chars( )` lists what no font had |
 | `zabaputil_cl_pdf_font_ttf` | an embedded TrueType or OpenType font (`lo_pdf->font_ttf( lv_ttf )`) - any script the font has glyphs for; only the glyphs in use are embedded (`subset = abap_false` for the whole file). An .otf with PostScript outlines is embedded whole, of a collection (.ttc) the font of `index` |

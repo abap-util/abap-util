@@ -188,6 +188,127 @@ CLASS zabaputil_cl_pdf_page DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
 
+    "! Keep the graphics state - colours, line width, rotation, clipping,
+    "! transparency - to come back to it with restore( )
+    METHODS save
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
+
+    "! Back to the graphics state of the last save( )
+    METHODS restore
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
+
+    "! Everything that follows is turned around a point - until restore( )
+    "! @parameter angle | in degrees, counter-clockwise
+    "! @parameter x     | the point it turns around
+    "! @parameter y     | the point it turns around
+    METHODS rotate
+      IMPORTING
+        angle         TYPE numeric
+        x             TYPE numeric
+        y             TYPE numeric
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
+
+    "! Everything that follows is drawn inside this rectangle only - until
+    "! restore( )
+    METHODS clip_rect
+      IMPORTING
+        x             TYPE numeric
+        y             TYPE numeric
+        w             TYPE numeric
+        h             TYPE numeric
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
+
+    "! How opaque what follows is: 1 opaque, 0 invisible - until restore( )
+    "! or the next call
+    "! @parameter fill   | of fillings and texts
+    "! @parameter stroke | of lines and outlines; -1 for the same as fill
+    METHODS set_alpha
+      IMPORTING
+        fill          TYPE numeric
+        stroke        TYPE numeric DEFAULT -1
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
+
+    "! A rectangle with rounded corners
+    "! @parameter r     | the radius of the corners
+    "! @parameter style | D outline, F filled, DF both
+    METHODS rounded_rect
+      IMPORTING
+        x             TYPE numeric
+        y             TYPE numeric
+        w             TYPE numeric
+        h             TYPE numeric
+        r             TYPE numeric
+        style         TYPE clike DEFAULT `D`
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
+
+    "! A free path: move_to( ) starts it (or a part of it), line_to( ) and
+    "! curve_to( ) go on, close_path( ) goes back to the start of the part,
+    "! draw_path( ) draws all of it
+    METHODS move_to
+      IMPORTING
+        x             TYPE numeric
+        y             TYPE numeric
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
+
+    METHODS line_to
+      IMPORTING
+        x             TYPE numeric
+        y             TYPE numeric
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
+
+    "! A Bezier curve to x3, y3 with the control points x1, y1 and x2, y2
+    METHODS curve_to
+      IMPORTING
+        x1            TYPE numeric
+        y1            TYPE numeric
+        x2            TYPE numeric
+        y2            TYPE numeric
+        x3            TYPE numeric
+        y3            TYPE numeric
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
+
+    METHODS close_path
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
+
+    "! @parameter style | D outline, F filled, DF both
+    METHODS draw_path
+      IMPORTING
+        style         TYPE clike DEFAULT `D`
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
+
+    "! One line of text, turned around its start - a watermark, a label
+    "! along an edge
+    "! @parameter x     | where the text starts
+    "! @parameter y     | the baseline
+    "! @parameter angle | in degrees, counter-clockwise
+    "! @parameter align | L, C or R: the text starts, is centred or ends at x, y
+    METHODS text_rotated
+      IMPORTING
+        x             TYPE numeric
+        y             TYPE numeric
+        val           TYPE clike
+        angle         TYPE numeric
+        align         TYPE clike DEFAULT `L`
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
+
+    "! The transparencies the page uses, by the names of their graphics
+    "! states - `GS500 0.5 0.5` - for the resources of the document
+    METHODS alphas
+      RETURNING
+        VALUE(result) TYPE string_table.
+
     "! The content stream written so far
     METHODS content
       RETURNING
@@ -217,6 +338,7 @@ CLASS zabaputil_cl_pdf_page DEFINITION
     DATA mv_scale      TYPE f.
     DATA mv_content    TYPE string.
     DATA mt_annotation TYPE string_table.
+    DATA mt_alpha      TYPE string_table.
     DATA mo_font       TYPE REF TO zabaputil_if_pdf_font.
     DATA mv_font_size  TYPE f.
     " the colours as operands, `0 0 0`: text and fill share one operator in
@@ -511,6 +633,249 @@ CLASS zabaputil_cl_pdf_page IMPLEMENTATION.
 
     lv_show = |BT /{ mo_font->resource( ) } { zabaputil_cl_pdf_writer=>num( mv_font_size ) } Tf | &&
               |{ px( lv_x ) } { py( y ) } Td { mo_font->encode( lv_text ) } Tj ET|.
+    IF mv_text_color = mv_fill_color.
+      emit( lv_show ).
+    ELSE.
+      emit( |q { mv_text_color } rg { lv_show } Q| ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD save.
+
+    emit( `q` ).
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD restore.
+
+    emit( `Q` ).
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD rotate.
+
+    DATA lv_rad TYPE f.
+    DATA lv_cos TYPE f.
+    DATA lv_sin TYPE f.
+    DATA lv_x   TYPE f.
+    DATA lv_y   TYPE f.
+
+    " around the point, in the points of the page with y upwards
+    lv_rad = angle.
+    lv_rad = lv_rad * '3.14159265358979' / 180.
+    lv_cos = cos( lv_rad ).
+    lv_sin = sin( lv_rad ).
+    lv_x = x.
+    lv_x = lv_x * mv_scale.
+    lv_y = y.
+    lv_y = mv_height - lv_y * mv_scale.
+    emit( |{ zabaputil_cl_pdf_writer=>num( lv_cos ) } { zabaputil_cl_pdf_writer=>num( lv_sin ) } | &&
+          |{ zabaputil_cl_pdf_writer=>num( 0 - lv_sin ) } { zabaputil_cl_pdf_writer=>num( lv_cos ) } | &&
+          |{ zabaputil_cl_pdf_writer=>num( lv_x - lv_cos * lv_x + lv_sin * lv_y ) } | &&
+          |{ zabaputil_cl_pdf_writer=>num( lv_y - lv_sin * lv_x - lv_cos * lv_y ) } cm| ).
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD clip_rect.
+
+    DATA lv_y TYPE f.
+    DATA lv_h TYPE f.
+
+    lv_y = y.
+    lv_h = h.
+    emit( |{ px( x ) } { py( lv_y + lv_h ) } { pl( w ) } { pl( h ) } re W n| ).
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD set_alpha.
+
+    DATA lv_fill   TYPE f.
+    DATA lv_stroke TYPE f.
+
+    lv_fill = nmax( val1 = 0
+                    val2 = nmin( val1 = 1
+                                 val2 = fill ) ).
+    lv_stroke = stroke.
+    IF lv_stroke < 0.
+      lv_stroke = lv_fill.
+    ENDIF.
+    lv_stroke = nmax( val1 = 0
+                      val2 = nmin( val1 = 1
+                                   val2 = lv_stroke ) ).
+
+    " a graphics state per pair of values, named after them
+    DATA(lv_fill_name) = round( val = lv_fill * 1000 dec = 0 ).
+    DATA(lv_stroke_name) = round( val = lv_stroke * 1000 dec = 0 ).
+    DATA(lv_name) = |GS{ CONV i( lv_fill_name ) }_{ CONV i( lv_stroke_name ) }|.
+    DATA(lv_entry) = |{ lv_name } { zabaputil_cl_pdf_writer=>num( lv_fill ) } { zabaputil_cl_pdf_writer=>num( lv_stroke ) }|.
+    IF NOT line_exists( mt_alpha[ table_line = lv_entry ] ).
+      INSERT lv_entry INTO TABLE mt_alpha.
+    ENDIF.
+    emit( |/{ lv_name } gs| ).
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD alphas.
+
+    result = mt_alpha.
+
+  ENDMETHOD.
+
+  METHOD rounded_rect.
+
+    DATA lv_x  TYPE f.
+    DATA lv_y  TYPE f.
+    DATA lv_w  TYPE f.
+    DATA lv_h  TYPE f.
+    DATA lv_r  TYPE f.
+    DATA lv_k  TYPE f.
+    " the distance of the control points that comes closest to a circle
+    CONSTANTS lc_kappa TYPE f VALUE '0.5523'.
+
+    lv_x = x.
+    lv_y = y.
+    lv_w = w.
+    lv_h = h.
+    lv_r = r.
+    lv_r = nmin( val1 = lv_r
+                 val2 = nmin( val1 = lv_w / 2
+                              val2 = lv_h / 2 ) ).
+    IF lv_r <= 0.
+      result = rect( x     = x
+                     y     = y
+                     w     = w
+                     h     = h
+                     style = style ).
+      RETURN.
+    ENDIF.
+    lv_k = lv_r * lc_kappa.
+
+    " clockwise on the page from the top edge, a quarter circle per corner
+    move_to( x = lv_x + lv_r
+             y = lv_y ).
+    line_to( x = lv_x + lv_w - lv_r
+             y = lv_y ).
+    curve_to( x1 = lv_x + lv_w - lv_r + lv_k
+              y1 = lv_y
+              x2 = lv_x + lv_w
+              y2 = lv_y + lv_r - lv_k
+              x3 = lv_x + lv_w
+              y3 = lv_y + lv_r ).
+    line_to( x = lv_x + lv_w
+             y = lv_y + lv_h - lv_r ).
+    curve_to( x1 = lv_x + lv_w
+              y1 = lv_y + lv_h - lv_r + lv_k
+              x2 = lv_x + lv_w - lv_r + lv_k
+              y2 = lv_y + lv_h
+              x3 = lv_x + lv_w - lv_r
+              y3 = lv_y + lv_h ).
+    line_to( x = lv_x + lv_r
+             y = lv_y + lv_h ).
+    curve_to( x1 = lv_x + lv_r - lv_k
+              y1 = lv_y + lv_h
+              x2 = lv_x
+              y2 = lv_y + lv_h - lv_r + lv_k
+              x3 = lv_x
+              y3 = lv_y + lv_h - lv_r ).
+    line_to( x = lv_x
+             y = lv_y + lv_r ).
+    curve_to( x1 = lv_x
+              y1 = lv_y + lv_r - lv_k
+              x2 = lv_x + lv_r - lv_k
+              y2 = lv_y
+              x3 = lv_x + lv_r
+              y3 = lv_y ).
+    close_path( ).
+    result = draw_path( style ).
+
+  ENDMETHOD.
+
+  METHOD move_to.
+
+    emit( |{ px( x ) } { py( y ) } m| ).
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD line_to.
+
+    emit( |{ px( x ) } { py( y ) } l| ).
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD curve_to.
+
+    emit( |{ px( x1 ) } { py( y1 ) } { px( x2 ) } { py( y2 ) } { px( x3 ) } { py( y3 ) } c| ).
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD close_path.
+
+    emit( `h` ).
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD draw_path.
+
+    emit( paint( style ) ).
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD text_rotated.
+
+    DATA lv_rad TYPE f.
+    DATA lv_cos TYPE f.
+    DATA lv_sin TYPE f.
+    DATA lv_x   TYPE f.
+    DATA lv_y   TYPE f.
+    DATA lv_off TYPE f.
+
+    result = me.
+    IF mo_font IS NOT BOUND.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = `PDF: set a font before a text is measured or written (set_font)`.
+    ENDIF.
+    DATA(lv_text) = CONV string( val ).
+    IF lv_text IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    lv_rad = angle.
+    lv_rad = lv_rad * '3.14159265358979' / 180.
+    lv_cos = cos( lv_rad ).
+    lv_sin = sin( lv_rad ).
+
+    " the start of the text, moved back along its direction to centre or end it
+    DATA(lv_align) = to_upper( align ).
+    CASE lv_align.
+      WHEN `R`.
+        lv_off = mo_font->width( val  = lv_text
+                                 size = mv_font_size ).
+      WHEN `C`.
+        lv_off = mo_font->width( val  = lv_text
+                                 size = mv_font_size ) / 2.
+    ENDCASE.
+    lv_x = x.
+    lv_x = lv_x * mv_scale - lv_off * lv_cos.
+    lv_y = y.
+    lv_y = mv_height - lv_y * mv_scale - lv_off * lv_sin.
+
+    DATA(lv_show) = |BT /{ mo_font->resource( ) } { zabaputil_cl_pdf_writer=>num( mv_font_size ) } Tf | &&
+                    |{ zabaputil_cl_pdf_writer=>num( lv_cos ) } { zabaputil_cl_pdf_writer=>num( lv_sin ) } | &&
+                    |{ zabaputil_cl_pdf_writer=>num( 0 - lv_sin ) } { zabaputil_cl_pdf_writer=>num( lv_cos ) } | &&
+                    |{ zabaputil_cl_pdf_writer=>num( lv_x ) } { zabaputil_cl_pdf_writer=>num( lv_y ) } Tm | &&
+                    |{ mo_font->encode( lv_text ) } Tj ET|.
     IF mv_text_color = mv_fill_color.
       emit( lv_show ).
     ELSE.
