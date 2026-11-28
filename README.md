@@ -628,6 +628,9 @@ DATA(lt_rows) = zabaputil_cl_pdf_barcode=>qr( val = lv_url ecc = `H` ). " the mo
 DATA(lo_letterhead) = lo_pdf->import_page( lv_letterhead_pdf ).
 lo_page->background( lo_letterhead ).
 lo_page->place( page = lo_letterhead x = 150 y = 250 w = 40 ).
+" Fields of a fillable form: text and check box, with their appearance
+lo_page->field_text( name = `name` x = 45 y = 20 w = 80 h = 9 value = `Ada` ).
+lo_page->field_checkbox( name = `agreed` x = 45 y = 36 w = 6 checked = abap_true ).
 " Bookmarks (the outline beside the pages) and links to a page of the document
 lo_pdf->add_bookmark( title = `Delivery note` )->add_bookmark( title = `Items` level = 2 y = 80 ).
 lo_page->link_page( x = 20 y = 30 w = 80 h = 6 page = 2 ).

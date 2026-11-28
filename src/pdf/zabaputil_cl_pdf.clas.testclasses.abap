@@ -26,6 +26,7 @@ CLASS ltcl_pdf DEFINITION FINAL
     METHODS link_to_page            FOR TESTING.
     METHODS attachments             FOR TESTING.
     METHODS invoice                 FOR TESTING.
+    METHODS form_fields             FOR TESTING.
 
     " a font and an image made for the tests of their classes
     METHODS font_format_4
@@ -556,6 +557,40 @@ CLASS ltcl_pdf IMPLEMENTATION.
         cl_abap_unit_assert=>fail( ).
       CATCH zabaputil_cx_util_error ##NO_HANDLER.
     ENDTRY.
+  ENDMETHOD.
+
+  METHOD form_fields.
+    DATA lv_hex TYPE string.
+    DATA(lo_pdf) = zabaputil_cl_pdf=>create( compress = abap_false ).
+    lo_pdf->add_page( )->field_text( name  = `name`
+                                     x     = 100
+                                     y     = 100
+                                     w     = 200
+                                     h     = 20
+                                     value = `Ada` )->field_checkbox( name    = `ok`
+                                                                      x       = 100
+                                                                      y       = 130
+                                                                      w       = 10
+                                                                      checked = abap_true ).
+    lv_hex = lo_pdf->render( ).
+    " the form in the catalog, with its fonts
+    DATA(lv_form) = zabaputil_cl_pdf_writer=>hex( `/AcroForm << /Fields [ 7 0 R 10 0 R ] /DA (/Helv 0 Tf 0 g) ` &&
+                                                  `/DR << /Font << /Helv 4 0 R /ZaDb 5 0 R >> >> >>` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_form ) ).
+    " a text field: its name and value in UTF-16, its appearance with the value
+    DATA(lv_name) = zabaputil_cl_pdf_writer=>hex_utf16( `name` ).
+    DATA(lv_value) = zabaputil_cl_pdf_writer=>hex_utf16( `Ada` ).
+    DATA(lv_widget) = zabaputil_cl_pdf_writer=>hex(
+        |<< /Type /Annot /Subtype /Widget /F 4 /Rect [100 721.89 300 741.89] /T <{ lv_name }> | &&
+        |/FT /Tx /V <{ lv_value }> /DA (/Helv 10 Tf 0 g)| ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_widget ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( `Tf 0 g 2 7 Td <416461> Tj ET Q EMC` ) ) ).
+    " a check box: on, two appearances
+    DATA(lv_box) = zabaputil_cl_pdf_writer=>hex( `/FT /Btn /V /Yes /AS /Yes /DA (/ZaDb 0 Tf 0 g) /MK << /CA (4) /BC [0.5] >> ` &&
+                                                 `/AP << /N << /Yes 8 0 R /Off 9 0 R >> >> >>` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_box ) ).
+    " the widgets are the annotations of the page
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( `/Annots [ 7 0 R 10 0 R ]` ) ) ).
   ENDMETHOD.
 
 ENDCLASS.

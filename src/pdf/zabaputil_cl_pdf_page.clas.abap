@@ -334,6 +334,55 @@ CLASS zabaputil_cl_pdf_page DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
 
+    "! a field of a fillable form
+    TYPES:
+      BEGIN OF ty_s_field,
+        "! T a text, C a check box
+        kind    TYPE c LENGTH 1,
+        name    TYPE string,
+        value   TYPE string,
+        checked TYPE abap_bool,
+        "! the area in points: left bottom right top
+        rect    TYPE string,
+        "! width and height in points
+        width   TYPE f,
+        height  TYPE f,
+        size    TYPE f,
+      END OF ty_s_field.
+    TYPES ty_t_field TYPE STANDARD TABLE OF ty_s_field WITH EMPTY KEY.
+
+    "! A text field of a fillable form, in Helvetica
+    "! @parameter name  | the name of the field, unique in the document
+    "! @parameter value | what it holds to begin with
+    "! @parameter size  | the font size in points
+    METHODS field_text
+      IMPORTING
+        name          TYPE clike
+        x             TYPE numeric
+        y             TYPE numeric
+        w             TYPE numeric
+        h             TYPE numeric
+        value         TYPE clike OPTIONAL
+        size          TYPE numeric DEFAULT 10
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
+
+    "! A check box of a fillable form, a square of the side w
+    METHODS field_checkbox
+      IMPORTING
+        name          TYPE clike
+        x             TYPE numeric
+        y             TYPE numeric
+        w             TYPE numeric
+        checked       TYPE abap_bool DEFAULT abap_false
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
+
+    "! The fields of the form on this page
+    METHODS fields
+      RETURNING
+        VALUE(result) TYPE ty_t_field.
+
     "! A page of another PDF file, from zabaputil_cl_pdf=>import_page, in
     "! the box x, y, w, h - stretched to it
     "! @parameter w | 0 for its own width, or what its height makes of it
@@ -395,6 +444,7 @@ CLASS zabaputil_cl_pdf_page DEFINITION
     DATA mt_annotation TYPE string_table.
     DATA mt_alpha      TYPE string_table.
     DATA mt_goto       TYPE ty_t_goto.
+    DATA mt_field      TYPE ty_t_field.
     DATA mo_font       TYPE REF TO zabaputil_if_pdf_font.
     DATA mv_font_size  TYPE f.
     " the colours as operands, `0 0 0`: text and fill share one operator in
@@ -714,6 +764,57 @@ CLASS zabaputil_cl_pdf_page IMPLEMENTATION.
   METHOD gotos.
 
     result = mt_goto.
+
+  ENDMETHOD.
+
+  METHOD field_text.
+
+    DATA ls_field TYPE ty_s_field.
+    DATA lv_x     TYPE f.
+    DATA lv_y     TYPE f.
+    DATA lv_w     TYPE f.
+    DATA lv_h     TYPE f.
+
+    lv_x = x.
+    lv_y = y.
+    lv_w = w.
+    lv_h = h.
+    ls_field-kind = `T`.
+    ls_field-name = name.
+    ls_field-value = value.
+    ls_field-size = size.
+    ls_field-rect = |{ px( lv_x ) } { py( lv_y + lv_h ) } { px( lv_x + lv_w ) } { py( lv_y ) }|.
+    ls_field-width = lv_w * mv_scale.
+    ls_field-height = lv_h * mv_scale.
+    INSERT ls_field INTO TABLE mt_field.
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD field_checkbox.
+
+    DATA ls_field TYPE ty_s_field.
+    DATA lv_x     TYPE f.
+    DATA lv_y     TYPE f.
+    DATA lv_w     TYPE f.
+
+    lv_x = x.
+    lv_y = y.
+    lv_w = w.
+    ls_field-kind = `C`.
+    ls_field-name = name.
+    ls_field-checked = checked.
+    ls_field-rect = |{ px( lv_x ) } { py( lv_y + lv_w ) } { px( lv_x + lv_w ) } { py( lv_y ) }|.
+    ls_field-width = lv_w * mv_scale.
+    ls_field-height = lv_w * mv_scale.
+    INSERT ls_field INTO TABLE mt_field.
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD fields.
+
+    result = mt_field.
 
   ENDMETHOD.
 

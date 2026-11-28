@@ -303,6 +303,19 @@ CLASS zabaputil_cl_pdf DEFINITION
       RETURNING
         VALUE(result) TYPE string.
 
+    "! The objects of the fields of a page: the widgets for its annotations
+    "! @parameter fonts | the objects of Helvetica and ZapfDingbats, made
+    "!                    with the first field
+    METHODS write_fields
+      IMPORTING
+        writer        TYPE REF TO zabaputil_cl_pdf_writer
+        page          TYPE REF TO zabaputil_cl_pdf_page
+      CHANGING
+        fonts         TYPE string
+        t_field       TYPE string_table
+      RETURNING
+        VALUE(result) TYPE string.
+
     "! The objects of the outline; its number, 0 without bookmarks
     METHODS write_outline
       IMPORTING
@@ -803,6 +816,75 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD write_fields.
+
+    DATA lv_ap   TYPE i.
+    DATA lv_off  TYPE i.
+    DATA lv_on   TYPE i.
+    DATA lv_id   TYPE i.
+    DATA lv_dict TYPE string.
+
+    DATA(lt_field) = page->fields( ).
+    IF lt_field IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    " the fonts of the appearances and of what a viewer types: Helvetica
+    " and the check mark of ZapfDingbats
+    IF fonts IS INITIAL.
+      DATA(lv_helv) = writer->add_object( `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>` ).
+      DATA(lv_zadb) = writer->add_object( `<< /Type /Font /Subtype /Type1 /BaseFont /ZapfDingbats >>` ).
+      fonts = | /Helv { lv_helv } 0 R /ZaDb { lv_zadb } 0 R|.
+    ENDIF.
+    DATA(lo_helvetica) = NEW zabaputil_cl_pdf_font_std( name     = `Helvetica`
+                                                        resource = `Helv` ).
+    DATA(lv_resources) = |/Resources << /Font <<{ fonts } >> >>|.
+
+    LOOP AT lt_field ASSIGNING FIELD-SYMBOL(<field>).
+      DATA(lv_box) = |/BBox [0 0 { zabaputil_cl_pdf_writer=>num( <field>-width ) } { zabaputil_cl_pdf_writer=>num( <field>-height ) }]|.
+      " a thin grey frame inside the area
+      DATA(lv_frame) = |q 0.5 G 0.5 w 0.25 0.25 { zabaputil_cl_pdf_writer=>num( <field>-width - 1 / 2 ) } | &&
+                       |{ zabaputil_cl_pdf_writer=>num( <field>-height - 1 / 2 ) } re S Q|.
+      lv_dict = |<< /Type /Annot /Subtype /Widget /F 4 /Rect [{ <field>-rect }] | &&
+                |/T <{ zabaputil_cl_pdf_writer=>hex_utf16( <field>-name ) }> |.
+      IF <field>-kind = `T`.
+        " the value as the viewer shows it: one line, 2 points in, centred
+        " in the height
+        DATA(lv_baseline) = ( <field>-height - <field>-size ) / 2 + <field>-size / 5.
+        lv_ap = writer->add_stream(
+            dict    = |/Type /XObject /Subtype /Form { lv_box } { lv_resources }|
+            content = zabaputil_cl_util_context=>conv_get_xstring_by_string(
+                          |{ lv_frame }\n/Tx BMC q BT /Helv { zabaputil_cl_pdf_writer=>num( <field>-size ) } Tf 0 g | &&
+                          |2 { zabaputil_cl_pdf_writer=>num( lv_baseline ) } Td | &&
+                          |{ lo_helvetica->zabaputil_if_pdf_font~encode( <field>-value ) } Tj ET Q EMC| ) ).
+        lv_dict = |{ lv_dict }/FT /Tx /V <{ zabaputil_cl_pdf_writer=>hex_utf16( <field>-value ) }> | &&
+                  |/DA (/Helv { zabaputil_cl_pdf_writer=>num( <field>-size ) } Tf 0 g) /MK << /BC [0.5] >> | &&
+                  |/AP << /N { lv_ap } 0 R >> >>|.
+      ELSE.
+        " two appearances: the frame with a check mark, drawn - no font a
+        " viewer might not have - and the frame alone
+        DATA(lv_w) = <field>-width.
+        DATA(lv_h) = <field>-height.
+        lv_on = writer->add_stream(
+            dict    = |/Type /XObject /Subtype /Form { lv_box }|
+            content = zabaputil_cl_util_context=>conv_get_xstring_by_string(
+                          |{ lv_frame }\nq 0 G { zabaputil_cl_pdf_writer=>num( lv_w / 8 ) } w 1 J 1 j | &&
+                          |{ zabaputil_cl_pdf_writer=>num( lv_w * 2 / 10 ) } { zabaputil_cl_pdf_writer=>num( lv_h * 5 / 10 ) } m | &&
+                          |{ zabaputil_cl_pdf_writer=>num( lv_w * 4 / 10 ) } { zabaputil_cl_pdf_writer=>num( lv_h * 25 / 100 ) } l | &&
+                          |{ zabaputil_cl_pdf_writer=>num( lv_w * 8 / 10 ) } { zabaputil_cl_pdf_writer=>num( lv_h * 8 / 10 ) } l S Q| ) ).
+        lv_off = writer->add_stream( dict    = |/Type /XObject /Subtype /Form { lv_box }|
+                                     content = zabaputil_cl_util_context=>conv_get_xstring_by_string( lv_frame ) ).
+        DATA(lv_state) = COND string( WHEN <field>-checked = abap_true THEN `/Yes` ELSE `/Off` ).
+        lv_dict = |{ lv_dict }/FT /Btn /V { lv_state } /AS { lv_state } /DA (/ZaDb 0 Tf 0 g) | &&
+                  |/MK << /CA (4) /BC [0.5] >> /AP << /N << /Yes { lv_on } 0 R /Off { lv_off } 0 R >> >> >>|.
+      ENDIF.
+      lv_id = writer->add_object( lv_dict ).
+      result = |{ result } { lv_id } 0 R|.
+      INSERT | { lv_id } 0 R| INTO TABLE t_field.
+    ENDLOOP.
+
+  ENDMETHOD.
+
   METHOD write_outline.
 
     DATA lt_id     TYPE STANDARD TABLE OF i WITH EMPTY KEY.
@@ -968,6 +1050,14 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
           CATCH cx_sy_move_cast_error ##NO_HANDLER.
         ENDTRY.
       ENDLOOP.
+      " the appearance of a text field is in Helvetica
+      LOOP AT mt_page INTO DATA(lo_field_page).
+        IF lo_field_page->fields( ) IS NOT INITIAL.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = `PDF/A: the fields of a form are written in Helvetica, which is not embedded`.
+        ENDIF.
+      ENDLOOP.
       " nor does it show the missing glyph
       DATA(lt_missing) = missing_chars( ).
       IF lt_missing IS NOT INITIAL.
@@ -1017,6 +1107,8 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
         |<< /ProcSet [/PDF /Text /ImageB /ImageC /ImageI] /Font <<{ lv_fonts } >> /XObject <<{ lv_images } >>{ lv_states } >>| ).
 
     DATA(lv_pages) = lo_writer->reserve( ).
+    DATA lv_field_fonts TYPE string.
+    DATA lt_field_id    TYPE string_table.
 
     " links into the document and bookmarks need the numbers of the page
     " objects before the pages are written
@@ -1050,6 +1142,11 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
         lv_id = lo_writer->add_object( lv_annotation ).
         lv_annots = lv_annots && | { lv_id } 0 R|.
       ENDLOOP.
+      " the fields of a fillable form: widgets with their appearance
+      lv_annots = lv_annots && write_fields( EXPORTING writer  = lo_writer
+                                                       page    = lo_page
+                                             CHANGING  fonts   = lv_field_fonts
+                                                       t_field = lt_field_id ).
       LOOP AT lo_page->gotos( ) INTO DATA(ls_goto).
         IF ls_goto-page < 1 OR ls_goto-page > lines( mt_page ).
           CONTINUE.
@@ -1089,6 +1186,10 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
       lv_catalog_extra = | /Outlines { lv_outline } 0 R /PageMode /UseOutlines|.
     ENDIF.
     lv_catalog_extra = lv_catalog_extra && write_attachments( lo_writer ).
+    IF lt_field_id IS NOT INITIAL.
+      lv_catalog_extra = |{ lv_catalog_extra } /AcroForm << /Fields [{ concat_lines_of( lt_field_id ) } ] | &&
+                         |/DA (/Helv 0 Tf 0 g) /DR << /Font <<{ lv_field_fonts } >> >> >>|.
+    ENDIF.
 
     " PDF/A: the metadata, the colours of the device as sRGB, the time
     DATA lv_date     TYPE string.
