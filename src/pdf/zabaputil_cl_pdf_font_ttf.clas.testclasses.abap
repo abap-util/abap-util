@@ -97,13 +97,13 @@ CLASS ltcl_font_ttf IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD font.
-    result = NEW zabaputil_cl_pdf_font_ttf( content  = content
-                                            resource = `F1` ).
+    CREATE OBJECT result TYPE zabaputil_cl_pdf_font_ttf EXPORTING content = content resource = `F1`.
   ENDMETHOD.
 
   METHOD rendered.
     " the file with the objects of the font, not deflated, in hex
-    DATA(lo_writer) = NEW zabaputil_cl_pdf_writer( abap_false ).
+    DATA lo_writer TYPE REF TO zabaputil_cl_pdf_writer.
+    CREATE OBJECT lo_writer TYPE zabaputil_cl_pdf_writer EXPORTING COMPRESS = abap_false.
     result = lo_writer->render( font->write( lo_writer ) ).
   ENDMETHOD.
 
@@ -112,15 +112,15 @@ CLASS ltcl_font_ttf IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD name_from_table.
-    DATA(lo_font) = NEW zabaputil_cl_pdf_font_ttf( content  = font_format_4( )
-                                                   resource = `F3` ).
+    DATA lo_font TYPE REF TO zabaputil_cl_pdf_font_ttf.
+    CREATE OBJECT lo_font TYPE zabaputil_cl_pdf_font_ttf EXPORTING content = font_format_4( ) resource = `F3`.
     cl_abap_unit_assert=>assert_equals( exp = `TestFont` act = lo_font->name( ) ).
     cl_abap_unit_assert=>assert_equals( exp = `F3` act = lo_font->zabaputil_if_pdf_font~resource( ) ).
   ENDMETHOD.
 
   METHOD glyph_format_4.
-    DATA(lo_font) = NEW zabaputil_cl_pdf_font_ttf( content  = font_format_4( )
-                                                   resource = `F1` ).
+    DATA lo_font TYPE REF TO zabaputil_cl_pdf_font_ttf.
+    CREATE OBJECT lo_font TYPE zabaputil_cl_pdf_font_ttf EXPORTING content = font_format_4( ) resource = `F1`.
     cl_abap_unit_assert=>assert_equals( exp = 1 act = lo_font->glyph( 65 ) ).
     cl_abap_unit_assert=>assert_equals( exp = 2 act = lo_font->glyph( 66 ) ).
     cl_abap_unit_assert=>assert_equals( exp = 0 act = lo_font->glyph( 64 ) ).
@@ -131,8 +131,8 @@ CLASS ltcl_font_ttf IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD glyph_format_12.
-    DATA(lo_font) = NEW zabaputil_cl_pdf_font_ttf( content  = font_format_12( )
-                                                   resource = `F1` ).
+    DATA lo_font TYPE REF TO zabaputil_cl_pdf_font_ttf.
+    CREATE OBJECT lo_font TYPE zabaputil_cl_pdf_font_ttf EXPORTING content = font_format_12( ) resource = `F1`.
     cl_abap_unit_assert=>assert_equals( exp = 1 act = lo_font->glyph( 65 ) ).
     cl_abap_unit_assert=>assert_equals( exp = 2 act = lo_font->glyph( 66 ) ).
     cl_abap_unit_assert=>assert_equals( exp = 3 act = lo_font->glyph( 128512 ) ).
@@ -152,6 +152,8 @@ CLASS ltcl_font_ttf IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD width_of_text.
+    DATA temp1 TYPE xstring.
+    DATA lv_text TYPE string.
     " A 600 + B 700, and 500 for the missing glyph
     cl_abap_unit_assert=>assert_equals( exp = `13`
                                         act = num( font( font_format_4( ) )->width( val  = `AB`
@@ -159,7 +161,10 @@ CLASS ltcl_font_ttf IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( exp = `11`
                                         act = num( font( font_format_4( ) )->width( val  = `Ax`
                                                                                     size = 10 ) ) ).
-    DATA(lv_text) = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `F09F9880` ) ).
+    
+    temp1 = `F09F9880`.
+    
+    lv_text = zabaputil_cl_util_context=>conv_get_string_by_xstring( temp1 ).
     cl_abap_unit_assert=>assert_equals( exp = `8`
                                         act = num( font( font_format_12( ) )->width( val  = lv_text
                                                                                      size = 10 ) ) ).
@@ -171,82 +176,150 @@ CLASS ltcl_font_ttf IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD write_objects.
-    DATA(lo_font) = font( font_format_4( ) ).
+    DATA lo_font TYPE REF TO zabaputil_if_pdf_font.
+    DATA lv_hex TYPE string.
+    DATA lv_expect TYPE string.
+    DATA temp1 TYPE xsdboolean.
+    DATA temp2 TYPE xsdboolean.
+    DATA temp3 TYPE xsdboolean.
+    DATA temp4 TYPE xsdboolean.
+    DATA temp5 TYPE xsdboolean.
+    DATA lv_file TYPE string.
+    DATA temp6 TYPE xsdboolean.
+    lo_font = font( font_format_4( ) ).
     lo_font->encode( `AB` ).
-    DATA(lv_hex) = rendered( lo_font ).
+    
+    lv_hex = rendered( lo_font ).
 
     " the file, its descriptor, the font of the glyphs, the map back to
     " Unicode and the composite font - the last one is the font dictionary
-    DATA(lv_expect) = zabaputil_cl_pdf_writer=>hex( |1 0 obj\n<< /Length1 668 /Length 668 >>\nstream\n| ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
+    
+    lv_expect = zabaputil_cl_pdf_writer=>hex( |1 0 obj\n<< /Length1 668 /Length 668 >>\nstream\n| ).
+    
+    temp1 = boolc( lv_hex CS lv_expect ).
+    cl_abap_unit_assert=>assert_true( temp1 ).
     lv_expect = zabaputil_cl_pdf_writer=>hex(
         `<< /Type /FontDescriptor /FontName /TestFont /Flags 4 /FontBBox [50 0 700 700] ` &&
         `/ItalicAngle 0 /Ascent 800 /Descent -200 /CapHeight 700 /StemV 80 /FontFile2 1 0 R >>` ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
+    
+    temp2 = boolc( lv_hex CS lv_expect ).
+    cl_abap_unit_assert=>assert_true( temp2 ).
     lv_expect = zabaputil_cl_pdf_writer=>hex(
         `/FontDescriptor 2 0 R /DW 1000 /W [ 1 [600] 2 [700] ] /CIDToGIDMap /Identity >>` ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
+    
+    temp3 = boolc( lv_hex CS lv_expect ).
+    cl_abap_unit_assert=>assert_true( temp3 ).
     lv_expect = zabaputil_cl_pdf_writer=>hex( |2 beginbfchar\n<0001> <0041>\n<0002> <0042>\nendbfchar\n| ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
+    
+    temp4 = boolc( lv_hex CS lv_expect ).
+    cl_abap_unit_assert=>assert_true( temp4 ).
     lv_expect = zabaputil_cl_pdf_writer=>hex(
         |5 0 obj\n<< /Type /Font /Subtype /Type0 /BaseFont /TestFont /Encoding /Identity-H | &&
         |/DescendantFonts [3 0 R] /ToUnicode 4 0 R >>| ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
+    
+    temp5 = boolc( lv_hex CS lv_expect ).
+    cl_abap_unit_assert=>assert_true( temp5 ).
     " the font file itself is in the PDF, byte for byte
-    DATA lv_file TYPE string.
+    
     lv_file = font_format_4( ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_file ) ).
+    
+    temp6 = boolc( lv_hex CS lv_file ).
+    cl_abap_unit_assert=>assert_true( temp6 ).
   ENDMETHOD.
 
   METHOD write_used_glyphs_only.
     " B twice, a missing character and no A: one width for B, one for
     " the missing glyph - and the missing glyph maps to no character
-    DATA(lo_font) = font( font_format_4( ) ).
+    DATA lo_font TYPE REF TO zabaputil_if_pdf_font.
+    DATA lv_hex TYPE string.
+    DATA lv_expect TYPE string.
+    DATA temp7 TYPE xsdboolean.
+    DATA temp8 TYPE xsdboolean.
+    lo_font = font( font_format_4( ) ).
     lo_font->encode( `BxB` ).
-    DATA(lv_hex) = rendered( lo_font ).
-    DATA(lv_expect) = zabaputil_cl_pdf_writer=>hex( `/W [ 0 [500] 2 [700] ]` ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
+    
+    lv_hex = rendered( lo_font ).
+    
+    lv_expect = zabaputil_cl_pdf_writer=>hex( `/W [ 0 [500] 2 [700] ]` ).
+    
+    temp7 = boolc( lv_hex CS lv_expect ).
+    cl_abap_unit_assert=>assert_true( temp7 ).
     lv_expect = zabaputil_cl_pdf_writer=>hex( |1 beginbfchar\n<0002> <0042>\nendbfchar\n| ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
+    
+    temp8 = boolc( lv_hex CS lv_expect ).
+    cl_abap_unit_assert=>assert_true( temp8 ).
   ENDMETHOD.
 
   METHOD write_astral.
-    DATA(lv_text) = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `F09F9880` ) ).
-    DATA(lo_font) = font( font_format_12( ) ).
+    DATA temp2 TYPE xstring.
+    DATA lv_text TYPE string.
+    DATA lo_font TYPE REF TO zabaputil_if_pdf_font.
+    DATA lv_hex TYPE string.
+    DATA lv_expect TYPE string.
+    DATA temp9 TYPE xsdboolean.
+    DATA temp10 TYPE xsdboolean.
+    temp2 = `F09F9880`.
+    
+    lv_text = zabaputil_cl_util_context=>conv_get_string_by_xstring( temp2 ).
+    
+    lo_font = font( font_format_12( ) ).
     cl_abap_unit_assert=>assert_equals( exp = `<0003>` act = lo_font->encode( lv_text ) ).
-    DATA(lv_hex) = rendered( lo_font ).
-    DATA(lv_expect) = zabaputil_cl_pdf_writer=>hex( |<0003> <D83DDE00>\n| ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
+    
+    lv_hex = rendered( lo_font ).
+    
+    lv_expect = zabaputil_cl_pdf_writer=>hex( |<0003> <D83DDE00>\n| ).
+    
+    temp9 = boolc( lv_hex CS lv_expect ).
+    cl_abap_unit_assert=>assert_true( temp9 ).
     lv_expect = zabaputil_cl_pdf_writer=>hex( `/W [ 3 [800] ]` ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
+    
+    temp10 = boolc( lv_hex CS lv_expect ).
+    cl_abap_unit_assert=>assert_true( temp10 ).
   ENDMETHOD.
 
   METHOD not_a_font.
+        DATA temp3 TYPE xstring.
+        DATA temp4 TYPE xstring.
     TRY.
-        font( CONV xstring( `255044462D312E340A25E2E3CFD30A00` ) ).
+        
+        temp3 = `255044462D312E340A25E2E3CFD30A00`.
+        font( temp3 ).
         cl_abap_unit_assert=>fail( ).
       CATCH zabaputil_cx_util_error ##NO_HANDLER.
     ENDTRY.
     TRY.
-        font( CONV xstring( `0001` ) ).
+        
+        temp4 = `0001`.
+        font( temp4 ).
         cl_abap_unit_assert=>fail( ).
       CATCH zabaputil_cx_util_error ##NO_HANDLER.
     ENDTRY.
   ENDMETHOD.
 
   METHOD postscript_outlines.
+        DATA temp5 TYPE xstring.
+        DATA lx TYPE REF TO zabaputil_cx_util_error.
+        DATA temp11 TYPE xsdboolean.
     " OTTO: an OpenType font with CFF outlines
     TRY.
-        font( CONV xstring( `4F54544F000A008000030020` ) ).
+        
+        temp5 = `4F54544F000A008000030020`.
+        font( temp5 ).
         cl_abap_unit_assert=>fail( ).
-      CATCH zabaputil_cx_util_error INTO DATA(lx).
-        cl_abap_unit_assert=>assert_true( xsdbool( lx->get_text( ) CS `.otf` ) ).
+        
+      CATCH zabaputil_cx_util_error INTO lx.
+        
+        temp11 = boolc( lx->get_text( ) CS `.otf` ).
+        cl_abap_unit_assert=>assert_true( temp11 ).
     ENDTRY.
   ENDMETHOD.
 
   METHOD collection.
+        DATA temp6 TYPE xstring.
     TRY.
-        font( CONV xstring( `74746366000200000000000200000014` ) ).
+        
+        temp6 = `74746366000200000000000200000014`.
+        font( temp6 ).
         cl_abap_unit_assert=>fail( ).
       CATCH zabaputil_cx_util_error ##NO_HANDLER.
     ENDTRY.
@@ -254,8 +327,11 @@ CLASS ltcl_font_ttf IMPLEMENTATION.
 
   METHOD truncated.
     " the directory is there, the tables behind it are not
-    DATA(lv_font) = font_format_4( ).
-    DATA(lv_head) = lv_font(200).
+    DATA lv_font TYPE xstring.
+    DATA lv_head TYPE xstring.
+    lv_font = font_format_4( ).
+    
+    lv_head = lv_font(200).
     TRY.
         font( lv_head ).
         cl_abap_unit_assert=>fail( ).

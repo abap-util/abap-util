@@ -33,9 +33,9 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
         "! L, C or R
         align TYPE string,
       END OF ty_s_column.
-    TYPES ty_t_column TYPE STANDARD TABLE OF ty_s_column WITH EMPTY KEY.
+    TYPES ty_t_column TYPE STANDARD TABLE OF ty_s_column WITH DEFAULT KEY.
     "! the rows of a table as texts, a string_table per row
-    TYPES ty_t_text_row TYPE STANDARD TABLE OF string_table WITH EMPTY KEY.
+    TYPES ty_t_text_row TYPE STANDARD TABLE OF string_table WITH DEFAULT KEY.
 
     "! @parameter pdf | the document; the margins start at 20 mm on every side
     METHODS constructor
@@ -204,7 +204,7 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
       BEGIN OF ty_s_cell,
         t_line TYPE string_table,
       END OF ty_s_cell.
-    TYPES ty_t_cell TYPE STANDARD TABLE OF ty_s_cell WITH EMPTY KEY.
+    TYPES ty_t_cell TYPE STANDARD TABLE OF ty_s_cell WITH DEFAULT KEY.
 
     " the lines of a rule and of the table cells: half a point, grey
     CONSTANTS c_line_width TYPE f VALUE '0.5'.
@@ -212,7 +212,7 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
 
     DATA mo_pdf          TYPE REF TO zabaputil_cl_pdf.
     DATA mo_page         TYPE REF TO zabaputil_cl_pdf_page.
-    DATA mt_page         TYPE STANDARD TABLE OF REF TO zabaputil_cl_pdf_page WITH EMPTY KEY.
+    DATA mt_page         TYPE STANDARD TABLE OF REF TO zabaputil_cl_pdf_page WITH DEFAULT KEY.
     DATA mv_scale        TYPE f.
     DATA mv_left         TYPE f.
     DATA mv_top          TYPE f.
@@ -379,8 +379,11 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
 
   METHOD baseline.
 
-    DATA(lv_ascent) = font->ascent( mv_size ) / mv_scale.
-    DATA(lv_descent) = font->descent( mv_size ) / mv_scale.
+    DATA lv_ascent TYPE f.
+    DATA lv_descent TYPE f.
+    lv_ascent = font->ascent( mv_size ) / mv_scale.
+    
+    lv_descent = font->descent( mv_size ) / mv_scale.
     result = ( line_height( ) - lv_ascent - lv_descent ) / 2 + lv_ascent.
 
   ENDMETHOD.
@@ -433,7 +436,8 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
 
   METHOD rule.
 
-    DATA(lv_gap) = line_height( ) / 2.
+    DATA lv_gap TYPE f.
+    lv_gap = line_height( ) / 2.
 
     ensure( lv_gap * 2 ).
     mv_y = mv_y + lv_gap.
@@ -451,11 +455,14 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
   METHOD wrap.
 
     DATA lv_width TYPE f.
+    DATA temp47 TYPE string.
 
     font_check( ).
     lv_width = width.
+    
+    temp47 = val.
     result = wrap_font( font  = mo_font
-                        val   = CONV string( val )
+                        val   = temp47
                         width = lv_width ).
 
   ENDMETHOD.
@@ -471,12 +478,19 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
 
     " widths in points; a word is measured once, and a line is the sum
     " of its words and the blanks between them
-    DATA(lv_max) = width * mv_scale.
-    DATA(lv_blank) = font->width( val  = ` `
+    DATA lv_max TYPE f.
+    DATA lv_blank TYPE f.
+    DATA lt_word TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+    DATA lv_word LIKE LINE OF lt_word.
+    lv_max = width * mv_scale.
+    
+    lv_blank = font->width( val  = ` `
                                   size = mv_size ).
 
-    SPLIT val AT ` ` INTO TABLE DATA(lt_word).
-    LOOP AT lt_word INTO DATA(lv_word).
+    
+    SPLIT val AT ` ` INTO TABLE lt_word.
+    
+    LOOP AT lt_word INTO lv_word.
 
       IF lv_word IS INITIAL.
         CONTINUE.
@@ -533,33 +547,52 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
   METHOD text.
 
     DATA lv_x TYPE f.
+    DATA temp48 TYPE string.
+    DATA lv_text LIKE temp48.
+    DATA lv_line_feed TYPE string.
+    DATA lt_paragraph TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+    DATA lv_align TYPE string.
+    DATA lv_height TYPE f.
+    DATA lv_paragraph LIKE LINE OF lt_paragraph.
+      DATA lt_line TYPE string_table.
+      DATA lv_line LIKE LINE OF lt_line.
 
     result = me.
     font_check( ).
 
-    DATA(lv_text) = CONV string( val ).
-    DATA(lv_line_feed) = |\n|.
+    
+    temp48 = val.
+    
+    lv_text = temp48.
+    
+    lv_line_feed = |\n|.
     lv_text = replace( val  = lv_text
                        sub  = |\r\n|
                        with = lv_line_feed
                        occ  = 0 ).
-    SPLIT lv_text AT lv_line_feed INTO TABLE DATA(lt_paragraph).
+    
+    SPLIT lv_text AT lv_line_feed INTO TABLE lt_paragraph.
 
-    DATA(lv_align) = to_upper( align ).
-    DATA(lv_height) = line_height( ).
+    
+    lv_align = to_upper( align ).
+    
+    lv_height = line_height( ).
 
-    LOOP AT lt_paragraph INTO DATA(lv_paragraph).
+    
+    LOOP AT lt_paragraph INTO lv_paragraph.
 
       " the width of this page - a page break inside the text may change it
       page( ).
-      DATA(lt_line) = wrap_font( font  = mo_font
+      
+      lt_line = wrap_font( font  = mo_font
                                  val   = lv_paragraph
                                  width = mo_page->width( ) - mv_left - mv_right ).
       IF lt_line IS INITIAL.
         INSERT `` INTO TABLE lt_line.
       ENDIF.
 
-      LOOP AT lt_line INTO DATA(lv_line).
+      
+      LOOP AT lt_line INTO lv_line.
         ensure( lv_height ).
         CASE lv_align.
           WHEN `R`.
@@ -592,10 +625,13 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
 
     FIELD-SYMBOLS <row>   TYPE any.
     FIELD-SYMBOLS <value> TYPE any.
+      FIELD-SYMBOLS <column> LIKE LINE OF columns.
+          DATA temp49 LIKE LINE OF lt_cell.
 
     LOOP AT rows ASSIGNING <row>.
       CLEAR lt_cell.
-      LOOP AT columns ASSIGNING FIELD-SYMBOL(<column>).
+      
+      LOOP AT columns ASSIGNING <column>.
         lv_index = sy-tabix.
         UNASSIGN <value>.
         IF <column>-name IS INITIAL.
@@ -612,7 +648,9 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
           ENDIF.
         ENDIF.
         IF <value> IS ASSIGNED.
-          INSERT |{ <value> }| INTO TABLE lt_cell.
+          
+          temp49 = |{ <value> }|.
+          INSERT temp49 INTO TABLE lt_cell.
         ELSE.
           INSERT `` INTO TABLE lt_cell.
         ENDIF.
@@ -632,6 +670,8 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
     DATA lv_open  TYPE i.
     DATA lv_share TYPE f.
     DATA lv_title TYPE abap_bool.
+    FIELD-SYMBOLS <column> LIKE LINE OF mt_column.
+    FIELD-SYMBOLS <row> LIKE LINE OF rows.
 
     result = me.
     font_check( ).
@@ -642,7 +682,8 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
 
     " a column without a width takes an equal share of what is left
     mt_column = columns.
-    LOOP AT mt_column ASSIGNING FIELD-SYMBOL(<column>).
+    
+    LOOP AT mt_column ASSIGNING <column>.
       IF <column>-width > 0.
         lv_fixed = lv_fixed + <column>-width.
       ELSE.
@@ -673,7 +714,8 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
       table_header( ).
     ENDIF.
 
-    LOOP AT rows ASSIGNING FIELD-SYMBOL(<row>).
+    
+    LOOP AT rows ASSIGNING <row>.
       table_row( cells = <row>
                  font  = mo_font ).
     ENDLOOP.
@@ -687,7 +729,8 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
 
     DATA lt_cell TYPE string_table.
 
-    LOOP AT mt_column ASSIGNING FIELD-SYMBOL(<column>).
+    FIELD-SYMBOLS <column> LIKE LINE OF mt_column.
+    LOOP AT mt_column ASSIGNING <column>.
       INSERT <column>-title INTO TABLE lt_cell.
     ENDLOOP.
     table_row( cells     = lt_cell
@@ -711,14 +754,32 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
     CONSTANTS lc_tolerance TYPE f VALUE '0.001'.
 
     " three points between the text and the lines of the cell
-    DATA(lv_pad) = 3 / mv_scale.
-    DATA(lv_height) = line_height( ).
+    DATA lv_pad TYPE f.
+    DATA lv_height TYPE f.
+    FIELD-SYMBOLS <column> LIKE LINE OF mt_column.
+        FIELD-SYMBOLS <temp50> LIKE LINE OF cells.
+        DATA temp51 LIKE sy-tabix.
+    DATA lv_row_height TYPE f.
+      FIELD-SYMBOLS <wrapped> TYPE zabaputil_cl_pdf_layout=>ty_s_cell.
+      DATA lv_line LIKE LINE OF <wrapped>-t_line.
+    lv_pad = 3 / mv_scale.
+    
+    lv_height = line_height( ).
 
-    LOOP AT mt_column ASSIGNING FIELD-SYMBOL(<column>).
+    
+    LOOP AT mt_column ASSIGNING <column>.
       lv_index = sy-tabix.
       CLEAR lv_cell.
       IF lv_index <= lines( cells ).
-        lv_cell = cells[ lv_index ].
+        
+        
+        temp51 = sy-tabix.
+        READ TABLE cells INDEX lv_index ASSIGNING <temp50>.
+        sy-tabix = temp51.
+        IF sy-subrc <> 0.
+          ASSERT 1 = 0.
+        ENDIF.
+        lv_cell = <temp50>.
       ENDIF.
       ls_wrapped-t_line = wrap_font( font  = font
                                      val   = lv_cell
@@ -731,7 +792,8 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
 
     " a row stays in one piece: when it does not fit, the table goes on
     " at the top of the next page, under a header row of its own
-    DATA(lv_row_height) = lv_lines * lv_height + lv_pad * 2.
+    
+    lv_row_height = lv_lines * lv_height + lv_pad * 2.
     IF mv_y + lv_row_height > mo_page->height( ) - mv_bottom + lc_tolerance AND mv_y > mv_top + lc_tolerance.
       new_page( ).
       IF is_header = abap_false AND mo_header_font IS BOUND.
@@ -774,8 +836,10 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
       ENDCASE.
 
       lv_text_y = mv_y + lv_pad + baseline( font ).
-      ASSIGN lt_wrapped[ lv_index ] TO FIELD-SYMBOL(<wrapped>).
-      LOOP AT <wrapped>-t_line INTO DATA(lv_line).
+      
+      READ TABLE lt_wrapped INDEX lv_index ASSIGNING <wrapped>.
+      
+      LOOP AT <wrapped>-t_line INTO lv_line.
         mo_page->text( x     = lv_text_x
                        y     = lv_text_y
                        val   = lv_line
@@ -812,6 +876,7 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
 
     DATA lv_number TYPE i.
     DATA lv_text   TYPE string.
+    DATA lo_page LIKE LINE OF mt_page.
 
     IF mv_finished = abap_true.
       RETURN.
@@ -823,7 +888,8 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
     ENDIF.
     font_check( ).
 
-    LOOP AT mt_page INTO DATA(lo_page).
+    
+    LOOP AT mt_page INTO lo_page.
       lv_number = sy-tabix.
 
       IF mv_header IS NOT INITIAL.

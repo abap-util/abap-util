@@ -105,7 +105,7 @@ CLASS zabaputil_cl_pdf_barcode IMPLEMENTATION.
 
   METHOD code128.
 
-    DATA lt_value TYPE STANDARD TABLE OF i WITH EMPTY KEY.
+    DATA lt_value TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
     DATA lv_set   TYPE c LENGTH 1.
     DATA lv_index TYPE i.
     DATA lv_run   TYPE i.
@@ -113,8 +113,24 @@ CLASS zabaputil_cl_pdf_barcode IMPLEMENTATION.
     DATA lv_sum   TYPE i.
     DATA lv_first TYPE i.
 
-    DATA(lt_symbol) = symbols( val ).
-    DATA(lv_count) = lines( lt_symbol ).
+    DATA lt_symbol TYPE string_table.
+    DATA lv_count TYPE i.
+    FIELD-SYMBOLS <temp1> LIKE LINE OF lt_symbol.
+    DATA temp2 LIKE sy-tabix.
+      DATA lv_symbol LIKE LINE OF lt_symbol.
+      FIELD-SYMBOLS <temp2> LIKE LINE OF lt_symbol.
+      DATA temp3 LIKE sy-tabix.
+          FIELD-SYMBOLS <temp3> LIKE LINE OF lt_symbol.
+          DATA temp4 LIKE sy-tabix.
+      DATA lv_pattern TYPE string.
+      DATA lv_bar LIKE abap_true.
+        DATA lv_offset TYPE i.
+        DATA temp5 TYPE i.
+        DATA lv_width LIKE temp5.
+        DATA temp1 TYPE xsdboolean.
+    lt_symbol = symbols( val ).
+    
+    lv_count = lines( lt_symbol ).
     IF lv_count = 0.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
         EXPORTING
@@ -124,7 +140,15 @@ CLASS zabaputil_cl_pdf_barcode IMPLEMENTATION.
     " the start: C when the text begins with four digits - behind an FNC1,
     " where GS1 data begins - or is two digits alone
     lv_first = 1.
-    IF lt_symbol[ 1 ] = c_fnc1.
+    
+    
+    temp2 = sy-tabix.
+    READ TABLE lt_symbol INDEX 1 ASSIGNING <temp1>.
+    sy-tabix = temp2.
+    IF sy-subrc <> 0.
+      ASSERT 1 = 0.
+    ENDIF.
+    IF <temp1> = c_fnc1.
       lv_first = 2.
     ENDIF.
     lv_run = digits( symbols = lt_symbol
@@ -139,7 +163,16 @@ CLASS zabaputil_cl_pdf_barcode IMPLEMENTATION.
 
     lv_index = 1.
     WHILE lv_index <= lv_count.
-      DATA(lv_symbol) = lt_symbol[ lv_index ].
+      
+      
+      
+      temp3 = sy-tabix.
+      READ TABLE lt_symbol INDEX lv_index ASSIGNING <temp2>.
+      sy-tabix = temp3.
+      IF sy-subrc <> 0.
+        ASSERT 1 = 0.
+      ENDIF.
+      lv_symbol = <temp2>.
 
       IF lv_symbol = c_fnc1.
         INSERT cs_code-fnc1 INTO TABLE lt_value.
@@ -152,7 +185,15 @@ CLASS zabaputil_cl_pdf_barcode IMPLEMENTATION.
 
       IF lv_set = `C`.
         IF lv_run >= 2.
-          lv_value = lv_symbol && lt_symbol[ lv_index + 1 ].
+          
+          
+          temp4 = sy-tabix.
+          READ TABLE lt_symbol INDEX lv_index + 1 ASSIGNING <temp3>.
+          sy-tabix = temp4.
+          IF sy-subrc <> 0.
+            ASSERT 1 = 0.
+          ENDIF.
+          lv_value = lv_symbol && <temp3>.
           INSERT lv_value INTO TABLE lt_value.
           lv_index = lv_index + 2.
           CONTINUE.
@@ -195,11 +236,17 @@ CLASS zabaputil_cl_pdf_barcode IMPLEMENTATION.
     INSERT cs_code-stop INTO TABLE lt_value.
 
     LOOP AT lt_value INTO lv_value.
-      DATA(lv_pattern) = pattern( lv_value ).
-      DATA(lv_bar) = abap_true.
+      
+      lv_pattern = pattern( lv_value ).
+      
+      lv_bar = abap_true.
       DO strlen( lv_pattern ) TIMES.
-        DATA(lv_offset) = sy-index - 1.
-        DATA(lv_width) = CONV i( lv_pattern+lv_offset(1) ).
+        
+        lv_offset = sy-index - 1.
+        
+        temp5 = lv_pattern+lv_offset(1).
+        
+        lv_width = temp5.
         DO lv_width TIMES.
           IF lv_bar = abap_true.
             result = result && `1`.
@@ -207,7 +254,9 @@ CLASS zabaputil_cl_pdf_barcode IMPLEMENTATION.
             result = result && `0`.
           ENDIF.
         ENDDO.
-        lv_bar = xsdbool( lv_bar = abap_false ).
+        
+        temp1 = boolc( lv_bar = abap_false ).
+        lv_bar = temp1.
       ENDDO.
     ENDLOOP.
 
@@ -219,7 +268,8 @@ CLASS zabaputil_cl_pdf_barcode IMPLEMENTATION.
     DATA lv_start  TYPE i.
     DATA lv_offset TYPE i.
 
-    DATA(lv_count) = strlen( modules ).
+    DATA lv_count TYPE i.
+    lv_count = strlen( modules ).
     IF lv_count = 0.
       RETURN.
     ENDIF.
@@ -249,6 +299,7 @@ CLASS zabaputil_cl_pdf_barcode IMPLEMENTATION.
   METHOD symbols.
 
     DATA lv_text TYPE string.
+      DATA lv_char TYPE string.
 
     lv_text = val.
     IF strlen( lv_text ) > 0 AND lv_text(1) = `(`.
@@ -259,7 +310,8 @@ CLASS zabaputil_cl_pdf_barcode IMPLEMENTATION.
     " a blank is a character of its own: substring( ) keeps it, a field
     " of type c would lose it
     DO strlen( lv_text ) TIMES.
-      DATA(lv_char) = substring( val = lv_text
+      
+      lv_char = substring( val = lv_text
                                  off = sy-index - 1
                                  len = 1 ).
       IF find( val = c_ascii
@@ -342,10 +394,22 @@ CLASS zabaputil_cl_pdf_barcode IMPLEMENTATION.
   METHOD digits.
 
     DATA lv_index TYPE i.
+      DATA lv_symbol LIKE LINE OF symbols.
+      FIELD-SYMBOLS <temp4> LIKE LINE OF symbols.
+      DATA temp5 LIKE sy-tabix.
 
     lv_index = from.
     WHILE lv_index <= lines( symbols ).
-      DATA(lv_symbol) = symbols[ lv_index ].
+      
+      
+      
+      temp5 = sy-tabix.
+      READ TABLE symbols INDEX lv_index ASSIGNING <temp4>.
+      sy-tabix = temp5.
+      IF sy-subrc <> 0.
+        ASSERT 1 = 0.
+      ENDIF.
+      lv_symbol = <temp4>.
       IF strlen( lv_symbol ) <> 1 OR lv_symbol CN `0123456789`.
         EXIT.
       ENDIF.

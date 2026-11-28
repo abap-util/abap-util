@@ -23,53 +23,116 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_info.
 
-    DATA(lo_log) = NEW zabaputil_cl_util_log( ).
+    DATA lo_log TYPE REF TO zabaputil_cl_util_log.
+    DATA lt_msg TYPE zabaputil_cl_util_context=>ty_t_msg.
+    FIELD-SYMBOLS <temp1> LIKE LINE OF lt_msg.
+    DATA temp2 LIKE sy-tabix.
+    FIELD-SYMBOLS <temp3> LIKE LINE OF lt_msg.
+    DATA temp4 LIKE sy-tabix.
+    CREATE OBJECT lo_log TYPE zabaputil_cl_util_log.
     lo_log->info( `Test info` ).
 
-    DATA(lt_msg) = lo_log->to_msg( ).
+    
+    lt_msg = lo_log->to_msg( ).
 
     cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_msg ) ).
-    cl_abap_unit_assert=>assert_equals( exp = `I` act = lt_msg[ 1 ]-type ).
-    cl_abap_unit_assert=>assert_equals( exp = `Test info` act = lt_msg[ 1 ]-text ).
+    
+    
+    temp2 = sy-tabix.
+    READ TABLE lt_msg INDEX 1 ASSIGNING <temp1>.
+    sy-tabix = temp2.
+    IF sy-subrc <> 0.
+      ASSERT 1 = 0.
+    ENDIF.
+    cl_abap_unit_assert=>assert_equals( exp = `I` act = <temp1>-type ).
+    
+    
+    temp4 = sy-tabix.
+    READ TABLE lt_msg INDEX 1 ASSIGNING <temp3>.
+    sy-tabix = temp4.
+    IF sy-subrc <> 0.
+      ASSERT 1 = 0.
+    ENDIF.
+    cl_abap_unit_assert=>assert_equals( exp = `Test info` act = <temp3>-text ).
 
   ENDMETHOD.
 
   METHOD test_error.
 
-    DATA(lo_log) = NEW zabaputil_cl_util_log( ).
+    DATA lo_log TYPE REF TO zabaputil_cl_util_log.
+    DATA lt_msg TYPE zabaputil_cl_util_context=>ty_t_msg.
+    FIELD-SYMBOLS <temp5> LIKE LINE OF lt_msg.
+    DATA temp6 LIKE sy-tabix.
+    CREATE OBJECT lo_log TYPE zabaputil_cl_util_log.
     lo_log->error( `Something failed` ).
 
-    DATA(lt_msg) = lo_log->to_msg( ).
+    
+    lt_msg = lo_log->to_msg( ).
 
-    cl_abap_unit_assert=>assert_equals( exp = `E` act = lt_msg[ 1 ]-type ).
+    
+    
+    temp6 = sy-tabix.
+    READ TABLE lt_msg INDEX 1 ASSIGNING <temp5>.
+    sy-tabix = temp6.
+    IF sy-subrc <> 0.
+      ASSERT 1 = 0.
+    ENDIF.
+    cl_abap_unit_assert=>assert_equals( exp = `E` act = <temp5>-type ).
 
   ENDMETHOD.
 
   METHOD test_warning.
 
-    DATA(lo_log) = NEW zabaputil_cl_util_log( ).
+    DATA lo_log TYPE REF TO zabaputil_cl_util_log.
+    DATA lt_msg TYPE zabaputil_cl_util_context=>ty_t_msg.
+    FIELD-SYMBOLS <temp7> LIKE LINE OF lt_msg.
+    DATA temp8 LIKE sy-tabix.
+    CREATE OBJECT lo_log TYPE zabaputil_cl_util_log.
     lo_log->warning( `Be careful` ).
 
-    DATA(lt_msg) = lo_log->to_msg( ).
+    
+    lt_msg = lo_log->to_msg( ).
 
-    cl_abap_unit_assert=>assert_equals( exp = `W` act = lt_msg[ 1 ]-type ).
+    
+    
+    temp8 = sy-tabix.
+    READ TABLE lt_msg INDEX 1 ASSIGNING <temp7>.
+    sy-tabix = temp8.
+    IF sy-subrc <> 0.
+      ASSERT 1 = 0.
+    ENDIF.
+    cl_abap_unit_assert=>assert_equals( exp = `W` act = <temp7>-type ).
 
   ENDMETHOD.
 
   METHOD test_success.
 
-    DATA(lo_log) = NEW zabaputil_cl_util_log( ).
+    DATA lo_log TYPE REF TO zabaputil_cl_util_log.
+    DATA lt_msg TYPE zabaputil_cl_util_context=>ty_t_msg.
+    FIELD-SYMBOLS <temp9> LIKE LINE OF lt_msg.
+    DATA temp10 LIKE sy-tabix.
+    CREATE OBJECT lo_log TYPE zabaputil_cl_util_log.
     lo_log->success( `All good` ).
 
-    DATA(lt_msg) = lo_log->to_msg( ).
+    
+    lt_msg = lo_log->to_msg( ).
 
-    cl_abap_unit_assert=>assert_equals( exp = `S` act = lt_msg[ 1 ]-type ).
+    
+    
+    temp10 = sy-tabix.
+    READ TABLE lt_msg INDEX 1 ASSIGNING <temp9>.
+    sy-tabix = temp10.
+    IF sy-subrc <> 0.
+      ASSERT 1 = 0.
+    ENDIF.
+    cl_abap_unit_assert=>assert_equals( exp = `S` act = <temp9>-type ).
 
   ENDMETHOD.
 
   METHOD test_chaining.
 
-    DATA(lo_log) = NEW zabaputil_cl_util_log( ).
+    DATA lo_log TYPE REF TO zabaputil_cl_util_log.
+    CREATE OBJECT lo_log TYPE zabaputil_cl_util_log.
     lo_log->info( `Step 1`
       )->info( `Step 2`
       )->error( `Step 3` ).
@@ -80,24 +143,40 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_has_error.
 
-    DATA(lo_log) = NEW zabaputil_cl_util_log( ).
+    DATA lo_log TYPE REF TO zabaputil_cl_util_log.
+    DATA lo_abort TYPE REF TO zabaputil_cl_util_log.
+    DATA temp11 TYPE zabaputil_cl_util_context=>ty_s_msg.
+    DATA lo_exit TYPE REF TO zabaputil_cl_util_log.
+    DATA temp12 TYPE zabaputil_cl_util_context=>ty_s_msg.
+    CREATE OBJECT lo_log TYPE zabaputil_cl_util_log.
     lo_log->info( `OK` )->error( `Fail` ).
 
     cl_abap_unit_assert=>assert_true( lo_log->has_error( ) ).
 
     " an abort or exit message is an error too
-    DATA(lo_abort) = NEW zabaputil_cl_util_log( ).
-    lo_abort->add( VALUE zabaputil_cl_util_context=>ty_s_msg( type = `A` text = `Abort` ) ).
+    
+    CREATE OBJECT lo_abort TYPE zabaputil_cl_util_log.
+    
+    CLEAR temp11.
+    temp11-type = `A`.
+    temp11-text = `Abort`.
+    lo_abort->add( temp11 ).
     cl_abap_unit_assert=>assert_true( lo_abort->has_error( ) ).
-    DATA(lo_exit) = NEW zabaputil_cl_util_log( ).
-    lo_exit->add( VALUE zabaputil_cl_util_context=>ty_s_msg( type = `X` text = `Exit` ) ).
+    
+    CREATE OBJECT lo_exit TYPE zabaputil_cl_util_log.
+    
+    CLEAR temp12.
+    temp12-type = `X`.
+    temp12-text = `Exit`.
+    lo_exit->add( temp12 ).
     cl_abap_unit_assert=>assert_true( lo_exit->has_error( ) ).
 
   ENDMETHOD.
 
   METHOD test_has_no_error.
 
-    DATA(lo_log) = NEW zabaputil_cl_util_log( ).
+    DATA lo_log TYPE REF TO zabaputil_cl_util_log.
+    CREATE OBJECT lo_log TYPE zabaputil_cl_util_log.
     lo_log->info( `OK` )->success( `Done` ).
 
     cl_abap_unit_assert=>assert_false( lo_log->has_error( ) ).
@@ -106,7 +185,8 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_count.
 
-    DATA(lo_log) = NEW zabaputil_cl_util_log( ).
+    DATA lo_log TYPE REF TO zabaputil_cl_util_log.
+    CREATE OBJECT lo_log TYPE zabaputil_cl_util_log.
 
     cl_abap_unit_assert=>assert_equals( exp = 0 act = lo_log->count( ) ).
 
@@ -118,7 +198,8 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_clear.
 
-    DATA(lo_log) = NEW zabaputil_cl_util_log( ).
+    DATA lo_log TYPE REF TO zabaputil_cl_util_log.
+    CREATE OBJECT lo_log TYPE zabaputil_cl_util_log.
     lo_log->info( `One` )->info( `Two` )->clear( ).
 
     cl_abap_unit_assert=>assert_equals( exp = 0 act = lo_log->count( ) ).
@@ -127,49 +208,108 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_to_msg.
 
-    DATA(lo_log) = NEW zabaputil_cl_util_log( ).
+    DATA lo_log TYPE REF TO zabaputil_cl_util_log.
+    DATA lt_msg TYPE zabaputil_cl_util_context=>ty_t_msg.
+    FIELD-SYMBOLS <temp13> LIKE LINE OF lt_msg.
+    DATA temp14 LIKE sy-tabix.
+    FIELD-SYMBOLS <temp15> LIKE LINE OF lt_msg.
+    DATA temp16 LIKE sy-tabix.
+    CREATE OBJECT lo_log TYPE zabaputil_cl_util_log.
     lo_log->info( `A` )->error( `B` ).
 
-    DATA(lt_msg) = lo_log->to_msg( ).
+    
+    lt_msg = lo_log->to_msg( ).
 
     cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_msg ) ).
-    cl_abap_unit_assert=>assert_equals( exp = `A` act = lt_msg[ 1 ]-text ).
-    cl_abap_unit_assert=>assert_equals( exp = `B` act = lt_msg[ 2 ]-text ).
+    
+    
+    temp14 = sy-tabix.
+    READ TABLE lt_msg INDEX 1 ASSIGNING <temp13>.
+    sy-tabix = temp14.
+    IF sy-subrc <> 0.
+      ASSERT 1 = 0.
+    ENDIF.
+    cl_abap_unit_assert=>assert_equals( exp = `A` act = <temp13>-text ).
+    
+    
+    temp16 = sy-tabix.
+    READ TABLE lt_msg INDEX 2 ASSIGNING <temp15>.
+    sy-tabix = temp16.
+    IF sy-subrc <> 0.
+      ASSERT 1 = 0.
+    ENDIF.
+    cl_abap_unit_assert=>assert_equals( exp = `B` act = <temp15>-text ).
 
   ENDMETHOD.
 
   METHOD test_to_string.
 
-    DATA(lo_log) = NEW zabaputil_cl_util_log( ).
+    DATA lo_log TYPE REF TO zabaputil_cl_util_log.
+    DATA lv_str TYPE string.
+    DATA temp1 TYPE xsdboolean.
+    DATA temp2 TYPE xsdboolean.
+    CREATE OBJECT lo_log TYPE zabaputil_cl_util_log.
     lo_log->info( `Hello` )->error( `World` ).
 
-    DATA(lv_str) = lo_log->to_string( ).
+    
+    lv_str = lo_log->to_string( ).
 
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_str CS `[I] Hello` ) ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_str CS `[E] World` ) ).
+    
+    temp1 = boolc( lv_str CS `[I] Hello` ).
+    cl_abap_unit_assert=>assert_true( temp1 ).
+    
+    temp2 = boolc( lv_str CS `[E] World` ).
+    cl_abap_unit_assert=>assert_true( temp2 ).
 
   ENDMETHOD.
 
   METHOD test_to_xlsx.
 
-    DATA(lo_log) = NEW zabaputil_cl_util_log( ).
+    DATA lo_log TYPE REF TO zabaputil_cl_util_log.
+    DATA lt_files TYPE zabaputil_cl_util_context=>ty_t_zip_file.
+    DATA lv_sheet TYPE string.
+    FIELD-SYMBOLS <temp1> LIKE LINE OF lt_files.
+    DATA temp2 LIKE sy-tabix.
+    DATA temp3 TYPE xsdboolean.
+    DATA temp4 TYPE xsdboolean.
+    CREATE OBJECT lo_log TYPE zabaputil_cl_util_log.
     lo_log->info( `Hello` )->error( `World` ).
 
-    DATA(lt_files) = zabaputil_cl_util_context=>zip_unpack( lo_log->to_xlsx( ) ).
-    DATA(lv_sheet) = zabaputil_cl_util_context=>conv_get_string_by_xstring(
-                         lt_files[ name = `xl/worksheets/sheet1.xml` ]-content ).
+    
+    lt_files = zabaputil_cl_util_context=>zip_unpack( lo_log->to_xlsx( ) ).
+    
+    
+    
+    temp2 = sy-tabix.
+    READ TABLE lt_files WITH KEY name = `xl/worksheets/sheet1.xml` ASSIGNING <temp1>.
+    sy-tabix = temp2.
+    IF sy-subrc <> 0.
+      ASSERT 1 = 0.
+    ENDIF.
+    lv_sheet = zabaputil_cl_util_context=>conv_get_string_by_xstring(
+                         <temp1>-content ).
 
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `>Hello<` ) ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `>World<` ) ).
+    
+    temp3 = boolc( lv_sheet CS `>Hello<` ).
+    cl_abap_unit_assert=>assert_true( temp3 ).
+    
+    temp4 = boolc( lv_sheet CS `>World<` ).
+    cl_abap_unit_assert=>assert_true( temp4 ).
 
   ENDMETHOD.
 
   METHOD test_add_cx.
+        DATA lv_val TYPE i.
+        DATA lx TYPE REF TO cx_root.
+        DATA lo_log TYPE REF TO zabaputil_cl_util_log.
 
     TRY.
-        DATA(lv_val) = 1 / 0.
-      CATCH cx_root INTO DATA(lx).
-        DATA(lo_log) = NEW zabaputil_cl_util_log( ).
+        
+        lv_val = 1 / 0.
+        
+      CATCH cx_root INTO lx.
+        
+        CREATE OBJECT lo_log TYPE zabaputil_cl_util_log.
         lo_log->add( lx ).
     ENDTRY.
 

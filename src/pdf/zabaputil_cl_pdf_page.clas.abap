@@ -377,7 +377,8 @@ CLASS zabaputil_cl_pdf_page IMPLEMENTATION.
 
   METHOD paint.
 
-    DATA(lv_style) = to_upper( style ).
+    DATA lv_style TYPE string.
+    lv_style = to_upper( style ).
     CASE lv_style.
       WHEN `F`.
         result = `f`.
@@ -461,6 +462,9 @@ CLASS zabaputil_cl_pdf_page IMPLEMENTATION.
 
     DATA lv_x    TYPE f.
     DATA lv_show TYPE string.
+    DATA temp5 TYPE string.
+    DATA lv_text LIKE temp5.
+    DATA lv_align TYPE string.
 
     result = me.
     IF mo_font IS NOT BOUND.
@@ -469,13 +473,17 @@ CLASS zabaputil_cl_pdf_page IMPLEMENTATION.
           val = `PDF: set a font before a text is measured or written (set_font)`.
     ENDIF.
 
-    DATA(lv_text) = CONV string( val ).
+    
+    temp5 = val.
+    
+    lv_text = temp5.
     IF lv_text IS INITIAL.
       RETURN.
     ENDIF.
 
     lv_x = x.
-    DATA(lv_align) = to_upper( align ).
+    
+    lv_align = to_upper( align ).
     CASE lv_align.
       WHEN `R`.
         lv_x = lv_x - text_width( lv_text ).
@@ -523,6 +531,16 @@ CLASS zabaputil_cl_pdf_page IMPLEMENTATION.
     DATA lv_ky TYPE f.
     " the distance of the control points that comes closest to a circle
     CONSTANTS lc_kappa TYPE f VALUE '0.5523'.
+    DATA lv_left TYPE string.
+    DATA lv_right TYPE string.
+    DATA lv_top TYPE string.
+    DATA lv_bottom TYPE string.
+    DATA lv_mid_x TYPE string.
+    DATA lv_mid_y TYPE string.
+    DATA lv_x_minus TYPE string.
+    DATA lv_x_plus TYPE string.
+    DATA lv_y_minus TYPE string.
+    DATA lv_y_plus TYPE string.
 
     " everything in points, y from the bottom
     lv_cx = x.
@@ -541,16 +559,26 @@ CLASS zabaputil_cl_pdf_page IMPLEMENTATION.
     lv_kx = lv_rx * lc_kappa.
     lv_ky = lv_ry * lc_kappa.
 
-    DATA(lv_left) = zabaputil_cl_pdf_writer=>num( lv_cx - lv_rx ).
-    DATA(lv_right) = zabaputil_cl_pdf_writer=>num( lv_cx + lv_rx ).
-    DATA(lv_top) = zabaputil_cl_pdf_writer=>num( lv_cy + lv_ry ).
-    DATA(lv_bottom) = zabaputil_cl_pdf_writer=>num( lv_cy - lv_ry ).
-    DATA(lv_mid_x) = zabaputil_cl_pdf_writer=>num( lv_cx ).
-    DATA(lv_mid_y) = zabaputil_cl_pdf_writer=>num( lv_cy ).
-    DATA(lv_x_minus) = zabaputil_cl_pdf_writer=>num( lv_cx - lv_kx ).
-    DATA(lv_x_plus) = zabaputil_cl_pdf_writer=>num( lv_cx + lv_kx ).
-    DATA(lv_y_minus) = zabaputil_cl_pdf_writer=>num( lv_cy - lv_ky ).
-    DATA(lv_y_plus) = zabaputil_cl_pdf_writer=>num( lv_cy + lv_ky ).
+    
+    lv_left = zabaputil_cl_pdf_writer=>num( lv_cx - lv_rx ).
+    
+    lv_right = zabaputil_cl_pdf_writer=>num( lv_cx + lv_rx ).
+    
+    lv_top = zabaputil_cl_pdf_writer=>num( lv_cy + lv_ry ).
+    
+    lv_bottom = zabaputil_cl_pdf_writer=>num( lv_cy - lv_ry ).
+    
+    lv_mid_x = zabaputil_cl_pdf_writer=>num( lv_cx ).
+    
+    lv_mid_y = zabaputil_cl_pdf_writer=>num( lv_cy ).
+    
+    lv_x_minus = zabaputil_cl_pdf_writer=>num( lv_cx - lv_kx ).
+    
+    lv_x_plus = zabaputil_cl_pdf_writer=>num( lv_cx + lv_kx ).
+    
+    lv_y_minus = zabaputil_cl_pdf_writer=>num( lv_cy - lv_ky ).
+    
+    lv_y_plus = zabaputil_cl_pdf_writer=>num( lv_cy + lv_ky ).
 
     emit( |{ lv_right } { lv_mid_y } m | &&
           |{ lv_right } { lv_y_plus } { lv_x_plus } { lv_top } { lv_mid_x } { lv_top } c | &&
@@ -596,22 +624,25 @@ CLASS zabaputil_cl_pdf_page IMPLEMENTATION.
     DATA lv_h TYPE f.
     DATA lv_x TYPE f.
     DATA lv_w TYPE f.
+    DATA temp6 LIKE LINE OF mt_annotation.
 
     lv_x = x.
     lv_y = y.
     lv_w = w.
     lv_h = h.
     " the address as a hex string: nothing in it has to be escaped
-    INSERT |<< /Type /Annot /Subtype /Link /Rect [{ px( lv_x ) } { py( lv_y + lv_h ) } | &&
-           |{ px( lv_x + lv_w ) } { py( lv_y ) }] /Border [0 0 0] | &&
-           |/A << /S /URI /URI <{ zabaputil_cl_pdf_writer=>hex( url ) }> >> >>| INTO TABLE mt_annotation.
+    
+    temp6 = |<< /Type /Annot /Subtype /Link /Rect [{ px( lv_x ) } { py( lv_y + lv_h ) } | && |{ px( lv_x + lv_w ) } { py( lv_y ) }] /Border [0 0 0] | && |/A << /S /URI /URI <{ zabaputil_cl_pdf_writer=>hex( url ) }> >> >>|.
+    INSERT temp6 INTO TABLE mt_annotation.
     result = me.
 
   ENDMETHOD.
 
   METHOD raw.
 
-    emit( CONV string( val ) ).
+    DATA temp7 TYPE string.
+    temp7 = val.
+    emit( temp7 ).
     result = me.
 
   ENDMETHOD.

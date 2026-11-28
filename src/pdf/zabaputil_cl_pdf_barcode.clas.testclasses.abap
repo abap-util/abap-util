@@ -57,10 +57,12 @@ CLASS ltcl_barcode IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD no_such_character.
+        DATA lx_error TYPE REF TO zabaputil_cx_util_error.
     TRY.
         zabaputil_cl_pdf_barcode=>code128( |A{ cl_abap_char_utilities=>horizontal_tab }B| ).
         cl_abap_unit_assert=>fail( `a tab is no character of Code 128 B` ).
-      CATCH zabaputil_cx_util_error INTO DATA(lx_error).
+        
+      CATCH zabaputil_cx_util_error INTO lx_error.
         cl_abap_unit_assert=>assert_char_cp( exp = `*position 2*`
                                              act = lx_error->get_text( ) ).
     ENDTRY.
@@ -85,16 +87,17 @@ CLASS ltcl_barcode IMPLEMENTATION.
   METHOD bars_drawn.
     " 4711: one filled rectangle per bar - start C has three, every symbol
     " three, the stop four: 3 + 3 + 3 + 3 + 4 = 16
-    DATA(lo_page) = NEW zabaputil_cl_pdf_page( width  = 100
-                                               height = 100
-                                               scale  = 1 ).
+    DATA lo_page TYPE REF TO zabaputil_cl_pdf_page.
+    DATA lv_content TYPE string.
+    CREATE OBJECT lo_page TYPE zabaputil_cl_pdf_page EXPORTING width = 100 height = 100 scale = 1.
     zabaputil_cl_pdf_barcode=>draw( page    = lo_page
                                     modules = zabaputil_cl_pdf_barcode=>code128( `4711` )
                                     x       = 10
                                     y       = 20
                                     w       = 57
                                     h       = 30 ).
-    DATA(lv_content) = lo_page->content( ).
+    
+    lv_content = lo_page->content( ).
     cl_abap_unit_assert=>assert_equals( exp = 16
                                         act = count( val = lv_content
                                                      sub = ` re f` ) ).

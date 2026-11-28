@@ -75,7 +75,7 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         "! L, C or R
         align TYPE string,
       END OF ty_s_column.
-    TYPES ty_t_column TYPE STANDARD TABLE OF ty_s_column WITH EMPTY KEY.
+    TYPES ty_t_column TYPE STANDARD TABLE OF ty_s_column WITH DEFAULT KEY.
 
     TYPES:
       BEGIN OF ty_s_element,
@@ -113,7 +113,7 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         "! the bytes of an image that belongs to the form (a logo)
         image      TYPE xstring,
       END OF ty_s_element.
-    TYPES ty_t_element TYPE STANDARD TABLE OF ty_s_element WITH EMPTY KEY.
+    TYPES ty_t_element TYPE STANDARD TABLE OF ty_s_element WITH DEFAULT KEY.
 
     TYPES:
       BEGIN OF ty_s_form,
@@ -161,7 +161,7 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         "! for a column: the path of its table
         parent TYPE string,
       END OF ty_s_field.
-    TYPES ty_t_field TYPE STANDARD TABLE OF ty_s_field WITH EMPTY KEY.
+    TYPES ty_t_field TYPE STANDARD TABLE OF ty_s_field WITH DEFAULT KEY.
 
     "! An empty form: A4 portrait, 20 mm margins
     CLASS-METHODS new_form
@@ -536,7 +536,11 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
     " without data the form prints its placeholders: the form itself
     " stands in, a structure that has none of the names
-    lv_with_data = xsdbool( data IS SUPPLIED ).
+    DATA temp1 TYPE xsdboolean.
+    DATA lo_layout TYPE REF TO zabaputil_cl_pdf_layout.
+      FIELD-SYMBOLS <element> LIKE LINE OF val-t_element.
+    temp1 = boolc( data IS SUPPLIED ).
+    lv_with_data = temp1.
     IF lv_with_data = abap_true.
       ASSIGN data TO <data>.
     ELSE.
@@ -554,7 +558,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
       result->set_info( title = val-title ).
     ENDIF.
 
-    DATA(lo_layout) = NEW zabaputil_cl_pdf_layout( result ).
+    
+    CREATE OBJECT lo_layout TYPE zabaputil_cl_pdf_layout EXPORTING PDF = result.
     lo_layout->set_margins( left   = val-margin_left
                             top    = val-margin_top
                             right  = val-margin_right
@@ -569,7 +574,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
                          data      = <data>
                          with_data = lv_with_data ).
     ELSE.
-      LOOP AT val-t_element ASSIGNING FIELD-SYMBOL(<element>).
+      
+      LOOP AT val-t_element ASSIGNING <element>.
         IF <element>-fixed = abap_true OR <element>-type = cs_type-rect.
           CONTINUE.
         ENDIF.
@@ -646,6 +652,12 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     DATA lv_height    TYPE f.
 
     FIELD-SYMBOLS <data> TYPE any.
+    DATA temp2 TYPE xsdboolean.
+    DATA lo_pdf TYPE REF TO zabaputil_cl_pdf.
+    DATA lo_layout TYPE REF TO zabaputil_cl_pdf_layout.
+    DATA lo_page TYPE REF TO zabaputil_cl_pdf_page.
+    FIELD-SYMBOLS <element> LIKE LINE OF val-t_element.
+          DATA temp122 TYPE string.
 
     result = val.
     IF val-absolute = abap_true.
@@ -654,7 +666,9 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     result-absolute = abap_true.
     CLEAR result-t_element.
 
-    lv_with_data = xsdbool( data IS SUPPLIED ).
+    
+    temp2 = boolc( data IS SUPPLIED ).
+    lv_with_data = temp2.
     IF lv_with_data = abap_true.
       ASSIGN data TO <data>.
     ELSE.
@@ -667,21 +681,25 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     IF lv_format IS INITIAL.
       lv_format = `A4`.
     ENDIF.
-    DATA(lo_pdf) = zabaputil_cl_pdf=>create( unit        = `mm`
+    
+    lo_pdf = zabaputil_cl_pdf=>create( unit        = `mm`
                                              format      = lv_format
                                              orientation = val-orientation ).
-    DATA(lo_layout) = NEW zabaputil_cl_pdf_layout( lo_pdf ).
+    
+    CREATE OBJECT lo_layout TYPE zabaputil_cl_pdf_layout EXPORTING PDF = lo_pdf.
     lo_layout->set_margins( left   = val-margin_left
                             top    = val-margin_top
                             right  = val-margin_right
                             bottom = val-margin_bottom ).
     lo_layout->set_font( font = lo_pdf->font( c_font )
                          size = c_size ).
-    DATA(lo_page) = lo_layout->page( ).
+    
+    lo_page = lo_layout->page( ).
     lv_width = lo_page->width( ) - val-margin_left - val-margin_right.
     lv_height = lo_page->height( ).
 
-    LOOP AT val-t_element ASSIGNING FIELD-SYMBOL(<element>).
+    
+    LOOP AT val-t_element ASSIGNING <element>.
       ls_element = <element>.
       ls_element-fixed = abap_false.
 
@@ -731,11 +749,14 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
           ENDIF.
         WHEN cs_type-barcode.
           ls_element-h = lv_bottom - lv_top.
+          
+          IF lv_with_data = abap_true.
+            temp122 = resolve( val = <element>-text data = <data> ).
+          ELSE.
+            temp122 = <element>-text.
+          ENDIF.
           ls_element-w = barcode_width( element = <element>
-                                        text    = COND #( WHEN lv_with_data = abap_true
-                                                          THEN resolve( val  = <element>-text
-                                                                        data = <data> )
-                                                          ELSE <element>-text ) ).
+                                        text    = temp122 ).
         WHEN OTHERS.
           ls_element-w = lv_width.
           ls_element-h = lv_bottom - lv_top.
@@ -799,6 +820,10 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     DATA lr_node TYPE REF TO data.
 
     FIELD-SYMBOLS <node> TYPE any.
+    TYPES temp1 TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+DATA lt_part TYPE temp1.
+    DATA lv_part LIKE LINE OF lt_part.
+    DATA lv_kind TYPE string.
 
     CLEAR found.
     CLEAR text.
@@ -811,10 +836,13 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     IF lv_path IS INITIAL.
       RETURN.
     ENDIF.
-    SPLIT lv_path AT `-` INTO TABLE DATA(lt_part).
+    
+
+    SPLIT lv_path AT `-` INTO TABLE lt_part.
 
     ASSIGN data TO <node>.
-    LOOP AT lt_part INTO DATA(lv_part).
+    
+    LOOP AT lt_part INTO lv_part.
       lr_node = component_of( node = <node>
                               name = lv_part ).
       IF lr_node IS NOT BOUND.
@@ -824,7 +852,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     ENDLOOP.
 
     " a structure, a table or a reference is no text
-    DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( <node> ).
+    
+    lv_kind = zabaputil_cl_util_context=>rtti_get_type_kind( <node> ).
     IF lv_kind = `u` OR lv_kind = `v` OR lv_kind = `h` OR lv_kind = `l` OR lv_kind = `r`.
       RETURN.
     ENDIF.
@@ -839,7 +868,10 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
     FIELD-SYMBOLS <component> TYPE any.
 
-    DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( node ).
+    DATA lv_kind TYPE string.
+        DATA lt_name TYPE string_table.
+        DATA temp123 LIKE sy-subrc.
+    lv_kind = zabaputil_cl_util_context=>rtti_get_type_kind( node ).
     CASE lv_kind.
 
       WHEN `u` OR `v`.
@@ -856,8 +888,12 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
         IF lo_object IS NOT BOUND.
           RETURN.
         ENDIF.
-        DATA(lt_name) = component_names( lo_object ).
-        IF NOT line_exists( lt_name[ table_line = name ] ).
+        
+        lt_name = component_names( lo_object ).
+        
+        READ TABLE lt_name WITH KEY table_line = name TRANSPORTING NO FIELDS.
+        temp123 = sy-subrc.
+        IF NOT temp123 = 0.
           RETURN.
         ENDIF.
         ASSIGN lo_object->(name) TO <component>.
@@ -865,7 +901,7 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     ENDCASE.
 
     IF <component> IS ASSIGNED.
-      result = REF #( <component> ).
+      GET REFERENCE OF <component> INTO result.
     ENDIF.
 
   ENDMETHOD.
@@ -874,14 +910,26 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
     DATA lo_object TYPE REF TO object.
 
-    DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( node ).
+    DATA lv_kind TYPE string.
+            DATA temp124 TYPE abap_component_tab.
+            FIELD-SYMBOLS <component> LIKE LINE OF temp124.
+              DATA temp125 LIKE LINE OF result.
+        DATA temp126 TYPE abap_attrdescr_tab.
+        FIELD-SYMBOLS <attribute> LIKE LINE OF temp126.
+            DATA temp127 LIKE LINE OF result.
+    lv_kind = zabaputil_cl_util_context=>rtti_get_type_kind( node ).
     CASE lv_kind.
 
       WHEN `u` OR `v` OR `h`.
         " of a table: the components of its rows
         TRY.
-            LOOP AT zabaputil_cl_util_context=>rtti_get_t_attri_by_any( node ) ASSIGNING FIELD-SYMBOL(<component>).
-              INSERT CONV string( <component>-name ) INTO TABLE result.
+            
+            temp124 = zabaputil_cl_util_context=>rtti_get_t_attri_by_any( node ).
+            
+            LOOP AT temp124 ASSIGNING <component>.
+              
+              temp125 = <component>-name.
+              INSERT temp125 INTO TABLE result.
             ENDLOOP.
           CATCH cx_root ##NO_HANDLER.
             " rows that are no structure have no components
@@ -896,10 +944,15 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
         IF lo_object IS NOT BOUND.
           RETURN.
         ENDIF.
-        LOOP AT zabaputil_cl_util_context=>rtti_get_t_attri_by_oref( lo_object ) ASSIGNING FIELD-SYMBOL(<attribute>).
+        
+        temp126 = zabaputil_cl_util_context=>rtti_get_t_attri_by_oref( lo_object ).
+        
+        LOOP AT temp126 ASSIGNING <attribute>.
           IF <attribute>-visibility = zabaputil_cl_util_context=>cv_objectdescr_public
               AND <attribute>-is_class = abap_false AND <attribute>-is_constant = abap_false.
-            INSERT CONV string( <attribute>-name ) INTO TABLE result.
+            
+            temp127 = <attribute>-name.
+            INSERT temp127 INTO TABLE result.
           ENDIF.
         ENDLOOP.
 
@@ -922,25 +975,47 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
     FIELD-SYMBOLS <component> TYPE any.
 
-    LOOP AT component_names( node ) INTO DATA(lv_name).
+    DATA temp128 TYPE string_table.
+    DATA lv_name LIKE LINE OF temp128.
+      DATA lv_path TYPE string.
+      DATA lv_kind TYPE string.
+          DATA temp129 TYPE zabaputil_cl_pdf_form=>ty_s_field.
+          DATA temp130 TYPE string_table.
+          DATA lv_column LIKE LINE OF temp130.
+            DATA temp131 TYPE zabaputil_cl_pdf_form=>ty_s_field.
+          DATA temp132 TYPE zabaputil_cl_pdf_form=>ty_s_field.
+    temp128 = component_names( node ).
+    
+    LOOP AT temp128 INTO lv_name.
       lr_component = component_of( node = node
                                    name = lv_name ).
       IF lr_component IS NOT BOUND.
         CONTINUE.
       ENDIF.
       ASSIGN lr_component->* TO <component>.
-      DATA(lv_path) = prefix && lv_name.
+      
+      lv_path = prefix && lv_name.
 
-      DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( <component> ).
+      
+      lv_kind = zabaputil_cl_util_context=>rtti_get_type_kind( <component> ).
       CASE lv_kind.
 
         WHEN `h`.
-          INSERT VALUE #( path = lv_path
-                          kind = cs_field_kind-table ) INTO TABLE result.
-          LOOP AT component_names( <component> ) INTO DATA(lv_column).
-            INSERT VALUE #( path   = lv_column
-                            kind   = cs_field_kind-column
-                            parent = lv_path ) INTO TABLE result.
+          
+          CLEAR temp129.
+          temp129-path = lv_path.
+          temp129-kind = cs_field_kind-table.
+          INSERT temp129 INTO TABLE result.
+          
+          temp130 = component_names( <component> ).
+          
+          LOOP AT temp130 INTO lv_column.
+            
+            CLEAR temp131.
+            temp131-path = lv_column.
+            temp131-kind = cs_field_kind-column.
+            temp131-parent = lv_path.
+            INSERT temp131 INTO TABLE result.
           ENDLOOP.
 
         WHEN `u` OR `v` OR `r`.
@@ -958,8 +1033,11 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
           CONTINUE.
 
         WHEN OTHERS.
-          INSERT VALUE #( path = lv_path
-                          kind = cs_field_kind-value ) INTO TABLE result.
+          
+          CLEAR temp132.
+          temp132-path = lv_path.
+          temp132-kind = cs_field_kind-value.
+          INSERT temp132 INTO TABLE result.
 
       ENDCASE.
     ENDLOOP.
@@ -973,8 +1051,12 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
     " the name of the interface from a reference typed with it: a renamed
     " copy of this class asks for its own interface
-    DATA(lv_interface) = zabaputil_cl_util_context=>rtti_get_ref_type_name( li_data ).
-    DATA(lv_class) = to_upper( condense( val ) ).
+    DATA lv_interface TYPE string.
+    DATA lv_class TYPE string.
+        DATA lx_create TYPE REF TO cx_root.
+    lv_interface = zabaputil_cl_util_context=>rtti_get_ref_type_name( li_data ).
+    
+    lv_class = to_upper( condense( val ) ).
 
     " asked of the class descriptor, before anything is created: a class
     " that is no data class is never instantiated from a name somebody typed
@@ -988,7 +1070,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     TRY.
         CREATE OBJECT lo_object TYPE (lv_class).
         result ?= lo_object.
-      CATCH cx_root INTO DATA(lx_create).
+        
+      CATCH cx_root INTO lx_create.
         RAISE EXCEPTION TYPE zabaputil_cx_util_error
           EXPORTING
             val      = |PDF: { lv_class } cannot be created - a data class needs a constructor without parameters|
@@ -1016,14 +1099,22 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     FIELD-SYMBOLS <component> TYPE any.
     FIELD-SYMBOLS <rows>      TYPE ANY TABLE.
     FIELD-SYMBOLS <row>       TYPE any.
+    DATA temp133 TYPE string_table.
+    DATA lv_name LIKE LINE OF temp133.
+      DATA lr_component TYPE REF TO data.
+            DATA lv_kind TYPE string.
 
     " a structure in a structure in a table: deep enough for a form
     IF depth > 3.
       RETURN.
     ENDIF.
 
-    LOOP AT component_names( node ) INTO DATA(lv_name).
-      DATA(lr_component) = component_of( node = node
+    
+    temp133 = component_names( node ).
+    
+    LOOP AT temp133 INTO lv_name.
+      
+      lr_component = component_of( node = node
                                          name = lv_name ).
       IF lr_component IS NOT BOUND.
         CONTINUE.
@@ -1049,7 +1140,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
           DO 3 TIMES.
             lv_number = sy-index.
             CLEAR <row>.
-            DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( <row> ).
+            
+            lv_kind = zabaputil_cl_util_context=>rtti_get_type_kind( <row> ).
             IF lv_kind = `u` OR lv_kind = `v`.
               sample_fill( EXPORTING row   = lv_number
                                      depth = depth + 1
@@ -1144,11 +1236,17 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     FIELD-SYMBOLS <rows>      TYPE ANY TABLE.
     FIELD-SYMBOLS <row>       TYPE any.
 
-    DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( node ).
+    DATA lv_kind TYPE string.
+        DATA temp134 TYPE string_table.
+        DATA lv_name LIKE LINE OF temp134.
+    lv_kind = zabaputil_cl_util_context=>rtti_get_type_kind( node ).
     CASE lv_kind.
 
       WHEN `u` OR `v`.
-        LOOP AT component_names( node ) INTO DATA(lv_name).
+        
+        temp134 = component_names( node ).
+        
+        LOOP AT temp134 INTO lv_name.
           ASSIGN COMPONENT lv_name OF STRUCTURE node TO <component>.
           IF sy-subrc <> 0 OR <component> IS INITIAL.
             CONTINUE.
@@ -1220,8 +1318,14 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     " a class that has no form yet returns nothing: an empty page to start on.
     " The text itself is read as it is - blanks in a row are a text's own;
     " what stands in front of the first tag is skipped by xml_open( )
-    DATA(lv_text) = CONV string( val ).
-    DATA(lv_content) = condense( lv_text ).
+    DATA temp135 TYPE string.
+    DATA lv_text LIKE temp135.
+    DATA lv_content TYPE string.
+    temp135 = val.
+    
+    lv_text = temp135.
+    
+    lv_content = condense( lv_text ).
     IF lv_content IS INITIAL.
       result = new_form( ).
       RETURN.
@@ -1244,10 +1348,15 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
   METHOD xml_open.
 
     " at an opening tag: its name, and `pos` behind its `>`
-    DATA(lv_start) = find( val = xml
+    DATA lv_start TYPE i.
+    DATA lv_end TYPE i.
+    DATA temp3 TYPE xsdboolean.
+    DATA lv_blank TYPE i.
+    lv_start = find( val = xml
                            sub = `<`
                            off = pos ).
-    DATA(lv_end) = -1.
+    
+    lv_end = -1.
     IF lv_start >= 0.
       lv_end = find( val = xml
                      sub = `>`
@@ -1264,14 +1373,16 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
                       len = lv_end - lv_start - 1 ).
     pos = lv_end + 1.
     " <NAME/> is an element without content: nothing to read, nothing to close
-    empty = xsdbool( strlen( name ) > 0 AND substring( val = name
-                                                         off = strlen( name ) - 1 ) = `/` ).
+    
+    temp3 = boolc( strlen( name ) > 0 AND substring( val = name off = strlen( name ) - 1 ) = `/` ).
+    empty = temp3.
     IF empty = abap_true.
       name = substring( val = name
                         len = strlen( name ) - 1 ).
     ENDIF.
     " attributes - the version of the form - are not part of the name
-    DATA(lv_blank) = find( val = name
+    
+    lv_blank = find( val = name
                            sub = ` ` ).
     IF lv_blank >= 0.
       name = substring( val = name
@@ -1294,13 +1405,18 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
     " `pos` is behind an opening tag: read what the element holds into the
     " node, and leave `pos` behind the closing tag
-    DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( node ).
+    DATA lv_kind TYPE string.
+      DATA lv_next TYPE i.
+        DATA lv_close TYPE i.
+        DATA lx_value TYPE REF TO cx_root.
+    lv_kind = zabaputil_cl_util_context=>rtti_get_type_kind( node ).
     IF lv_kind = `h`.
       ASSIGN node TO <rows>.
     ENDIF.
 
     DO.
-      DATA(lv_next) = find( val = xml
+      
+      lv_next = find( val = xml
                             sub = `<`
                             off = pos ).
       IF lv_next < 0.
@@ -1321,7 +1437,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
                                                off = pos + 1
                                                len = 1 ) = `/`.
         " the closing tag of this element
-        DATA(lv_close) = find( val = xml
+        
+        lv_close = find( val = xml
                                sub = `>`
                                off = pos ).
         IF lv_close < 0.
@@ -1413,7 +1530,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
         ELSE.
           node = lv_text.
         ENDIF.
-      CATCH cx_root INTO DATA(lx_value).
+        
+      CATCH cx_root INTO lx_value.
         RAISE EXCEPTION TYPE zabaputil_cx_util_error
           EXPORTING
             val      = |PDF: the text is no form - "{ lv_text }" is no value of its field|
@@ -1443,7 +1561,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
   METHOD element_font.
 
-    DATA(lv_name) = element-font.
+    DATA lv_name LIKE element-font.
+    lv_name = element-font.
     IF lv_name IS INITIAL.
       lv_name = c_font.
     ENDIF.
@@ -1453,7 +1572,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
   METHOD element_font_bold.
 
-    DATA(lv_name) = element-font.
+    DATA lv_name LIKE element-font.
+    lv_name = element-font.
     IF lv_name IS INITIAL.
       lv_name = c_font.
     ENDIF.
@@ -1496,15 +1616,19 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     DATA lv_bytes TYPE xstring.
 
     FIELD-SYMBOLS <component> TYPE any.
+      DATA lr_component TYPE REF TO data.
+        DATA lv_kind TYPE string.
 
     lv_bytes = element-image.
     IF with_data = abap_true AND element-source IS NOT INITIAL.
-      DATA(lr_component) = component_of( node = data
+      
+      lr_component = component_of( node = data
                                          name = to_upper( element-source ) ).
       IF lr_component IS BOUND.
         ASSIGN lr_component->* TO <component>.
         " an xstring, or raw bytes of a fixed length
-        DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( <component> ).
+        
+        lv_kind = zabaputil_cl_util_context=>rtti_get_type_kind( <component> ).
         IF lv_kind = `y` OR lv_kind = `X`.
           lv_bytes = <component>.
         ENDIF.
@@ -1529,7 +1653,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
         y      TYPE f,
       END OF ty_s_anchor.
 
-    DATA lt_anchor  TYPE STANDARD TABLE OF ty_s_anchor WITH EMPTY KEY.
+    TYPES temp2 TYPE STANDARD TABLE OF ty_s_anchor WITH DEFAULT KEY.
+DATA lt_anchor  TYPE temp2.
     DATA ls_anchor  TYPE ty_s_anchor.
     DATA lt_element TYPE ty_t_element.
     DATA ls_element TYPE ty_s_element.
@@ -1541,7 +1666,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     DATA lv_left    TYPE f.
     DATA lv_right   TYPE f.
 
-    DATA(lo_first) = layout->page( ).
+    DATA lo_first TYPE REF TO zabaputil_cl_pdf_page.
+    lo_first = layout->page( ).
     lv_width = lo_first->width( ).
     lv_height = lo_first->height( ).
 
@@ -1634,6 +1760,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
     DATA lv_text   TYPE string.
     DATA lv_height TYPE f.
+        DATA lo_image TYPE REF TO zabaputil_cl_pdf_image.
+        DATA lo_page TYPE REF TO zabaputil_cl_pdf_page.
 
     CASE element-type.
 
@@ -1682,7 +1810,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
         layout->set_y( layout->y( ) + lv_height ).
 
       WHEN cs_type-image.
-        DATA(lo_image) = element_image( pdf       = pdf
+        
+        lo_image = element_image( pdf       = pdf
                                         element   = element
                                         data      = data
                                         with_data = with_data ).
@@ -1691,7 +1820,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
         ENDIF.
         " at the left margin, where the flow is; its height moves the flow on.
         " A text wraps, an image does not: it is not moved to the next page
-        DATA(lo_page) = layout->page( ).
+        
+        lo_page = layout->page( ).
         lv_height = element-h.
         IF lv_height <= 0 AND element-w > 0.
           lv_height = element-w * lo_image->height( ) / lo_image->width( ).
@@ -1718,11 +1848,16 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
     FIELD-SYMBOLS <rows>      TYPE ANY TABLE.
     FIELD-SYMBOLS <component> TYPE any.
+    FIELD-SYMBOLS <column> LIKE LINE OF element-t_column.
+      DATA lr_component TYPE REF TO data.
+        DATA lv_kind TYPE string.
+      DATA temp136 LIKE LINE OF lt_cell.
 
     IF element-t_column IS INITIAL.
       RETURN.
     ENDIF.
-    LOOP AT element-t_column ASSIGNING FIELD-SYMBOL(<column>).
+    
+    LOOP AT element-t_column ASSIGNING <column>.
       ls_column-name = to_upper( <column>-name ).
       ls_column-title = <column>-title.
       ls_column-width = <column>-width.
@@ -1737,11 +1872,13 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
     " the rows: the table the data has under the name of the source
     IF with_data = abap_true AND element-source IS NOT INITIAL.
-      DATA(lr_component) = component_of( node = data
+      
+      lr_component = component_of( node = data
                                          name = to_upper( element-source ) ).
       IF lr_component IS BOUND.
         ASSIGN lr_component->* TO <component>.
-        DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( <component> ).
+        
+        lv_kind = zabaputil_cl_util_context=>rtti_get_type_kind( <component> ).
         IF lv_kind = `h`.
           ASSIGN <component> TO <rows>.
         ENDIF.
@@ -1758,7 +1895,9 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
     " printed without its rows: three rows that name their components
     LOOP AT lt_column INTO ls_column.
-      INSERT |\{{ ls_column-name }\}| INTO TABLE lt_cell.
+      
+      temp136 = |\{{ ls_column-name }\}|.
+      INSERT temp136 INTO TABLE lt_cell.
     ENDLOOP.
     DO 3 TIMES.
       INSERT lt_cell INTO TABLE lt_sample.
@@ -1774,6 +1913,7 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
     DATA lv_text  TYPE string.
     DATA lv_width TYPE f.
+        DATA lo_image TYPE REF TO zabaputil_cl_pdf_image.
 
     CASE element-type.
 
@@ -1830,7 +1970,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
                       y       = element-y ).
 
       WHEN cs_type-image.
-        DATA(lo_image) = element_image( pdf       = pdf
+        
+        lo_image = element_image( pdf       = pdf
                                         element   = element
                                         data      = data
                                         with_data = with_data ).
@@ -1851,8 +1992,12 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     DATA lv_bars TYPE f.
     DATA lv_text TYPE f.
 
-    DATA(lv_modules) = zabaputil_cl_pdf_barcode=>code128( text ).
-    DATA(lv_width) = barcode_width( element = element
+    DATA lv_modules TYPE string.
+    DATA lv_width TYPE f.
+      DATA lo_font TYPE REF TO zabaputil_if_pdf_font.
+    lv_modules = zabaputil_cl_pdf_barcode=>code128( text ).
+    
+    lv_width = barcode_width( element = element
                                     text    = text ).
     result = element-h.
     IF result <= 0.
@@ -1879,7 +2024,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
                                     h       = lv_bars ).
 
     IF element-size > 0.
-      DATA(lo_font) = element_font( pdf     = pdf
+      
+      lo_font = element_font( pdf     = pdf
                                     element = element ).
       page->set_font( font = lo_font
                       size = element-size ).
@@ -1908,23 +2054,41 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     DATA lv_y      TYPE f.
     DATA lv_height TYPE f.
 
-    DATA(lo_font) = element_font( pdf     = pdf
+    DATA lo_font TYPE REF TO zabaputil_if_pdf_font.
+    DATA lv_size TYPE f.
+    DATA lv_align TYPE string.
+    DATA lv_line_feed TYPE string.
+    DATA lv_text TYPE string.
+    TYPES temp3 TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+DATA lt_paragraph TYPE temp3.
+    DATA lv_paragraph LIKE LINE OF lt_paragraph.
+        DATA lt_wrapped TYPE string_table.
+    DATA lv_line LIKE LINE OF lt_line.
+    lo_font = element_font( pdf     = pdf
                                   element = element ).
-    DATA(lv_size) = element_size( element ).
-    DATA(lv_align) = to_upper( element-align ).
+    
+    lv_size = element_size( element ).
+    
+    lv_align = to_upper( element-align ).
 
     " the layout measures: a text with a width wraps in it
     layout->set_font( font = lo_font
                       size = lv_size ).
-    DATA(lv_line_feed) = |\n|.
-    DATA(lv_text) = replace( val  = text
+    
+    lv_line_feed = |\n|.
+    
+    lv_text = replace( val  = text
                              sub  = |\r\n|
                              with = lv_line_feed
                              occ  = 0 ).
-    SPLIT lv_text AT lv_line_feed INTO TABLE DATA(lt_paragraph).
-    LOOP AT lt_paragraph INTO DATA(lv_paragraph).
+    
+
+    SPLIT lv_text AT lv_line_feed INTO TABLE lt_paragraph.
+    
+    LOOP AT lt_paragraph INTO lv_paragraph.
       IF element-w > 0.
-        DATA(lt_wrapped) = layout->wrap( val   = lv_paragraph
+        
+        lt_wrapped = layout->wrap( val   = lv_paragraph
                                          width = element-w ).
         IF lt_wrapped IS INITIAL.
           INSERT `` INTO TABLE lt_line.
@@ -1955,7 +2119,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     page->set_font( font = lo_font
                     size = lv_size ).
     page->set_text_color( element_color( element ) ).
-    LOOP AT lt_line INTO DATA(lv_line).
+    
+    LOOP AT lt_line INTO lv_line.
       page->text( x     = lv_x
                   y     = lv_y
                   val   = lv_line

@@ -89,7 +89,8 @@ CLASS zabaputil_cl_util_log IMPLEMENTATION.
 
   METHOD add.
 
-    DATA(lt_msg) = zabaputil_cl_util_context=>msg_get_t( val ).
+    DATA lt_msg TYPE zabaputil_cl_util_context=>ty_t_msg.
+    lt_msg = zabaputil_cl_util_context=>msg_get_t( val ).
     INSERT LINES OF lt_msg INTO TABLE mt_log.
     result = me.
 
@@ -97,28 +98,44 @@ CLASS zabaputil_cl_util_log IMPLEMENTATION.
 
   METHOD info.
 
-    INSERT VALUE #( type = `I` text = val ) INTO TABLE mt_log.
+    DATA temp17 TYPE zabaputil_cl_util_context=>ty_s_msg.
+    CLEAR temp17.
+    temp17-type = `I`.
+    temp17-text = val.
+    INSERT temp17 INTO TABLE mt_log.
     result = me.
 
   ENDMETHOD.
 
   METHOD error.
 
-    INSERT VALUE #( type = `E` text = val ) INTO TABLE mt_log.
+    DATA temp18 TYPE zabaputil_cl_util_context=>ty_s_msg.
+    CLEAR temp18.
+    temp18-type = `E`.
+    temp18-text = val.
+    INSERT temp18 INTO TABLE mt_log.
     result = me.
 
   ENDMETHOD.
 
   METHOD warning.
 
-    INSERT VALUE #( type = `W` text = val ) INTO TABLE mt_log.
+    DATA temp19 TYPE zabaputil_cl_util_context=>ty_s_msg.
+    CLEAR temp19.
+    temp19-type = `W`.
+    temp19-text = val.
+    INSERT temp19 INTO TABLE mt_log.
     result = me.
 
   ENDMETHOD.
 
   METHOD success.
 
-    INSERT VALUE #( type = `S` text = val ) INTO TABLE mt_log.
+    DATA temp20 TYPE zabaputil_cl_util_context=>ty_s_msg.
+    CLEAR temp20.
+    temp20-type = `S`.
+    temp20-text = val.
+    INSERT temp20 INTO TABLE mt_log.
     result = me.
 
   ENDMETHOD.
@@ -134,9 +151,21 @@ CLASS zabaputil_cl_util_log IMPLEMENTATION.
 
     " A (abort) and X (exit) are errors as well - a log that holds only
     " an abort message reported "no error"
-    result = xsdbool( line_exists( mt_log[ type = `E` ] )
-                   OR line_exists( mt_log[ type = `A` ] )
-                   OR line_exists( mt_log[ type = `X` ] ) ).
+    DATA temp21 LIKE sy-subrc.
+    DATA temp3 LIKE sy-subrc.
+    DATA temp1 LIKE sy-subrc.
+    DATA temp2 TYPE xsdboolean.
+    READ TABLE mt_log WITH KEY type = `E` TRANSPORTING NO FIELDS.
+    temp21 = sy-subrc.
+    
+    READ TABLE mt_log WITH KEY type = `A` TRANSPORTING NO FIELDS.
+    temp3 = sy-subrc.
+    
+    READ TABLE mt_log WITH KEY type = `X` TRANSPORTING NO FIELDS.
+    temp1 = sy-subrc.
+    
+    temp2 = boolc( temp21 = 0 OR temp3 = 0 OR temp1 = 0 ).
+    result = temp2.
 
   ENDMETHOD.
 
@@ -148,7 +177,8 @@ CLASS zabaputil_cl_util_log IMPLEMENTATION.
 
   METHOD bal_read.
 
-    DATA(lt_msg) = zabaputil_cl_util_context=>bal_read(
+    DATA lt_msg TYPE zabaputil_cl_util_context=>ty_t_msg.
+    lt_msg = zabaputil_cl_util_context=>bal_read(
          object    = object
          subobject = subobject
          id        = id ).
@@ -186,7 +216,8 @@ CLASS zabaputil_cl_util_log IMPLEMENTATION.
 
   METHOD to_string.
 
-    LOOP AT mt_log INTO DATA(ls_msg).
+    DATA ls_msg LIKE LINE OF mt_log.
+    LOOP AT mt_log INTO ls_msg.
       IF result IS NOT INITIAL.
         result = |{ result }\n|.
       ENDIF.

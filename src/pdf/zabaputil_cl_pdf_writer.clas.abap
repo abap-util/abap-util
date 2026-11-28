@@ -122,7 +122,7 @@ CLASS zabaputil_cl_pdf_writer DEFINITION
       END OF ty_s_object.
 
     " the row index is the object number
-    DATA mt_object   TYPE STANDARD TABLE OF ty_s_object WITH EMPTY KEY.
+    DATA mt_object   TYPE STANDARD TABLE OF ty_s_object WITH DEFAULT KEY.
     DATA mv_compress TYPE abap_bool.
 
     METHODS object_put
@@ -143,7 +143,9 @@ CLASS zabaputil_cl_pdf_writer IMPLEMENTATION.
 
   METHOD reserve.
 
-    INSERT VALUE #( ) INTO TABLE mt_object.
+    DATA temp22 TYPE zabaputil_cl_pdf_writer=>ty_s_object.
+    CLEAR temp22.
+    INSERT temp22 INTO TABLE mt_object.
     result = lines( mt_object ).
 
   ENDMETHOD.
@@ -169,6 +171,7 @@ CLASS zabaputil_cl_pdf_writer IMPLEMENTATION.
     DATA lv_packed TYPE xstring.
     DATA lv_filter TYPE string.
     DATA lv_dict   TYPE string.
+    DATA temp23 TYPE string.
 
     lv_bytes = content.
     IF mv_compress = abap_true AND compress = abap_true AND xstrlen( content ) > 0.
@@ -188,9 +191,11 @@ CLASS zabaputil_cl_pdf_writer IMPLEMENTATION.
       lv_dict = lv_dict && ` `.
     ENDIF.
 
+    
+    temp23 = lv_bytes.
     object_put( id  = id
                 hex = hex( |{ id } 0 obj\n<< { lv_dict }/Length { xstrlen( lv_bytes ) }{ lv_filter } >>\nstream\n| ) &&
-                      CONV string( lv_bytes ) &&
+                      temp23 &&
                       hex( |\nendstream\nendobj\n| ) ).
 
   ENDMETHOD.
@@ -206,13 +211,15 @@ CLASS zabaputil_cl_pdf_writer IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD object_put.
+    FIELD-SYMBOLS <object> TYPE zabaputil_cl_pdf_writer=>ty_s_object.
 
     IF id < 1 OR id > lines( mt_object ).
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
         EXPORTING
           val = |PDF: object { id } is not reserved|.
     ENDIF.
-    ASSIGN mt_object[ id ] TO FIELD-SYMBOL(<object>).
+    
+    READ TABLE mt_object INDEX id ASSIGNING <object>.
     <object>-hex = hex.
 
   ENDMETHOD.
@@ -224,13 +231,15 @@ CLASS zabaputil_cl_pdf_writer IMPLEMENTATION.
     DATA lv_id     TYPE i.
     DATA lv_offset TYPE i.
     DATA lv_info   TYPE string.
+    FIELD-SYMBOLS <object> LIKE LINE OF mt_object.
 
     " the second line is a comment of four bytes above 127: it tells a
     " transfer program that the file is binary
     lv_hex = hex( |%PDF-1.4\n%| ) && `E2E3CFD3` && `0A`.
 
     lv_xref = |xref\n0 { lines( mt_object ) + 1 }\n0000000000 65535 f \n|.
-    LOOP AT mt_object ASSIGNING FIELD-SYMBOL(<object>).
+    
+    LOOP AT mt_object ASSIGNING <object>.
       lv_id = sy-tabix.
       IF <object>-hex IS INITIAL.
         " reserved and never written: an object has to be there
@@ -290,16 +299,23 @@ CLASS zabaputil_cl_pdf_writer IMPLEMENTATION.
 
   METHOD hex.
 
-    result = CONV string( zabaputil_cl_util_context=>conv_get_xstring_by_string( CONV string( val ) ) ).
+    DATA temp24 TYPE string.
+    DATA temp6 TYPE string.
+    temp6 = val.
+    temp24 = zabaputil_cl_util_context=>conv_get_xstring_by_string( temp6 ).
+    result = temp24.
 
   ENDMETHOD.
 
   METHOD hex_utf16.
 
     DATA lv_cp TYPE i.
+    DATA temp25 TYPE zabaputil_cl_util_context=>ty_t_codepoint.
 
     result = `FEFF`.
-    LOOP AT zabaputil_cl_util_context=>c_get_codepoints( val ) INTO lv_cp.
+    
+    temp25 = zabaputil_cl_util_context=>c_get_codepoints( val ).
+    LOOP AT temp25 INTO lv_cp.
       IF lv_cp < 65536.
         result = result && hex_word( lv_cp ).
       ELSE.

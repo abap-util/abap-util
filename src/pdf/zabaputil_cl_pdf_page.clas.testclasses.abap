@@ -56,24 +56,21 @@ CLASS ltcl_page IMPLEMENTATION.
   METHOD fresh_page.
     " 600 x 800 points, one unit is one point; Courier is 600 wide per
     " character, so a text of n characters at 10 points is n * 6 wide
-    mo_page = NEW #( width  = 600
-                     height = 800
-                     scale  = 1 ).
-    mo_font = NEW zabaputil_cl_pdf_font_std( name     = `Courier`
-                                             resource = `F1` ).
+    CREATE OBJECT mo_page EXPORTING width = 600 height = 800 scale = 1.
+    CREATE OBJECT mo_font TYPE zabaputil_cl_pdf_font_std EXPORTING name = `Courier` resource = `F1`.
   ENDMETHOD.
 
   METHOD size_in_units.
     DATA lv_scale  TYPE f.
     DATA lv_width  TYPE f.
     DATA lv_height TYPE f.
+    DATA lo_page TYPE REF TO zabaputil_cl_pdf_page.
     lv_scale = 720.
     lv_scale = lv_scale / 254.
     lv_width = `595.28`.
     lv_height = `841.89`.
-    DATA(lo_page) = NEW zabaputil_cl_pdf_page( width  = lv_width
-                                               height = lv_height
-                                               scale  = lv_scale ).
+    
+    CREATE OBJECT lo_page TYPE zabaputil_cl_pdf_page EXPORTING width = lv_width height = lv_height scale = lv_scale.
     " A4 is rounded to hundredths of a point: 595.28 are a bit more than 210 mm
     cl_abap_unit_assert=>assert_equals( exp = `210.002` act = zabaputil_cl_pdf_writer=>num( lo_page->width( ) ) ).
     cl_abap_unit_assert=>assert_equals( exp = `297` act = zabaputil_cl_pdf_writer=>num( lo_page->height( ) ) ).
@@ -97,13 +94,13 @@ CLASS ltcl_page IMPLEMENTATION.
     DATA lv_scale  TYPE f.
     DATA lv_width  TYPE f.
     DATA lv_height TYPE f.
+    DATA lo_page TYPE REF TO zabaputil_cl_pdf_page.
     lv_scale = 720.
     lv_scale = lv_scale / 254.
     lv_width = `595.28`.
     lv_height = `841.89`.
-    DATA(lo_page) = NEW zabaputil_cl_pdf_page( width  = lv_width
-                                               height = lv_height
-                                               scale  = lv_scale ).
+    
+    CREATE OBJECT lo_page TYPE zabaputil_cl_pdf_page EXPORTING width = lv_width height = lv_height scale = lv_scale.
     lo_page->set_font( font = mo_font
                        size = 9 ).
     lo_page->text( x   = 10
@@ -135,14 +132,14 @@ CLASS ltcl_page IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD text_width_of.
+    DATA lo_page TYPE REF TO zabaputil_cl_pdf_page.
     mo_page->set_font( font = mo_font
                        size = 10 ).
     cl_abap_unit_assert=>assert_equals( exp = `12` act = zabaputil_cl_pdf_writer=>num( mo_page->text_width( `Hi` ) ) ).
 
     " in the unit of the page: 12 points are half a unit of 24 points
-    DATA(lo_page) = NEW zabaputil_cl_pdf_page( width  = 600
-                                               height = 800
-                                               scale  = 24 ).
+    
+    CREATE OBJECT lo_page TYPE zabaputil_cl_pdf_page EXPORTING width = 600 height = 800 scale = 24.
     lo_page->set_font( font = mo_font
                        size = 10 ).
     cl_abap_unit_assert=>assert_equals( exp = `0.5` act = zabaputil_cl_pdf_writer=>num( lo_page->text_width( `Hi` ) ) ).
@@ -204,8 +201,17 @@ CLASS ltcl_page IMPLEMENTATION.
 
   METHOD color_invalid.
     DATA lt_bad TYPE string_table.
-    lt_bad = VALUE #( ( `12345` ) ( `GGGGGG` ) ( `` ) ( `#1234567` ) ( `red` ) ).
-    LOOP AT lt_bad INTO DATA(lv_bad).
+    DATA temp1 TYPE string_table.
+    DATA lv_bad LIKE LINE OF lt_bad.
+    CLEAR temp1.
+    INSERT `12345` INTO TABLE temp1.
+    INSERT `GGGGGG` INTO TABLE temp1.
+    INSERT `` INTO TABLE temp1.
+    INSERT `#1234567` INTO TABLE temp1.
+    INSERT `red` INTO TABLE temp1.
+    lt_bad = temp1.
+    
+    LOOP AT lt_bad INTO lv_bad.
       TRY.
           mo_page->set_fill_color( lv_bad ).
           cl_abap_unit_assert=>fail( lv_bad ).
@@ -256,6 +262,11 @@ CLASS ltcl_page IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD ellipse_curves.
+    DATA lv_content TYPE string.
+    DATA temp1 TYPE xsdboolean.
+    DATA temp2 TYPE xsdboolean.
+    DATA temp3 TYPE xsdboolean.
+    DATA temp4 TYPE xsdboolean.
     " a circle of radius 50 around ( 100, 100 ): four curves, the control
     " points 27.615 from the ends
     mo_page->ellipse( x  = 100
@@ -272,16 +283,25 @@ CLASS ltcl_page IMPLEMENTATION.
                       rx    = 50
                       ry    = 10
                       style = `F` ).
-    DATA(lv_content) = mo_page->content( ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS `150 700 m ` ) ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS ` 100 710 c ` ) ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS ` 100 690 c ` ) ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CP `* c f` ) ).
+    
+    lv_content = mo_page->content( ).
+    
+    temp1 = boolc( lv_content CS `150 700 m ` ).
+    cl_abap_unit_assert=>assert_true( temp1 ).
+    
+    temp2 = boolc( lv_content CS ` 100 710 c ` ).
+    cl_abap_unit_assert=>assert_true( temp2 ).
+    
+    temp3 = boolc( lv_content CS ` 100 690 c ` ).
+    cl_abap_unit_assert=>assert_true( temp3 ).
+    
+    temp4 = boolc( lv_content CP `* c f` ).
+    cl_abap_unit_assert=>assert_true( temp4 ).
   ENDMETHOD.
 
   METHOD image_sizes.
-    DATA(lo_image) = NEW zabaputil_cl_pdf_image( content  = image_rgb( )
-                                                 resource = `I1` ).
+    DATA lo_image TYPE REF TO zabaputil_cl_pdf_image.
+    CREATE OBJECT lo_image TYPE zabaputil_cl_pdf_image EXPORTING content = image_rgb( ) resource = `I1`.
     " the width given: the height follows from 2 x 2 pixels
     mo_page->image( image = lo_image
                     x     = 10
@@ -309,18 +329,30 @@ CLASS ltcl_page IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD link_annotation.
+    DATA lt_annotation TYPE string_table.
+    FIELD-SYMBOLS <temp3> LIKE LINE OF lt_annotation.
+    DATA temp4 LIKE sy-tabix.
     mo_page->link( x   = 10
                    y   = 20
                    w   = 100
                    h   = 10
                    url = `https://a.b/c` ).
     cl_abap_unit_assert=>assert_initial( mo_page->content( ) ).
-    DATA(lt_annotation) = mo_page->annotations( ).
+    
+    lt_annotation = mo_page->annotations( ).
     cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_annotation ) ).
+    
+    
+    temp4 = sy-tabix.
+    READ TABLE lt_annotation INDEX 1 ASSIGNING <temp3>.
+    sy-tabix = temp4.
+    IF sy-subrc <> 0.
+      ASSERT 1 = 0.
+    ENDIF.
     cl_abap_unit_assert=>assert_equals(
         exp = `<< /Type /Annot /Subtype /Link /Rect [10 770 110 780] /Border [0 0 0] ` &&
               `/A << /S /URI /URI <68747470733A2F2F612E622F63> >> >>`
-        act = lt_annotation[ 1 ] ).
+        act = <temp3> ).
   ENDMETHOD.
 
   METHOD raw_and_order.
@@ -335,7 +367,9 @@ CLASS ltcl_page IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD fluent.
-    DATA(lo_same) = mo_page->set_font( mo_font )->set_text_color( `000000` )->set_fill_color( `000000`
+    DATA lo_same TYPE REF TO zabaputil_cl_pdf_page.
+    DATA temp5 TYPE xsdboolean.
+    lo_same = mo_page->set_font( mo_font )->set_text_color( `000000` )->set_fill_color( `000000`
         )->set_draw_color( `000000` )->set_line_width( 1 )->set_dash( )->text( x   = 1
                                                                                 y   = 1
                                                                                 val = `x`
@@ -348,7 +382,9 @@ CLASS ltcl_page IMPLEMENTATION.
                                  h = 1 )->ellipse( x  = 5
                                                    y  = 5
                                                    rx = 1 )->raw( `q Q` ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lo_same = mo_page ) ).
+    
+    temp5 = boolc( lo_same = mo_page ).
+    cl_abap_unit_assert=>assert_true( temp5 ).
   ENDMETHOD.
 
 ENDCLASS.

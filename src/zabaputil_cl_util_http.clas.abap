@@ -214,13 +214,22 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
   METHOD client_create.
 
     DATA lv_classname TYPE c LENGTH 14.
+    DATA lv_destination TYPE c LENGTH 32.
+    DATA temp18 TYPE string.
+    DATA lv_url LIKE temp18.
+    DATA lv_error TYPE string.
+        DATA x TYPE REF TO cx_root.
+    FIELD-SYMBOLS <popup> TYPE any.
     lv_classname = `CL_HTTP_CLIENT`.
 
-    DATA lv_destination TYPE c LENGTH 32.
+    
     lv_destination = destination.
-    DATA(lv_url) = CONV string( url ).
+    
+    temp18 = url.
+    
+    lv_url = temp18.
     " the classic exception by name - each one has another fix
-    DATA lv_error TYPE string.
+    
 
     TRY.
 
@@ -278,7 +287,8 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
           CLEAR result.
         ENDIF.
 
-      CATCH cx_root INTO DATA(x).
+        
+      CATCH cx_root INTO x.
         RAISE EXCEPTION TYPE zabaputil_cx_util_error
           EXPORTING val = x.
     ENDTRY.
@@ -301,7 +311,7 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     " named by value because this class names no on-premise type statically.
     " The attribute is reached by its alias on CL_HTTP_CLIENT and by its
     " interface name otherwise; a stack that has neither keeps its default
-    FIELD-SYMBOLS <popup> TYPE any.
+    
     TRY.
         ASSIGN result->(`PROPERTYTYPE_LOGON_POPUP`) TO <popup>.
         IF <popup> IS NOT ASSIGNED.
@@ -348,11 +358,17 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     DATA lo_response TYPE REF TO object.
     FIELD-SYMBOLS <any> TYPE any.
 
-    DATA(ls_target) = client_target( destination = is_req-destination
+    DATA ls_target TYPE zabaputil_cl_util_http=>ty_s_client_target.
+    DATA lo_client TYPE REF TO object.
+        DATA lv_content_type TYPE string.
+          DATA lv_bytes TYPE xstring.
+        DATA x TYPE REF TO cx_root.
+    ls_target = client_target( destination = is_req-destination
                                      url         = is_req-url
                                      query       = is_req-query ).
 
-    DATA(lo_client) = client_create( destination = is_req-destination
+    
+    lo_client = client_create( destination = is_req-destination
                                      url         = ls_target-url ).
 
     TRY.
@@ -388,7 +404,7 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
         " UTF-8 unless it says otherwise (RFC 8259), so a body without a
         " charset is read as bytes and decoded as UTF-8; one that names its
         " charset is left to the ICF
-        DATA lv_content_type TYPE string.
+        
         CALL METHOD lo_response->(`GET_HEADER_FIELD`)
           EXPORTING
             name  = `content-type`
@@ -399,7 +415,7 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
             RECEIVING
               data = result-body.
         ELSE.
-          DATA lv_bytes TYPE xstring.
+          
           CALL METHOD lo_response->(`GET_DATA`)
             RECEIVING
               data = lv_bytes.
@@ -420,7 +436,8 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
           EXCEPTIONS
             OTHERS = 0.
 
-      CATCH cx_root INTO DATA(x).
+        
+      CATCH cx_root INTO x.
         " CLOSE on the failure path too: every throw between client_create
         " and the success-path CLOSE above (a failing dynamic GET_CDATA /
         " GET_STATUS, the RESPONSE assign, a failed SEND) used to leave the
@@ -444,6 +461,10 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     DATA lo_request TYPE REF TO object.
     DATA lv_message TYPE string.
     FIELD-SYMBOLS <any> TYPE any.
+    DATA ls_header LIKE LINE OF is_req-t_header.
+    DATA lv_method TYPE string.
+    DATA lv_body LIKE is_req-body.
+      DATA lv_timeout LIKE is_req-timeout.
 
     " IS ASSIGNED, not sy-subrc, and a RAISE rather than an ASSERT - see
     " get_response_onprem for both halves. An HTTP client whose REQUEST
@@ -466,7 +487,8 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
     " every header field as it came - name and value are strings already,
     " which is what the dynamic call needs (see set_cdata on the CONV)
-    LOOP AT is_req-t_header INTO DATA(ls_header).
+    
+    LOOP AT is_req-t_header INTO ls_header.
       CALL METHOD lo_request->(`SET_HEADER_FIELD`)
         EXPORTING
           name  = ls_header-n
@@ -475,18 +497,21 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
     " upper case as on ABAP Cloud - the method token is case-sensitive, and
     " `post` went out as it was and came back as a 400 or 405
-    DATA(lv_method) = to_upper( is_req-method ).
+    
+    lv_method = to_upper( is_req-method ).
     CALL METHOD lo_request->(`SET_METHOD`)
       EXPORTING
         method = lv_method.
 
-    DATA(lv_body) = is_req-body.
+    
+    lv_body = is_req-body.
     CALL METHOD lo_request->(`SET_CDATA`)
       EXPORTING
         data = lv_body.
 
     IF is_req-timeout > 0.
-      DATA(lv_timeout) = is_req-timeout.
+      
+      lv_timeout = is_req-timeout.
       CALL METHOD io_client->(`SEND`)
         EXPORTING
           timeout                    = lv_timeout
@@ -541,12 +566,21 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     DATA lv_system_id TYPE c LENGTH 60.
     DATA lt_part TYPE string_table.
     FIELD-SYMBOLS <authn> TYPE any.
+      DATA lv_url LIKE is_req-url.
+      DATA temp19 LIKE lv_scenario.
+      DATA temp20 TYPE string.
+      DATA temp21 LIKE lv_service_id.
+      DATA temp22 TYPE string.
+      DATA temp23 LIKE lv_system_id.
+      DATA temp24 TYPE string.
+      DATA lv_name LIKE is_req-destination.
 
     lv_provider = `CL_HTTP_DESTINATION_PROVIDER`.
     lv_service  = `IF_A4C_CP_SERVICE`.
 
     IF is_req-destination IS INITIAL OR is_req-destination = `NONE`.
-      DATA(lv_url) = is_req-url.
+      
+      lv_url = is_req-url.
       CALL METHOD (lv_provider)=>create_by_url
         EXPORTING
           i_url              = lv_url
@@ -554,9 +588,30 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
           r_http_destination = result.
     ELSEIF is_req-destination CS `/`.
       SPLIT is_req-destination AT `/` INTO TABLE lt_part.
-      lv_scenario   = VALUE #( lt_part[ 1 ] OPTIONAL ).
-      lv_service_id = VALUE #( lt_part[ 2 ] OPTIONAL ).
-      lv_system_id  = VALUE #( lt_part[ 3 ] OPTIONAL ).
+      
+      CLEAR temp19.
+      
+      READ TABLE lt_part INTO temp20 INDEX 1.
+      IF sy-subrc = 0.
+        temp19 = temp20.
+      ENDIF.
+      lv_scenario   = temp19.
+      
+      CLEAR temp21.
+      
+      READ TABLE lt_part INTO temp22 INDEX 2.
+      IF sy-subrc = 0.
+        temp21 = temp22.
+      ENDIF.
+      lv_service_id = temp21.
+      
+      CLEAR temp23.
+      
+      READ TABLE lt_part INTO temp24 INDEX 3.
+      IF sy-subrc = 0.
+        temp23 = temp24.
+      ENDIF.
+      lv_system_id  = temp23.
       CALL METHOD (lv_provider)=>create_by_comm_arrangement
         EXPORTING
           comm_scenario      = lv_scenario
@@ -565,7 +620,8 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
         RECEIVING
           r_http_destination = result.
     ELSE.
-      DATA(lv_name) = is_req-destination.
+      
+      lv_name = is_req-destination.
       ASSIGN (lv_service)=>(`SERVICE_SPECIFIC`) TO <authn>.
       IF <authn> IS NOT ASSIGNED.
         RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -594,20 +650,31 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     DATA lo_response TYPE REF TO object.
     DATA ls_status TYPE ty_s_http_status_cloud.
     FIELD-SYMBOLS <method> TYPE any.
+    DATA ls_target TYPE zabaputil_cl_util_http=>ty_s_client_target.
+    DATA ls_req LIKE is_req.
+        DATA lo_destination TYPE REF TO object.
+          DATA lv_path LIKE ls_target-request_uri.
+        DATA ls_header LIKE LINE OF is_req-t_header.
+        DATA lv_body LIKE is_req-body.
+        DATA lv_method TYPE string.
+        DATA x TYPE REF TO cx_root.
 
     lv_manager     = `CL_WEB_HTTP_CLIENT_MANAGER`.
     lv_client_intf = `IF_WEB_HTTP_CLIENT`.
 
     " the query goes where it goes on Standard - into the URL, or after the
     " path below a destination
-    DATA(ls_target) = client_target( destination = is_req-destination
+    
+    ls_target = client_target( destination = is_req-destination
                                      url         = is_req-url
                                      query       = is_req-query ).
-    DATA(ls_req) = is_req.
+    
+    ls_req = is_req.
     ls_req-url = ls_target-url.
 
     TRY.
-        DATA(lo_destination) = client_destination_cloud( ls_req ).
+        
+        lo_destination = client_destination_cloud( ls_req ).
 
         " every call on the client, request and response objects names its
         " interface: the objects are typed REF TO object, and a bare
@@ -627,25 +694,29 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
         " with a destination the url is the path below it, with a URL the
         " path is already part of it
         IF ls_target-request_uri IS NOT INITIAL.
-          DATA(lv_path) = ls_target-request_uri.
+          
+          lv_path = ls_target-request_uri.
           CALL METHOD lo_request->(`IF_WEB_HTTP_REQUEST~SET_URI_PATH`)
             EXPORTING
               i_uri_path = lv_path.
         ENDIF.
 
-        LOOP AT is_req-t_header INTO DATA(ls_header).
+        
+        LOOP AT is_req-t_header INTO ls_header.
           CALL METHOD lo_request->(`IF_WEB_HTTP_REQUEST~SET_HEADER_FIELD`)
             EXPORTING
               i_name  = ls_header-n
               i_value = ls_header-v.
         ENDLOOP.
 
-        DATA(lv_body) = is_req-body.
+        
+        lv_body = is_req-body.
         CALL METHOD lo_request->(`IF_WEB_HTTP_REQUEST~SET_TEXT`)
           EXPORTING
             i_text = lv_body.
 
-        DATA(lv_method) = to_upper( is_req-method ).
+        
+        lv_method = to_upper( is_req-method ).
         ASSIGN (lv_client_intf)=>(lv_method) TO <method>.
         IF <method> IS NOT ASSIGNED.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -668,7 +739,8 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
         CALL METHOD lo_client->(`IF_WEB_HTTP_CLIENT~CLOSE`).
 
-      CATCH cx_root INTO DATA(x).
+        
+      CATCH cx_root INTO x.
         IF lo_client IS BOUND.
           TRY.
               CALL METHOD lo_client->(`IF_WEB_HTTP_CLIENT~CLOSE`).
@@ -682,6 +754,8 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD client_execute_cloud.
+          DATA lv_timeout LIKE timeout.
+        DATA x TYPE REF TO cx_root.
 
     " the timeout only when one is asked for - the parameter's own default is
     " the client's. A failed EXECUTE (no connection, TLS, timeout) is the
@@ -691,7 +765,8 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     " for one). The caller closes the client on the way out
     TRY.
         IF timeout > 0.
-          DATA(lv_timeout) = timeout.
+          
+          lv_timeout = timeout.
           CALL METHOD io_client->(`IF_WEB_HTTP_CLIENT~EXECUTE`)
             EXPORTING
               i_method   = method
@@ -705,7 +780,8 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
             RECEIVING
               r_response = result.
         ENDIF.
-      CATCH cx_root INTO DATA(x).
+        
+      CATCH cx_root INTO x.
         RAISE EXCEPTION TYPE zabaputil_cx_util_error
           EXPORTING
             val      = `HTTP_COMMUNICATION_ERROR - the request could not be sent or no response came back`
@@ -717,11 +793,17 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
   METHOD delete_response_cookie.
 
-    DATA(lv_val) = CONV string( val ).
+    DATA temp25 TYPE string.
+    DATA lv_val LIKE temp25.
+      DATA object TYPE REF TO object.
+    temp25 = val.
+    
+    lv_val = temp25.
 
     IF mo_server_onprem IS BOUND.
 
-      DATA(object) = get_response_onprem( ).
+      
+      object = get_response_onprem( ).
 
       CALL METHOD object->(`DELETE_COOKIE`)
         EXPORTING
@@ -733,11 +815,17 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
   METHOD get_response_cookie.
 
-    DATA(lv_val) = CONV string( val ).
+    DATA temp26 TYPE string.
+    DATA lv_val LIKE temp26.
+      DATA object TYPE REF TO object.
+    temp26 = val.
+    
+    lv_val = temp26.
 
     IF mo_server_onprem IS BOUND.
 
-      DATA(object) = get_response_onprem( ).
+      
+      object = get_response_onprem( ).
 
       CALL METHOD object->(`GET_COOKIE`)
         EXPORTING
@@ -753,11 +841,17 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
   METHOD get_header_field.
 
-    DATA(lv_val) = CONV string( val ).
+    DATA temp27 TYPE string.
+    DATA lv_val LIKE temp27.
+      DATA object TYPE REF TO object.
+    temp27 = val.
+    
+    lv_val = temp27.
 
     IF mo_server_onprem IS BOUND.
 
-      DATA(object) = get_request_onprem( ).
+      
+      object = get_request_onprem( ).
 
       CALL METHOD object->(`GET_HEADER_FIELD`)
         EXPORTING
@@ -779,8 +873,22 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
   METHOD set_header_field.
 
-    DATA(lv_n) = CONV string( n ).
-    DATA(lv_v) = CONV string( v ).
+    DATA temp28 TYPE string.
+    DATA lv_n LIKE temp28.
+    DATA temp29 TYPE string.
+    DATA lv_v LIKE temp29.
+      DATA temp30 TYPE string.
+      DATA lv_cr LIKE temp30.
+      DATA temp31 TYPE string.
+      DATA lv_lf LIKE temp31.
+      DATA object TYPE REF TO object.
+    temp28 = n.
+    
+    lv_n = temp28.
+    
+    temp29 = v.
+    
+    lv_v = temp29.
 
     " strip CR/LF from both halves before they reach the stack: a header
     " name or value that carries a line break splits the response into two
@@ -789,8 +897,14 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     " embedded CRLF itself, but nothing here should depend on it
     IF lv_n CA zabaputil_cl_util_context=>cv_char_util_cr_lf
         OR lv_v CA zabaputil_cl_util_context=>cv_char_util_cr_lf.
-      DATA(lv_cr) = CONV string( zabaputil_cl_util_context=>cv_char_util_cr_lf(1) ).
-      DATA(lv_lf) = CONV string( zabaputil_cl_util_context=>cv_char_util_cr_lf+1(1) ).
+      
+      temp30 = zabaputil_cl_util_context=>cv_char_util_cr_lf(1).
+      
+      lv_cr = temp30.
+      
+      temp31 = zabaputil_cl_util_context=>cv_char_util_cr_lf+1(1).
+      
+      lv_lf = temp31.
       lv_n = replace( val = lv_n sub = lv_cr with = `` occ = 0 ).
       lv_n = replace( val = lv_n sub = lv_lf with = `` occ = 0 ).
       lv_v = replace( val = lv_v sub = lv_cr with = `` occ = 0 ).
@@ -799,7 +913,8 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
     IF mo_server_onprem IS BOUND.
 
-      DATA(object) = get_response_onprem( ).
+      
+      object = get_response_onprem( ).
 
       CALL METHOD object->(`SET_HEADER_FIELD`)
         EXPORTING
@@ -819,24 +934,26 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
   METHOD factory.
 
-    result = NEW #( ).
+    CREATE OBJECT result.
     result->mo_server_onprem = server.
 
   ENDMETHOD.
 
   METHOD factory_cloud.
 
-    result = NEW #( ).
+    CREATE OBJECT result.
     result->mo_request_cloud  = req.
     result->mo_response_cloud = res.
 
   ENDMETHOD.
 
   METHOD get_cdata.
+      DATA object TYPE REF TO object.
 
     IF mo_server_onprem IS BOUND.
 
-      DATA(object) = get_request_onprem( ).
+      
+      object = get_request_onprem( ).
 
       CALL METHOD object->(`GET_CDATA`)
         RECEIVING
@@ -853,10 +970,12 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD get_method.
+      DATA object TYPE REF TO object.
 
     IF mo_server_onprem IS BOUND.
 
-      DATA(object) = get_request_onprem( ).
+      
+      object = get_request_onprem( ).
 
       CALL METHOD object->(`IF_HTTP_REQUEST~GET_METHOD`)
         RECEIVING
@@ -880,11 +999,17 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     " call would have converted. Converted ONCE, above the branch: the cloud
     " half used to pass the generic value through, so a CHAR caller worked
     " on-prem and failed on cloud only
-    DATA(lv_data) = CONV string( val ).
+    DATA temp32 TYPE string.
+    DATA lv_data LIKE temp32.
+      DATA object TYPE REF TO object.
+    temp32 = val.
+    
+    lv_data = temp32.
 
     IF mo_server_onprem IS BOUND.
 
-      DATA(object) = get_response_onprem( ).
+      
+      object = get_response_onprem( ).
 
       CALL METHOD object->(`SET_CDATA`)
         EXPORTING
@@ -902,11 +1027,17 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
   METHOD set_status.
 
-    DATA(lv_reason) = CONV string( reason ).
+    DATA temp33 TYPE string.
+    DATA lv_reason LIKE temp33.
+      DATA object TYPE REF TO object.
+    temp33 = reason.
+    
+    lv_reason = temp33.
 
     IF mo_server_onprem IS BOUND.
 
-      DATA(object) = get_response_onprem( ).
+      
+      object = get_response_onprem( ).
 
       CALL METHOD object->(`IF_HTTP_RESPONSE~SET_STATUS`)
         EXPORTING
@@ -943,7 +1074,8 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     " header read is a dynamic call into the request object, and this
     " method runs on every request. get_query( ) reads the header itself
     " and stays for a caller that wants the query alone
-    DATA(lv_uri) = get_header_field( `~request_uri` ).
+    DATA lv_uri TYPE string.
+    lv_uri = get_header_field( `~request_uri` ).
 
     result-body     = get_cdata( ).
     result-method   = get_method( ).
@@ -957,9 +1089,10 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD get_request_onprem.
+      FIELD-SYMBOLS <any> TYPE any.
 
     IF mo_request_onprem IS NOT BOUND.
-      FIELD-SYMBOLS <any> TYPE any.
+      
       " IS ASSIGNED, not sy-subrc, and a RAISE rather than an ASSERT - see
       " the note at get_response_onprem below, which both share
       ASSIGN mo_server_onprem->(`REQUEST`) TO <any>.
@@ -975,9 +1108,10 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD get_response_onprem.
+      FIELD-SYMBOLS <any> TYPE any.
 
     IF mo_response_onprem IS NOT BOUND.
-      FIELD-SYMBOLS <any> TYPE any.
+      
       " Both halves of this guard changed together, and both matter on the
       " path every single request takes (get_cdata / get_method /
       " get_header_field all come through here):
@@ -1016,10 +1150,15 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
     " prefix - so the path stays the one maintained in SM59. The destination
     " test is client_create's, which decides between the two
     DATA lv_destination TYPE c LENGTH 32.
+    DATA temp34 TYPE string.
+    DATA lv_query LIKE temp34.
     lv_destination = destination.
 
     result-url = url.
-    DATA(lv_query) = CONV string( query ).
+    
+    temp34 = query.
+    
+    lv_query = temp34.
     lv_query = shift_left( val = lv_query
                            sub = `?` ).
 
@@ -1045,7 +1184,8 @@ CLASS zabaputil_cl_util_http IMPLEMENTATION.
 
   METHOD get_query.
 
-    DATA(lv_uri) = get_header_field( `~request_uri` ).
+    DATA lv_uri TYPE string.
+    lv_uri = get_header_field( `~request_uri` ).
     IF lv_uri CS `?`.
       result = substring_after( val = lv_uri
                                 sub = `?` ).

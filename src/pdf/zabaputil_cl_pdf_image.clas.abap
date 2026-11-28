@@ -196,7 +196,8 @@ CLASS zabaputil_cl_pdf_image IMPLEMENTATION.
 
     " offsets and lengths: none of them reaches 2^31 in a file that fits
     " into memory, and a larger value would not fit into an integer
-    DATA(lv_high) = u16( off ).
+    DATA lv_high TYPE i.
+    lv_high = u16( off ).
     IF lv_high >= 32768.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
         EXPORTING
@@ -214,7 +215,8 @@ CLASS zabaputil_cl_pdf_image IMPLEMENTATION.
     " a chain of segments, each FF, a marker byte and (for most) a length.
     " The size is in the start-of-frame segment: C0 to CF, except C4
     " (Huffman tables), C8 and CC
-    DATA(lv_len) = xstrlen( mv_content ).
+    DATA lv_len TYPE i.
+    lv_len = xstrlen( mv_content ).
     WHILE lv_off + 4 <= lv_len.
       IF u8( lv_off ) <> 255.
         lv_off = lv_off + 1.
@@ -256,7 +258,9 @@ CLASS zabaputil_cl_pdf_image IMPLEMENTATION.
     DATA lv_data  TYPE i.
 
     " chunks: four bytes length, four bytes type, the data, four bytes CRC
-    DATA(lv_len) = xstrlen( mv_content ).
+    DATA lv_len TYPE i.
+          DATA temp8 TYPE string.
+    lv_len = xstrlen( mv_content ).
     WHILE lv_off + 12 <= lv_len.
       lv_size = u32( lv_off ).
       lv_data = lv_off + 8.
@@ -292,7 +296,9 @@ CLASS zabaputil_cl_pdf_image IMPLEMENTATION.
           mv_trns = lv_chunk.
         WHEN `49444154`.
           " IDAT - one zlib stream, cut into chunks
-          mv_idat = mv_idat && CONV string( lv_chunk ).
+          
+          temp8 = lv_chunk.
+          mv_idat = mv_idat && temp8.
         WHEN `49454E44`.
           " IEND
           EXIT.
@@ -369,6 +375,7 @@ CLASS zabaputil_cl_pdf_image IMPLEMENTATION.
     DATA lv_color TYPE xstring.
     DATA lv_alpha TYPE xstring.
     DATA lv_parms TYPE string.
+      DATA lv_mask TYPE i.
 
     CASE mv_color_type.
       WHEN 0 OR 4.
@@ -391,7 +398,8 @@ CLASS zabaputil_cl_pdf_image IMPLEMENTATION.
       png_split_alpha( IMPORTING color = lv_color
                                  alpha = lv_alpha ).
 
-      DATA(lv_mask) = writer->add_stream(
+      
+      lv_mask = writer->add_stream(
           dict     = |/Type /XObject /Subtype /Image /Width { mv_width } /Height { mv_height } | &&
                      |/ColorSpace /DeviceGray /BitsPerComponent { mv_depth } /Filter /FlateDecode | &&
                      |/DecodeParms << /Predictor 15 /Colors 1 /BitsPerComponent { mv_depth } | &&
@@ -476,6 +484,10 @@ CLASS zabaputil_cl_pdf_image IMPLEMENTATION.
     DATA lv_filter  TYPE string.
     DATA lv_off     TYPE i.
     DATA lv_row     TYPE i.
+    DATA lv_sample TYPE i.
+    DATA lv_color_len TYPE i.
+    DATA lv_pixel TYPE i.
+    DATA lv_row_len TYPE i.
 
     CLEAR color.
     CLEAR alpha.
@@ -484,10 +496,14 @@ CLASS zabaputil_cl_pdf_image IMPLEMENTATION.
     lv_packed = mv_idat.
     lv_raw = zabaputil_cl_util_context=>zlib_decompress( lv_packed ).
 
-    DATA(lv_sample) = mv_depth DIV 4.
-    DATA(lv_color_len) = mv_colors * lv_sample.
-    DATA(lv_pixel) = lv_color_len + lv_sample.
-    DATA(lv_row_len) = 2 + mv_width * lv_pixel.
+    
+    lv_sample = mv_depth DIV 4.
+    
+    lv_color_len = mv_colors * lv_sample.
+    
+    lv_pixel = lv_color_len + lv_sample.
+    
+    lv_row_len = 2 + mv_width * lv_pixel.
 
     IF strlen( lv_raw ) < lv_row_len * mv_height.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error

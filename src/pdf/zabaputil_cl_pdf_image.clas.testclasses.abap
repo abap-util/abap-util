@@ -173,18 +173,21 @@ CLASS ltcl_image IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD image.
-    result = NEW #( content  = content
-                    resource = `I1` ).
+    CREATE OBJECT result EXPORTING content = content resource = `I1`.
   ENDMETHOD.
 
   METHOD rendered.
-    DATA(lo_writer) = NEW zabaputil_cl_pdf_writer( abap_false ).
+    DATA lo_writer TYPE REF TO zabaputil_cl_pdf_writer.
+    CREATE OBJECT lo_writer TYPE zabaputil_cl_pdf_writer EXPORTING COMPRESS = abap_false.
     result = lo_writer->render( image( content )->write( lo_writer ) ).
   ENDMETHOD.
 
   METHOD has_gzip.
+        DATA temp1 TYPE xstring.
     TRY.
-        zabaputil_cl_util_context=>gzip_compress( CONV xstring( `00` ) ).
+        
+        temp1 = `00`.
+        zabaputil_cl_util_context=>gzip_compress( temp1 ).
         result = abap_true.
       CATCH cx_root.
         result = abap_false.
@@ -192,7 +195,8 @@ CLASS ltcl_image IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD jpeg_size.
-    DATA(lo_image) = image( image_jpeg( ) ).
+    DATA lo_image TYPE REF TO zabaputil_cl_pdf_image.
+    lo_image = image( image_jpeg( ) ).
     cl_abap_unit_assert=>assert_equals( exp = `JPEG` act = lo_image->format( ) ).
     cl_abap_unit_assert=>assert_equals( exp = 4 act = lo_image->width( ) ).
     cl_abap_unit_assert=>assert_equals( exp = 3 act = lo_image->height( ) ).
@@ -200,28 +204,47 @@ CLASS ltcl_image IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD jpeg_write.
-    DATA(lv_hex) = rendered( image_jpeg( ) ).
-    DATA(lv_expect) = zabaputil_cl_pdf_writer=>hex(
+    DATA lv_hex TYPE string.
+    DATA lv_expect TYPE string.
+    DATA temp1 TYPE xsdboolean.
+    DATA lv_file TYPE string.
+    DATA temp2 TYPE xsdboolean.
+    lv_hex = rendered( image_jpeg( ) ).
+    
+    lv_expect = zabaputil_cl_pdf_writer=>hex(
         `<< /Type /XObject /Subtype /Image /Width 4 /Height 3 /ColorSpace /DeviceRGB ` &&
         |/BitsPerComponent 8 /Filter /DCTDecode /Length 287 >>\nstream\n| ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
+    
+    temp1 = boolc( lv_hex CS lv_expect ).
+    cl_abap_unit_assert=>assert_true( temp1 ).
     " the file goes in as it is
-    DATA lv_file TYPE string.
+    
     lv_file = image_jpeg( ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_file ) ).
+    
+    temp2 = boolc( lv_hex CS lv_file ).
+    cl_abap_unit_assert=>assert_true( temp2 ).
   ENDMETHOD.
 
   METHOD jpeg_gray.
-    DATA(lo_image) = image( image_jpeggray( ) ).
+    DATA lo_image TYPE REF TO zabaputil_cl_pdf_image.
+    DATA lv_hex TYPE string.
+    DATA lv_expect TYPE string.
+    DATA temp3 TYPE xsdboolean.
+    lo_image = image( image_jpeggray( ) ).
     cl_abap_unit_assert=>assert_equals( exp = 5 act = lo_image->width( ) ).
     cl_abap_unit_assert=>assert_equals( exp = 2 act = lo_image->height( ) ).
-    DATA(lv_hex) = rendered( image_jpeggray( ) ).
-    DATA(lv_expect) = zabaputil_cl_pdf_writer=>hex( `/ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /DCTDecode` ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
+    
+    lv_hex = rendered( image_jpeggray( ) ).
+    
+    lv_expect = zabaputil_cl_pdf_writer=>hex( `/ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /DCTDecode` ).
+    
+    temp3 = boolc( lv_hex CS lv_expect ).
+    cl_abap_unit_assert=>assert_true( temp3 ).
   ENDMETHOD.
 
   METHOD png_size.
-    DATA(lo_image) = image( image_rgb( ) ).
+    DATA lo_image TYPE REF TO zabaputil_cl_pdf_image.
+    lo_image = image( image_rgb( ) ).
     cl_abap_unit_assert=>assert_equals( exp = `PNG` act = lo_image->format( ) ).
     cl_abap_unit_assert=>assert_equals( exp = 2 act = lo_image->width( ) ).
     cl_abap_unit_assert=>assert_equals( exp = 2 act = lo_image->height( ) ).
@@ -232,108 +255,187 @@ CLASS ltcl_image IMPLEMENTATION.
 
   METHOD png_rgb_write.
     " the pixel data of both IDAT chunks, joined and not unpacked
-    DATA(lv_hex) = rendered( image_rgb( ) ).
-    DATA(lv_expect) = zabaputil_cl_pdf_writer=>hex(
+    DATA lv_hex TYPE string.
+    DATA lv_expect TYPE string.
+    DATA temp4 TYPE xsdboolean.
+    DATA temp5 TYPE xsdboolean.
+    DATA temp6 TYPE xsdboolean.
+    DATA lo_image TYPE REF TO zabaputil_cl_pdf_image.
+    DATA lv_idat TYPE xstring.
+    DATA temp2 TYPE xstring.
+    lv_hex = rendered( image_rgb( ) ).
+    
+    lv_expect = zabaputil_cl_pdf_writer=>hex(
         `<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceRGB ` &&
         `/BitsPerComponent 8 /Filter /FlateDecode ` &&
         `/DecodeParms << /Predictor 15 /Colors 3 /BitsPerComponent 8 /Columns 2 >> /Length ` ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
-    cl_abap_unit_assert=>assert_false( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( `/SMask` ) ) ).
-    cl_abap_unit_assert=>assert_false( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( `/Mask` ) ) ).
+    
+    temp4 = boolc( lv_hex CS lv_expect ).
+    cl_abap_unit_assert=>assert_true( temp4 ).
+    
+    temp5 = boolc( lv_hex CS zabaputil_cl_pdf_writer=>hex( `/SMask` ) ).
+    cl_abap_unit_assert=>assert_false( temp5 ).
+    
+    temp6 = boolc( lv_hex CS zabaputil_cl_pdf_writer=>hex( `/Mask` ) ).
+    cl_abap_unit_assert=>assert_false( temp6 ).
 
     IF has_gzip( ) = abap_false.
       RETURN.
     ENDIF.
     " two rows: filter byte 0, then red and green, blue and white
-    DATA(lo_image) = image( image_rgb( ) ).
-    DATA lv_idat TYPE xstring.
+    
+    lo_image = image( image_rgb( ) ).
+    
     lv_idat = lo_image->mv_idat.
-    cl_abap_unit_assert=>assert_equals( exp = CONV xstring( `00FF000000FF00000000FFFFFFFF` )
+    
+    temp2 = `00FF000000FF00000000FFFFFFFF`.
+    cl_abap_unit_assert=>assert_equals( exp = temp2
                                         act = zabaputil_cl_util_context=>zlib_decompress( lv_idat ) ).
   ENDMETHOD.
 
   METHOD png_palette_write.
-    DATA(lv_hex) = rendered( image_pal( ) ).
-    DATA(lv_expect) = zabaputil_cl_pdf_writer=>hex(
+    DATA lv_hex TYPE string.
+    DATA lv_expect TYPE string.
+    DATA temp7 TYPE xsdboolean.
+    lv_hex = rendered( image_pal( ) ).
+    
+    lv_expect = zabaputil_cl_pdf_writer=>hex(
         `/ColorSpace [/Indexed /DeviceRGB 3 <FF000000FF000000FFFFFF00>] /BitsPerComponent 2 ` &&
         `/Filter /FlateDecode /DecodeParms << /Predictor 15 /Colors 1 /BitsPerComponent 2 /Columns 2 >> ` &&
         `/Mask [1 1] /Length ` ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
+    
+    temp7 = boolc( lv_hex CS lv_expect ).
+    cl_abap_unit_assert=>assert_true( temp7 ).
   ENDMETHOD.
 
   METHOD png_gray_key.
-    DATA(lv_hex) = rendered( image_gray( ) ).
-    DATA(lv_expect) = zabaputil_cl_pdf_writer=>hex( `/ColorSpace /DeviceGray /BitsPerComponent 8 ` ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
+    DATA lv_hex TYPE string.
+    DATA lv_expect TYPE string.
+    DATA temp8 TYPE xsdboolean.
+    DATA temp9 TYPE xsdboolean.
+    lv_hex = rendered( image_gray( ) ).
+    
+    lv_expect = zabaputil_cl_pdf_writer=>hex( `/ColorSpace /DeviceGray /BitsPerComponent 8 ` ).
+    
+    temp8 = boolc( lv_hex CS lv_expect ).
+    cl_abap_unit_assert=>assert_true( temp8 ).
     lv_expect = zabaputil_cl_pdf_writer=>hex( `/Columns 2 >> /Mask [200 200] /Length ` ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
+    
+    temp9 = boolc( lv_hex CS lv_expect ).
+    cl_abap_unit_assert=>assert_true( temp9 ).
   ENDMETHOD.
 
   METHOD png_rgb_key.
-    DATA(lv_hex) = rendered( image_rgbkey( ) ).
-    DATA(lv_expect) = zabaputil_cl_pdf_writer=>hex( `/Columns 1 >> /Mask [1 1 2 2 3 3 ] /Length ` ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
+    DATA lv_hex TYPE string.
+    DATA lv_expect TYPE string.
+    DATA temp10 TYPE xsdboolean.
+    lv_hex = rendered( image_rgbkey( ) ).
+    
+    lv_expect = zabaputil_cl_pdf_writer=>hex( `/Columns 1 >> /Mask [1 1 2 2 3 3 ] /Length ` ).
+    
+    temp10 = boolc( lv_hex CS lv_expect ).
+    cl_abap_unit_assert=>assert_true( temp10 ).
   ENDMETHOD.
 
   METHOD png_alpha_split.
+    DATA lv_color TYPE xstring.
+    DATA lv_alpha TYPE xstring.
+    DATA temp1 TYPE REF TO zabaputil_cl_pdf_image.
+    DATA temp3 TYPE xstring.
+    DATA temp4 TYPE xstring.
     IF has_gzip( ) = abap_false.
       RETURN.
     ENDIF.
     " rows of red (opaque) and green (half), blue (clear) and 10 20 30 (40)
-    DATA lv_color TYPE xstring.
-    DATA lv_alpha TYPE xstring.
-    image( image_rgba( ) )->png_split_alpha( IMPORTING color = lv_color
+    
+    
+    
+    temp1 = image( image_rgba( ) ).
+    temp1->png_split_alpha( IMPORTING color = lv_color
                                                        alpha = lv_alpha ).
-    cl_abap_unit_assert=>assert_equals( exp = CONV xstring( `00FF000000FF00000000FF102030` )
+    
+    temp3 = `00FF000000FF00000000FF102030`.
+    cl_abap_unit_assert=>assert_equals( exp = temp3
                                         act = lv_color ).
-    cl_abap_unit_assert=>assert_equals( exp = CONV xstring( `00FF80000040` )
+    
+    temp4 = `00FF80000040`.
+    cl_abap_unit_assert=>assert_equals( exp = temp4
                                         act = lv_alpha ).
   ENDMETHOD.
 
   METHOD png_alpha_split_16.
+    DATA lv_color TYPE xstring.
+    DATA lv_alpha TYPE xstring.
+    DATA temp1 TYPE REF TO zabaputil_cl_pdf_image.
+    DATA temp5 TYPE xstring.
+    DATA temp6 TYPE xstring.
     IF has_gzip( ) = abap_false.
       RETURN.
     ENDIF.
     " one row of two pixels, grey and alpha two bytes each
-    DATA lv_color TYPE xstring.
-    DATA lv_alpha TYPE xstring.
-    image( image_ga16( ) )->png_split_alpha( IMPORTING color = lv_color
+    
+    
+    
+    temp1 = image( image_ga16( ) ).
+    temp1->png_split_alpha( IMPORTING color = lv_color
                                                        alpha = lv_alpha ).
-    cl_abap_unit_assert=>assert_equals( exp = CONV xstring( `001234ABCD` )
+    
+    temp5 = `001234ABCD`.
+    cl_abap_unit_assert=>assert_equals( exp = temp5
                                         act = lv_color ).
-    cl_abap_unit_assert=>assert_equals( exp = CONV xstring( `00FFFF0080` )
+    
+    temp6 = `00FFFF0080`.
+    cl_abap_unit_assert=>assert_equals( exp = temp6
                                         act = lv_alpha ).
   ENDMETHOD.
 
   METHOD png_alpha_write.
+    DATA lv_hex TYPE string.
+    DATA lv_expect TYPE string.
+    DATA temp11 TYPE xsdboolean.
+    DATA temp12 TYPE xsdboolean.
     IF has_gzip( ) = abap_false.
       RETURN.
     ENDIF.
     " the transparency first, as a grey image the colour image points at
-    DATA(lv_hex) = rendered( image_rgba( ) ).
-    DATA(lv_expect) = zabaputil_cl_pdf_writer=>hex(
+    
+    lv_hex = rendered( image_rgba( ) ).
+    
+    lv_expect = zabaputil_cl_pdf_writer=>hex(
         |1 0 obj\n<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceGray | &&
         `/BitsPerComponent 8 /Filter /FlateDecode ` &&
         `/DecodeParms << /Predictor 15 /Colors 1 /BitsPerComponent 8 /Columns 2 >> /Length ` ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
+    
+    temp11 = boolc( lv_hex CS lv_expect ).
+    cl_abap_unit_assert=>assert_true( temp11 ).
     lv_expect = zabaputil_cl_pdf_writer=>hex(
         `/DecodeParms << /Predictor 15 /Colors 3 /BitsPerComponent 8 /Columns 2 >> /SMask 1 0 R /Length ` ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
+    
+    temp12 = boolc( lv_hex CS lv_expect ).
+    cl_abap_unit_assert=>assert_true( temp12 ).
   ENDMETHOD.
 
   METHOD png_interlaced.
+        DATA lx TYPE REF TO zabaputil_cx_util_error.
+        DATA temp13 TYPE xsdboolean.
     TRY.
         image( image_inter( ) ).
         cl_abap_unit_assert=>fail( ).
-      CATCH zabaputil_cx_util_error INTO DATA(lx).
-        cl_abap_unit_assert=>assert_true( xsdbool( lx->get_text( ) CS `interlaced` ) ).
+        
+      CATCH zabaputil_cx_util_error INTO lx.
+        
+        temp13 = boolc( lx->get_text( ) CS `interlaced` ).
+        cl_abap_unit_assert=>assert_true( temp13 ).
     ENDTRY.
   ENDMETHOD.
 
   METHOD png_without_data.
     " the signature and the header chunk, nothing after it
-    DATA(lv_file) = image_rgb( ).
-    DATA(lv_head) = lv_file(33).
+    DATA lv_file TYPE xstring.
+    DATA lv_head TYPE xstring.
+    lv_file = image_rgb( ).
+    
+    lv_head = lv_file(33).
     TRY.
         image( lv_head ).
         cl_abap_unit_assert=>fail( ).
@@ -342,12 +444,16 @@ CLASS ltcl_image IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD not_an_image.
+        DATA temp7 TYPE xstring.
+    DATA lv_empty TYPE xstring.
     TRY.
-        image( CONV xstring( `474946383961010001000000` ) ).
+        
+        temp7 = `474946383961010001000000`.
+        image( temp7 ).
         cl_abap_unit_assert=>fail( ).
       CATCH zabaputil_cx_util_error ##NO_HANDLER.
     ENDTRY.
-    DATA lv_empty TYPE xstring.
+    
     TRY.
         image( lv_empty ).
         cl_abap_unit_assert=>fail( ).
@@ -357,8 +463,11 @@ CLASS ltcl_image IMPLEMENTATION.
 
   METHOD truncated.
     " a JPEG that ends before its frame header has no size
-    DATA(lv_file) = image_jpeg( ).
-    DATA(lv_head) = lv_file(20).
+    DATA lv_file TYPE xstring.
+    DATA lv_head TYPE xstring.
+    lv_file = image_jpeg( ).
+    
+    lv_head = lv_file(20).
     TRY.
         image( lv_head ).
         cl_abap_unit_assert=>fail( ).

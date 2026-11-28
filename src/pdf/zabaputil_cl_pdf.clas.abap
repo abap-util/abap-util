@@ -130,10 +130,10 @@ CLASS zabaputil_cl_pdf DEFINITION
     DATA mv_width    TYPE f.
     DATA mv_height   TYPE f.
     DATA mv_compress TYPE abap_bool.
-    DATA mt_page     TYPE STANDARD TABLE OF REF TO zabaputil_cl_pdf_page WITH EMPTY KEY.
-    DATA mt_font     TYPE STANDARD TABLE OF ty_s_font WITH EMPTY KEY.
-    DATA mt_image    TYPE STANDARD TABLE OF REF TO zabaputil_cl_pdf_image WITH EMPTY KEY.
-    DATA mt_info     TYPE STANDARD TABLE OF ty_s_info WITH EMPTY KEY.
+    DATA mt_page     TYPE STANDARD TABLE OF REF TO zabaputil_cl_pdf_page WITH DEFAULT KEY.
+    DATA mt_font     TYPE STANDARD TABLE OF ty_s_font WITH DEFAULT KEY.
+    DATA mt_image    TYPE STANDARD TABLE OF REF TO zabaputil_cl_pdf_image WITH DEFAULT KEY.
+    DATA mt_info     TYPE STANDARD TABLE OF ty_s_info WITH DEFAULT KEY.
 
     "! The size of a page format in points
     CLASS-METHODS format_size
@@ -155,11 +155,13 @@ ENDCLASS.
 CLASS zabaputil_cl_pdf IMPLEMENTATION.
 
   METHOD create.
+    DATA lv_unit TYPE string.
 
-    result = NEW #( ).
+    CREATE OBJECT result.
     result->mv_compress = compress.
 
-    DATA(lv_unit) = to_lower( unit ).
+    
+    lv_unit = to_lower( unit ).
     CASE lv_unit.
       WHEN `pt`.
         result->mv_scale = 1.
@@ -189,7 +191,9 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
 
     DATA lv_swap TYPE f.
 
-    DATA(lv_format) = to_upper( format ).
+    DATA lv_format TYPE string.
+    DATA lv_orientation TYPE string.
+    lv_format = to_upper( format ).
     CASE lv_format.
       WHEN `A3`.
         width = '841.89'.
@@ -212,7 +216,8 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
             val = |PDF: { format } is not a page format (A3, A4, A5, LETTER, LEGAL)|.
     ENDCASE.
 
-    DATA(lv_orientation) = to_upper( orientation ).
+    
+    lv_orientation = to_upper( orientation ).
     IF lv_orientation IS NOT INITIAL AND lv_orientation(1) = `L`.
       lv_swap = width.
       width = height.
@@ -225,6 +230,7 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
 
     DATA lv_width  TYPE f.
     DATA lv_height TYPE f.
+      DATA lv_orientation TYPE string.
 
     lv_width = width.
     lv_height = height.
@@ -239,7 +245,8 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
       " the document's format, turned when it lies the other way
       lv_width = mv_width.
       lv_height = mv_height.
-      DATA(lv_orientation) = to_upper( orientation ).
+      
+      lv_orientation = to_upper( orientation ).
       IF ( lv_orientation(1) = `L` AND lv_width < lv_height )
           OR ( lv_orientation(1) <> `L` AND lv_width > lv_height ).
         lv_width = mv_height.
@@ -252,21 +259,29 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
                              height      = lv_height ).
     ENDIF.
 
-    result = NEW #( width  = lv_width
-                    height = lv_height
-                    scale  = mv_scale ).
+    CREATE OBJECT result EXPORTING width = lv_width height = lv_height scale = mv_scale.
     INSERT result INTO TABLE mt_page.
 
   ENDMETHOD.
 
   METHOD page.
+    FIELD-SYMBOLS <temp14> LIKE LINE OF mt_page.
+    DATA temp15 LIKE sy-tabix.
 
     IF val < 1 OR val > lines( mt_page ).
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
         EXPORTING
           val = |PDF: there is no page { val }|.
     ENDIF.
-    result = mt_page[ val ].
+    
+    
+    temp15 = sy-tabix.
+    READ TABLE mt_page INDEX val ASSIGNING <temp14>.
+    sy-tabix = temp15.
+    IF sy-subrc <> 0.
+      ASSERT 1 = 0.
+    ENDIF.
+    result = <temp14>.
 
   ENDMETHOD.
 
@@ -279,17 +294,18 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
   METHOD font.
 
     DATA ls_font TYPE ty_s_font.
+    FIELD-SYMBOLS <font> TYPE zabaputil_cl_pdf=>ty_s_font.
 
     " one object per name: asked for twice, it is the same font
     ls_font-name = name.
-    ASSIGN mt_font[ name = ls_font-name ] TO FIELD-SYMBOL(<font>).
+    
+    READ TABLE mt_font WITH KEY name = ls_font-name ASSIGNING <font>.
     IF sy-subrc = 0.
       result = <font>-font.
       RETURN.
     ENDIF.
 
-    ls_font-font = NEW zabaputil_cl_pdf_font_std( name     = ls_font-name
-                                                  resource = |F{ lines( mt_font ) + 1 }| ).
+    CREATE OBJECT ls_font-font TYPE zabaputil_cl_pdf_font_std EXPORTING name = ls_font-name resource = |F{ lines( mt_font ) + 1 }|.
     INSERT ls_font INTO TABLE mt_font.
     result = ls_font-font.
 
@@ -299,8 +315,7 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
 
     DATA ls_font TYPE ty_s_font.
 
-    ls_font-font = NEW zabaputil_cl_pdf_font_ttf( content  = content
-                                                  resource = |F{ lines( mt_font ) + 1 }| ).
+    CREATE OBJECT ls_font-font TYPE zabaputil_cl_pdf_font_ttf EXPORTING content = content resource = |F{ lines( mt_font ) + 1 }|.
     INSERT ls_font INTO TABLE mt_font.
     result = ls_font-font.
 
@@ -308,8 +323,7 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
 
   METHOD image.
 
-    result = NEW #( content  = content
-                    resource = |I{ lines( mt_image ) + 1 }| ).
+    CREATE OBJECT result EXPORTING content = content resource = |I{ lines( mt_image ) + 1 }|.
     INSERT result INTO TABLE mt_image.
 
   ENDMETHOD.
@@ -359,33 +373,54 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
     DATA lv_info    TYPE string.
     DATA lv_info_id TYPE i.
     DATA lv_id      TYPE i.
+    DATA lo_writer TYPE REF TO zabaputil_cl_pdf_writer.
+    FIELD-SYMBOLS <font> LIKE LINE OF mt_font.
+    DATA lo_image LIKE LINE OF mt_image.
+    DATA lv_resources TYPE i.
+    DATA lv_pages TYPE i.
+    DATA lo_page LIKE LINE OF mt_page.
+      DATA lv_content TYPE i.
+      DATA temp16 TYPE string_table.
+      DATA lv_annotation LIKE LINE OF temp16.
+    DATA lv_catalog TYPE i.
+    FIELD-SYMBOLS <info> LIKE LINE OF mt_info.
 
     IF mt_page IS INITIAL.
       add_page( ).
     ENDIF.
 
-    DATA(lo_writer) = NEW zabaputil_cl_pdf_writer( mv_compress ).
+    
+    CREATE OBJECT lo_writer TYPE zabaputil_cl_pdf_writer EXPORTING COMPRESS = mv_compress.
 
     " every page shares one resource dictionary with all fonts and images
-    LOOP AT mt_font ASSIGNING FIELD-SYMBOL(<font>).
+    
+    LOOP AT mt_font ASSIGNING <font>.
       lv_id = <font>-font->write( lo_writer ).
       lv_fonts = lv_fonts && | /{ <font>-font->resource( ) } { lv_id } 0 R|.
     ENDLOOP.
-    LOOP AT mt_image INTO DATA(lo_image).
+    
+    LOOP AT mt_image INTO lo_image.
       lv_id = lo_image->write( lo_writer ).
       lv_images = lv_images && | /{ lo_image->resource( ) } { lv_id } 0 R|.
     ENDLOOP.
-    DATA(lv_resources) = lo_writer->add_object(
+    
+    lv_resources = lo_writer->add_object(
         |<< /ProcSet [/PDF /Text /ImageB /ImageC /ImageI] /Font <<{ lv_fonts } >> /XObject <<{ lv_images } >> >>| ).
 
-    DATA(lv_pages) = lo_writer->reserve( ).
-    LOOP AT mt_page INTO DATA(lo_page).
+    
+    lv_pages = lo_writer->reserve( ).
+    
+    LOOP AT mt_page INTO lo_page.
 
-      DATA(lv_content) = lo_writer->add_stream(
+      
+      lv_content = lo_writer->add_stream(
           zabaputil_cl_util_context=>conv_get_xstring_by_string( lo_page->content( ) ) ).
 
       CLEAR lv_annots.
-      LOOP AT lo_page->annotations( ) INTO DATA(lv_annotation).
+      
+      temp16 = lo_page->annotations( ).
+      
+      LOOP AT temp16 INTO lv_annotation.
         lv_id = lo_writer->add_object( lv_annotation ).
         lv_annots = lv_annots && | { lv_id } 0 R|.
       ENDLOOP.
@@ -404,10 +439,12 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
     lo_writer->set_object( id  = lv_pages
                            val = |<< /Type /Pages /Kids [{ lv_kids } ] /Count { lines( mt_page ) } >>| ).
 
-    DATA(lv_catalog) = lo_writer->add_object( |<< /Type /Catalog /Pages { lv_pages } 0 R >>| ).
+    
+    lv_catalog = lo_writer->add_object( |<< /Type /Catalog /Pages { lv_pages } 0 R >>| ).
 
     " text strings in UTF-16: a title is not limited to one code page
-    LOOP AT mt_info ASSIGNING FIELD-SYMBOL(<info>).
+    
+    LOOP AT mt_info ASSIGNING <info>.
       lv_info = lv_info && | /{ <info>-key } <{ zabaputil_cl_pdf_writer=>hex_utf16( <info>-text ) }>|.
     ENDLOOP.
     lv_info_id = lo_writer->add_object( |<<{ lv_info } /Producer (abap-util) >>| ).

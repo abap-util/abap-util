@@ -31,7 +31,7 @@ CLASS zabaputil_cl_pdf_data_demo DEFINITION
         lfimg TYPE p LENGTH 8 DECIMALS 2,
         meins TYPE string,
       END OF ty_s_item.
-    TYPES ty_t_item TYPE STANDARD TABLE OF ty_s_item WITH EMPTY KEY.
+    TYPES ty_t_item TYPE STANDARD TABLE OF ty_s_item WITH DEFAULT KEY.
 
     DATA vbeln   TYPE string.
     DATA name    TYPE string.

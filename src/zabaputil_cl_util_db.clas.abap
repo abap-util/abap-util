@@ -40,7 +40,7 @@ CLASS zabaputil_cl_util_db DEFINITION
         VALUE(result) TYPE any.
 
     TYPES ty_s_db TYPE zabaputil_t_91.
-    TYPES ty_t_db TYPE STANDARD TABLE OF ty_s_db WITH EMPTY KEY.
+    TYPES ty_t_db TYPE STANDARD TABLE OF ty_s_db WITH DEFAULT KEY.
 
     " only supplied parameters filter the selection, initial values of
     " unsupplied parameters do not restrict the result
@@ -75,10 +75,10 @@ CLASS zabaputil_cl_util_db IMPLEMENTATION.
 
     DELETE FROM zabaputil_t_91
         WHERE
-           uname = @uname
-            AND handle = @handle
-            AND handle2 = @handle2
-            AND handle3 = @handle3.
+           uname = uname
+            AND handle = handle
+            AND handle2 = handle2
+            AND handle3 = handle3.
 
     IF check_commit = abap_true.
       COMMIT WORK AND WAIT.
@@ -89,14 +89,15 @@ CLASS zabaputil_cl_util_db IMPLEMENTATION.
 
   METHOD load_by_handle.
 
+    DATA lv_data TYPE zabaputil_t_91-data.
     SELECT SINGLE data
-      FROM zabaputil_t_91
+      FROM zabaputil_t_91 INTO lv_data
        WHERE
-        uname = @uname
-        AND handle = @handle
-        AND handle2 = @handle2
-        AND handle3 = @handle3 "#EC WARNOK
-      INTO @DATA(lv_data).
+        uname = uname
+        AND handle = handle
+        AND handle2 = handle2
+        AND handle3 = handle3 "#EC WARNOK
+      .
     IF sy-subrc <> 0.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
         EXPORTING
@@ -118,37 +119,74 @@ CLASS zabaputil_cl_util_db IMPLEMENTATION.
     DATA lr_handle  TYPE RANGE OF zabaputil_t_91-handle.
     DATA lr_handle2 TYPE RANGE OF zabaputil_t_91-handle2.
     DATA lr_handle3 TYPE RANGE OF zabaputil_t_91-handle3.
+      DATA temp13 LIKE lr_uname.
+      DATA temp14 LIKE LINE OF temp13.
+      DATA temp15 LIKE lr_handle.
+      DATA temp16 LIKE LINE OF temp15.
+      DATA temp17 LIKE lr_handle2.
+      DATA temp18 LIKE LINE OF temp17.
+      DATA temp19 LIKE lr_handle3.
+      DATA temp20 LIKE LINE OF temp19.
 
     IF uname IS SUPPLIED.
-      lr_uname = VALUE #( ( sign = `I` option = `EQ` low = uname ) ).
+      
+      CLEAR temp13.
+      
+      temp14-sign = `I`.
+      temp14-option = `EQ`.
+      temp14-low = uname.
+      INSERT temp14 INTO TABLE temp13.
+      lr_uname = temp13.
     ENDIF.
     IF handle IS SUPPLIED.
-      lr_handle = VALUE #( ( sign = `I` option = `EQ` low = handle ) ).
+      
+      CLEAR temp15.
+      
+      temp16-sign = `I`.
+      temp16-option = `EQ`.
+      temp16-low = handle.
+      INSERT temp16 INTO TABLE temp15.
+      lr_handle = temp15.
     ENDIF.
     IF handle2 IS SUPPLIED.
-      lr_handle2 = VALUE #( ( sign = `I` option = `EQ` low = handle2 ) ).
+      
+      CLEAR temp17.
+      
+      temp18-sign = `I`.
+      temp18-option = `EQ`.
+      temp18-low = handle2.
+      INSERT temp18 INTO TABLE temp17.
+      lr_handle2 = temp17.
     ENDIF.
     IF handle3 IS SUPPLIED.
-      lr_handle3 = VALUE #( ( sign = `I` option = `EQ` low = handle3 ) ).
+      
+      CLEAR temp19.
+      
+      temp20-sign = `I`.
+      temp20-option = `EQ`.
+      temp20-low = handle3.
+      INSERT temp20 INTO TABLE temp19.
+      lr_handle3 = temp19.
     ENDIF.
 
-    SELECT FROM zabaputil_t_91
-      FIELDS *
-      WHERE uname   IN @lr_uname
-        AND handle  IN @lr_handle
-        AND handle2 IN @lr_handle2
-        AND handle3 IN @lr_handle3 "#EC WARNOK
-      INTO CORRESPONDING FIELDS OF TABLE @result.
+    SELECT * FROM zabaputil_t_91 INTO CORRESPONDING FIELDS OF TABLE result
+      
+      WHERE uname   IN lr_uname
+        AND handle  IN lr_handle
+        AND handle2 IN lr_handle2
+        AND handle3 IN lr_handle3 "#EC WARNOK
+      .
 
   ENDMETHOD.
 
 
   METHOD load_by_id.
 
+    DATA lv_data TYPE zabaputil_t_91-data.
     SELECT SINGLE data
-      FROM zabaputil_t_91
-      WHERE id = @id  "#EC WARNOK
-      INTO @DATA(lv_data).
+      FROM zabaputil_t_91 INTO lv_data
+      WHERE id = id  "#EC WARNOK
+      .
     IF sy-subrc <> 0.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
         EXPORTING
@@ -166,25 +204,33 @@ CLASS zabaputil_cl_util_db IMPLEMENTATION.
 
   METHOD save.
 
+    DATA lv_id TYPE zabaputil_t_91-id.
+    DATA temp21 TYPE zabaputil_t_91.
+    DATA ls_db LIKE temp21.
+        DATA x TYPE REF TO cx_transformation_error.
     SELECT SINGLE id
-      FROM zabaputil_t_91
+      FROM zabaputil_t_91 INTO lv_id
        WHERE
-        uname = @uname
-        AND handle = @handle
-        AND handle2 = @handle2 "#EC WARNOK
-        AND handle3 = @handle3
-      INTO @DATA(lv_id) ##SUBRC_OK.
+        uname = uname
+        AND handle = handle
+        AND handle2 = handle2 "#EC WARNOK
+        AND handle3 = handle3
+       ##SUBRC_OK.
 
-    DATA(ls_db) = VALUE zabaputil_t_91(
-        uname   = uname
-        handle  = handle
-        handle2 = handle2
-        handle3 = handle3 ).
+    
+    CLEAR temp21.
+    temp21-uname = uname.
+    temp21-handle = handle.
+    temp21-handle2 = handle2.
+    temp21-handle3 = handle3.
+    
+    ls_db = temp21.
     " the declared static exception of xml_stringify (data it cannot
     " serialize) left save( ) as CX_SY_NO_HANDLER
     TRY.
         ls_db-data = zabaputil_cl_util_context=>xml_stringify( data ).
-      CATCH cx_transformation_error INTO DATA(x).
+        
+      CATCH cx_transformation_error INTO x.
         RAISE EXCEPTION TYPE zabaputil_cx_util_error
           EXPORTING val      = `DB_SAVE_FAILED - the data cannot be serialized`
                     previous = x.
@@ -202,7 +248,7 @@ CLASS zabaputil_cl_util_db IMPLEMENTATION.
       ls_db-id = get_id_by_handle( ls_db ).
     ENDIF.
 
-    MODIFY zabaputil_t_91 FROM @ls_db.
+    MODIFY zabaputil_t_91 FROM ls_db.
     IF sy-subrc <> 0.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
         EXPORTING
@@ -222,11 +268,14 @@ CLASS zabaputil_cl_util_db IMPLEMENTATION.
 
     " each handle with its length in front, so that no two tuples give the
     " same text; SHA-256 in hex, its first 32 characters fill the id
-    DATA(lv_key) = |{ strlen( is_db-uname ) }:{ is_db-uname }|
+    DATA lv_key TYPE string.
+    DATA lv_hash TYPE string.
+    lv_key = |{ strlen( is_db-uname ) }:{ is_db-uname }|
                 && |{ strlen( is_db-handle ) }:{ is_db-handle }|
                 && |{ strlen( is_db-handle2 ) }:{ is_db-handle2 }|
                 && |{ strlen( is_db-handle3 ) }:{ is_db-handle3 }|.
-    DATA(lv_hash) = to_upper( zabaputil_cl_util_context=>hash_string( lv_key ) ).
+    
+    lv_hash = to_upper( zabaputil_cl_util_context=>hash_string( lv_key ) ).
 
     " no digest class answers: hash_string gives the text back - a random
     " id then, as before

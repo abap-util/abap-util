@@ -42,9 +42,11 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
     DATA lt_range TYPE zabaputil_cl_util_context=>ty_t_range.
 
-    DATA(lo_range) = NEW zabaputil_cl_util_range(
-      iv_fieldname = `CARRID`
-      ir_range     = REF #( lt_range ) ).
+    DATA temp1 LIKE REF TO lt_range.
+DATA lo_range TYPE REF TO zabaputil_cl_util_range.
+    GET REFERENCE OF lt_range INTO temp1.
+
+CREATE OBJECT lo_range TYPE zabaputil_cl_util_range EXPORTING iv_fieldname = `CARRID` ir_range = temp1.
 
     cl_abap_unit_assert=>assert_initial( lo_range->get_sql( ) ).
 
@@ -52,12 +54,25 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_eq_include.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
-      ( sign = `I` option = `EQ` low = `AA` high = `` ) ).
+    DATA temp2 TYPE zabaputil_cl_util_context=>ty_t_range.
+    DATA temp3 LIKE LINE OF temp2.
+    DATA lt_range LIKE temp2.
+    DATA temp4 LIKE REF TO lt_range.
+DATA lo_range TYPE REF TO zabaputil_cl_util_range.
+    CLEAR temp2.
+    
+    temp3-sign = `I`.
+    temp3-option = `EQ`.
+    temp3-low = `AA`.
+    temp3-high = ``.
+    INSERT temp3 INTO TABLE temp2.
+    
+    lt_range = temp2.
 
-    DATA(lo_range) = NEW zabaputil_cl_util_range(
-      iv_fieldname = `CARRID`
-      ir_range     = REF #( lt_range ) ).
+    
+    GET REFERENCE OF lt_range INTO temp4.
+
+CREATE OBJECT lo_range TYPE zabaputil_cl_util_range EXPORTING iv_fieldname = `CARRID` ir_range = temp4.
 
     cl_abap_unit_assert=>assert_equals(
       exp = `( CARRID = 'AA' )`
@@ -67,12 +82,25 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_ne_include.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
-      ( sign = `I` option = `NE` low = `BB` high = `` ) ).
+    DATA temp5 TYPE zabaputil_cl_util_context=>ty_t_range.
+    DATA temp6 LIKE LINE OF temp5.
+    DATA lt_range LIKE temp5.
+    DATA temp7 LIKE REF TO lt_range.
+DATA lo_range TYPE REF TO zabaputil_cl_util_range.
+    CLEAR temp5.
+    
+    temp6-sign = `I`.
+    temp6-option = `NE`.
+    temp6-low = `BB`.
+    temp6-high = ``.
+    INSERT temp6 INTO TABLE temp5.
+    
+    lt_range = temp5.
 
-    DATA(lo_range) = NEW zabaputil_cl_util_range(
-      iv_fieldname = `CARRID`
-      ir_range     = REF #( lt_range ) ).
+    
+    GET REFERENCE OF lt_range INTO temp7.
+
+CREATE OBJECT lo_range TYPE zabaputil_cl_util_range EXPORTING iv_fieldname = `CARRID` ir_range = temp7.
 
     cl_abap_unit_assert=>assert_equals(
       exp = `( CARRID <> 'BB' )`
@@ -82,12 +110,25 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_gt_include.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
-      ( sign = `I` option = `GT` low = `100` high = `` ) ).
+    DATA temp8 TYPE zabaputil_cl_util_context=>ty_t_range.
+    DATA temp9 LIKE LINE OF temp8.
+    DATA lt_range LIKE temp8.
+    DATA temp10 LIKE REF TO lt_range.
+DATA lo_range TYPE REF TO zabaputil_cl_util_range.
+    CLEAR temp8.
+    
+    temp9-sign = `I`.
+    temp9-option = `GT`.
+    temp9-low = `100`.
+    temp9-high = ``.
+    INSERT temp9 INTO TABLE temp8.
+    
+    lt_range = temp8.
 
-    DATA(lo_range) = NEW zabaputil_cl_util_range(
-      iv_fieldname = `AMOUNT`
-      ir_range     = REF #( lt_range ) ).
+    
+    GET REFERENCE OF lt_range INTO temp10.
+
+CREATE OBJECT lo_range TYPE zabaputil_cl_util_range EXPORTING iv_fieldname = `AMOUNT` ir_range = temp10.
 
     cl_abap_unit_assert=>assert_equals(
       exp = `( AMOUNT > '100' )`
@@ -97,12 +138,25 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_ge_include.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
-      ( sign = `I` option = `GE` low = `50` high = `` ) ).
+    DATA temp11 TYPE zabaputil_cl_util_context=>ty_t_range.
+    DATA temp12 LIKE LINE OF temp11.
+    DATA lt_range LIKE temp11.
+    DATA temp13 LIKE REF TO lt_range.
+DATA lo_range TYPE REF TO zabaputil_cl_util_range.
+    CLEAR temp11.
+    
+    temp12-sign = `I`.
+    temp12-option = `GE`.
+    temp12-low = `50`.
+    temp12-high = ``.
+    INSERT temp12 INTO TABLE temp11.
+    
+    lt_range = temp11.
 
-    DATA(lo_range) = NEW zabaputil_cl_util_range(
-      iv_fieldname = `AMOUNT`
-      ir_range     = REF #( lt_range ) ).
+    
+    GET REFERENCE OF lt_range INTO temp13.
+
+CREATE OBJECT lo_range TYPE zabaputil_cl_util_range EXPORTING iv_fieldname = `AMOUNT` ir_range = temp13.
 
     cl_abap_unit_assert=>assert_equals(
       exp = `( AMOUNT >= '50' )`
@@ -112,12 +166,25 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_lt_include.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
-      ( sign = `I` option = `LT` low = `200` high = `` ) ).
+    DATA temp14 TYPE zabaputil_cl_util_context=>ty_t_range.
+    DATA temp15 LIKE LINE OF temp14.
+    DATA lt_range LIKE temp14.
+    DATA temp16 LIKE REF TO lt_range.
+DATA lo_range TYPE REF TO zabaputil_cl_util_range.
+    CLEAR temp14.
+    
+    temp15-sign = `I`.
+    temp15-option = `LT`.
+    temp15-low = `200`.
+    temp15-high = ``.
+    INSERT temp15 INTO TABLE temp14.
+    
+    lt_range = temp14.
 
-    DATA(lo_range) = NEW zabaputil_cl_util_range(
-      iv_fieldname = `AMOUNT`
-      ir_range     = REF #( lt_range ) ).
+    
+    GET REFERENCE OF lt_range INTO temp16.
+
+CREATE OBJECT lo_range TYPE zabaputil_cl_util_range EXPORTING iv_fieldname = `AMOUNT` ir_range = temp16.
 
     cl_abap_unit_assert=>assert_equals(
       exp = `( AMOUNT < '200' )`
@@ -127,12 +194,25 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_le_include.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
-      ( sign = `I` option = `LE` low = `300` high = `` ) ).
+    DATA temp17 TYPE zabaputil_cl_util_context=>ty_t_range.
+    DATA temp18 LIKE LINE OF temp17.
+    DATA lt_range LIKE temp17.
+    DATA temp19 LIKE REF TO lt_range.
+DATA lo_range TYPE REF TO zabaputil_cl_util_range.
+    CLEAR temp17.
+    
+    temp18-sign = `I`.
+    temp18-option = `LE`.
+    temp18-low = `300`.
+    temp18-high = ``.
+    INSERT temp18 INTO TABLE temp17.
+    
+    lt_range = temp17.
 
-    DATA(lo_range) = NEW zabaputil_cl_util_range(
-      iv_fieldname = `AMOUNT`
-      ir_range     = REF #( lt_range ) ).
+    
+    GET REFERENCE OF lt_range INTO temp19.
+
+CREATE OBJECT lo_range TYPE zabaputil_cl_util_range EXPORTING iv_fieldname = `AMOUNT` ir_range = temp19.
 
     cl_abap_unit_assert=>assert_equals(
       exp = `( AMOUNT <= '300' )`
@@ -142,12 +222,25 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_bt_include.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
-      ( sign = `I` option = `BT` low = `100` high = `500` ) ).
+    DATA temp20 TYPE zabaputil_cl_util_context=>ty_t_range.
+    DATA temp21 LIKE LINE OF temp20.
+    DATA lt_range LIKE temp20.
+    DATA temp22 LIKE REF TO lt_range.
+DATA lo_range TYPE REF TO zabaputil_cl_util_range.
+    CLEAR temp20.
+    
+    temp21-sign = `I`.
+    temp21-option = `BT`.
+    temp21-low = `100`.
+    temp21-high = `500`.
+    INSERT temp21 INTO TABLE temp20.
+    
+    lt_range = temp20.
 
-    DATA(lo_range) = NEW zabaputil_cl_util_range(
-      iv_fieldname = `AMOUNT`
-      ir_range     = REF #( lt_range ) ).
+    
+    GET REFERENCE OF lt_range INTO temp22.
+
+CREATE OBJECT lo_range TYPE zabaputil_cl_util_range EXPORTING iv_fieldname = `AMOUNT` ir_range = temp22.
 
     cl_abap_unit_assert=>assert_equals(
       exp = `( AMOUNT BETWEEN '100' AND '500' )`
@@ -157,12 +250,25 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_nb_include.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
-      ( sign = `I` option = `NB` low = `100` high = `500` ) ).
+    DATA temp23 TYPE zabaputil_cl_util_context=>ty_t_range.
+    DATA temp24 LIKE LINE OF temp23.
+    DATA lt_range LIKE temp23.
+    DATA temp25 LIKE REF TO lt_range.
+DATA lo_range TYPE REF TO zabaputil_cl_util_range.
+    CLEAR temp23.
+    
+    temp24-sign = `I`.
+    temp24-option = `NB`.
+    temp24-low = `100`.
+    temp24-high = `500`.
+    INSERT temp24 INTO TABLE temp23.
+    
+    lt_range = temp23.
 
-    DATA(lo_range) = NEW zabaputil_cl_util_range(
-      iv_fieldname = `AMOUNT`
-      ir_range     = REF #( lt_range ) ).
+    
+    GET REFERENCE OF lt_range INTO temp25.
+
+CREATE OBJECT lo_range TYPE zabaputil_cl_util_range EXPORTING iv_fieldname = `AMOUNT` ir_range = temp25.
 
     cl_abap_unit_assert=>assert_equals(
       exp = `( AMOUNT NOT BETWEEN '100' AND '500' )`
@@ -172,12 +278,25 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_cp_include.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
-      ( sign = `I` option = `CP` low = `*test*` high = `` ) ).
+    DATA temp26 TYPE zabaputil_cl_util_context=>ty_t_range.
+    DATA temp27 LIKE LINE OF temp26.
+    DATA lt_range LIKE temp26.
+    DATA temp28 LIKE REF TO lt_range.
+DATA lo_range TYPE REF TO zabaputil_cl_util_range.
+    CLEAR temp26.
+    
+    temp27-sign = `I`.
+    temp27-option = `CP`.
+    temp27-low = `*test*`.
+    temp27-high = ``.
+    INSERT temp27 INTO TABLE temp26.
+    
+    lt_range = temp26.
 
-    DATA(lo_range) = NEW zabaputil_cl_util_range(
-      iv_fieldname = `NAME`
-      ir_range     = REF #( lt_range ) ).
+    
+    GET REFERENCE OF lt_range INTO temp28.
+
+CREATE OBJECT lo_range TYPE zabaputil_cl_util_range EXPORTING iv_fieldname = `NAME` ir_range = temp28.
 
     cl_abap_unit_assert=>assert_equals(
       exp = `( NAME LIKE '%test%' ESCAPE '#' )`
@@ -187,12 +306,25 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_np_include.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
-      ( sign = `I` option = `NP` low = `*test*` high = `` ) ).
+    DATA temp29 TYPE zabaputil_cl_util_context=>ty_t_range.
+    DATA temp30 LIKE LINE OF temp29.
+    DATA lt_range LIKE temp29.
+    DATA temp31 LIKE REF TO lt_range.
+DATA lo_range TYPE REF TO zabaputil_cl_util_range.
+    CLEAR temp29.
+    
+    temp30-sign = `I`.
+    temp30-option = `NP`.
+    temp30-low = `*test*`.
+    temp30-high = ``.
+    INSERT temp30 INTO TABLE temp29.
+    
+    lt_range = temp29.
 
-    DATA(lo_range) = NEW zabaputil_cl_util_range(
-      iv_fieldname = `NAME`
-      ir_range     = REF #( lt_range ) ).
+    
+    GET REFERENCE OF lt_range INTO temp31.
+
+CREATE OBJECT lo_range TYPE zabaputil_cl_util_range EXPORTING iv_fieldname = `NAME` ir_range = temp31.
 
     cl_abap_unit_assert=>assert_equals(
       exp = `( NAME NOT LIKE '%test%' ESCAPE '#' )`
@@ -202,12 +334,25 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_exclude_sign.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
-      ( sign = `E` option = `EQ` low = `XX` high = `` ) ).
+    DATA temp32 TYPE zabaputil_cl_util_context=>ty_t_range.
+    DATA temp33 LIKE LINE OF temp32.
+    DATA lt_range LIKE temp32.
+    DATA temp34 LIKE REF TO lt_range.
+DATA lo_range TYPE REF TO zabaputil_cl_util_range.
+    CLEAR temp32.
+    
+    temp33-sign = `E`.
+    temp33-option = `EQ`.
+    temp33-low = `XX`.
+    temp33-high = ``.
+    INSERT temp33 INTO TABLE temp32.
+    
+    lt_range = temp32.
 
-    DATA(lo_range) = NEW zabaputil_cl_util_range(
-      iv_fieldname = `CARRID`
-      ir_range     = REF #( lt_range ) ).
+    
+    GET REFERENCE OF lt_range INTO temp34.
+
+CREATE OBJECT lo_range TYPE zabaputil_cl_util_range EXPORTING iv_fieldname = `CARRID` ir_range = temp34.
 
     cl_abap_unit_assert=>assert_equals(
       exp = `( CARRID <> 'XX' )`
@@ -217,13 +362,30 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_multiple_entries.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
-      ( sign = `I` option = `EQ` low = `AA` high = `` )
-      ( sign = `I` option = `EQ` low = `BB` high = `` ) ).
+    DATA temp35 TYPE zabaputil_cl_util_context=>ty_t_range.
+    DATA temp36 LIKE LINE OF temp35.
+    DATA lt_range LIKE temp35.
+    DATA temp37 LIKE REF TO lt_range.
+DATA lo_range TYPE REF TO zabaputil_cl_util_range.
+    CLEAR temp35.
+    
+    temp36-sign = `I`.
+    temp36-option = `EQ`.
+    temp36-low = `AA`.
+    temp36-high = ``.
+    INSERT temp36 INTO TABLE temp35.
+    temp36-sign = `I`.
+    temp36-option = `EQ`.
+    temp36-low = `BB`.
+    temp36-high = ``.
+    INSERT temp36 INTO TABLE temp35.
+    
+    lt_range = temp35.
 
-    DATA(lo_range) = NEW zabaputil_cl_util_range(
-      iv_fieldname = `CARRID`
-      ir_range     = REF #( lt_range ) ).
+    
+    GET REFERENCE OF lt_range INTO temp37.
+
+CREATE OBJECT lo_range TYPE zabaputil_cl_util_range EXPORTING iv_fieldname = `CARRID` ir_range = temp37.
 
     cl_abap_unit_assert=>assert_equals(
       exp = `( CARRID = 'AA' OR CARRID = 'BB' )`
@@ -233,12 +395,25 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_quote_escape.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
-      ( sign = `I` option = `EQ` low = `O'Brien` high = `` ) ).
+    DATA temp38 TYPE zabaputil_cl_util_context=>ty_t_range.
+    DATA temp39 LIKE LINE OF temp38.
+    DATA lt_range LIKE temp38.
+    DATA temp40 LIKE REF TO lt_range.
+DATA lo_range TYPE REF TO zabaputil_cl_util_range.
+    CLEAR temp38.
+    
+    temp39-sign = `I`.
+    temp39-option = `EQ`.
+    temp39-low = `O'Brien`.
+    temp39-high = ``.
+    INSERT temp39 INTO TABLE temp38.
+    
+    lt_range = temp38.
 
-    DATA(lo_range) = NEW zabaputil_cl_util_range(
-      iv_fieldname = `NAME`
-      ir_range     = REF #( lt_range ) ).
+    
+    GET REFERENCE OF lt_range INTO temp40.
+
+CREATE OBJECT lo_range TYPE zabaputil_cl_util_range EXPORTING iv_fieldname = `NAME` ir_range = temp40.
 
     cl_abap_unit_assert=>assert_equals(
       exp = `( NAME = 'O''Brien' )`
@@ -248,17 +423,35 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_fieldname_upper.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
-      ( sign = `I` option = `EQ` low = `test` high = `` ) ).
+    DATA temp41 TYPE zabaputil_cl_util_context=>ty_t_range.
+    DATA temp42 LIKE LINE OF temp41.
+    DATA lt_range LIKE temp41.
+    DATA temp43 LIKE REF TO lt_range.
+DATA lo_range TYPE REF TO zabaputil_cl_util_range.
+    DATA lv_sql TYPE string.
+    DATA temp1 TYPE xsdboolean.
+    CLEAR temp41.
+    
+    temp42-sign = `I`.
+    temp42-option = `EQ`.
+    temp42-low = `test`.
+    temp42-high = ``.
+    INSERT temp42 INTO TABLE temp41.
+    
+    lt_range = temp41.
 
-    DATA(lo_range) = NEW zabaputil_cl_util_range(
-      iv_fieldname = `carrid`
-      ir_range     = REF #( lt_range ) ).
+    
+    GET REFERENCE OF lt_range INTO temp43.
 
-    DATA(lv_sql) = lo_range->get_sql( ).
+CREATE OBJECT lo_range TYPE zabaputil_cl_util_range EXPORTING iv_fieldname = `carrid` ir_range = temp43.
 
+    
+    lv_sql = lo_range->get_sql( ).
+
+    
+    temp1 = boolc( lv_sql CS `CARRID` ).
     cl_abap_unit_assert=>assert_true(
-      xsdbool( lv_sql CS `CARRID` ) ).
+      temp1 ).
 
   ENDMETHOD.
 
@@ -281,7 +474,8 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_factory_eq.
 
-    DATA(ls_range) = zabaputil_cl_util_range=>eq( `AA` ).
+    DATA ls_range TYPE zabaputil_cl_util_context=>ty_s_range.
+    ls_range = zabaputil_cl_util_range=>eq( `AA` ).
 
     cl_abap_unit_assert=>assert_equals( exp = `I`  act = ls_range-sign ).
     cl_abap_unit_assert=>assert_equals( exp = `EQ` act = ls_range-option ).
@@ -291,7 +485,8 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_factory_ne.
 
-    DATA(ls_range) = zabaputil_cl_util_range=>ne( `BB` ).
+    DATA ls_range TYPE zabaputil_cl_util_context=>ty_s_range.
+    ls_range = zabaputil_cl_util_range=>ne( `BB` ).
 
     cl_abap_unit_assert=>assert_equals( exp = `NE` act = ls_range-option ).
     cl_abap_unit_assert=>assert_equals( exp = `BB` act = ls_range-low ).
@@ -300,7 +495,8 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_factory_bt.
 
-    DATA(ls_range) = zabaputil_cl_util_range=>bt( low = `100` high = `500` ).
+    DATA ls_range TYPE zabaputil_cl_util_context=>ty_s_range.
+    ls_range = zabaputil_cl_util_range=>bt( low = `100` high = `500` ).
 
     cl_abap_unit_assert=>assert_equals( exp = `BT`  act = ls_range-option ).
     cl_abap_unit_assert=>assert_equals( exp = `100` act = ls_range-low ).
@@ -310,7 +506,8 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_factory_cp.
 
-    DATA(ls_range) = zabaputil_cl_util_range=>cp( `*test*` ).
+    DATA ls_range TYPE zabaputil_cl_util_context=>ty_s_range.
+    ls_range = zabaputil_cl_util_range=>cp( `*test*` ).
 
     cl_abap_unit_assert=>assert_equals( exp = `CP`      act = ls_range-option ).
     cl_abap_unit_assert=>assert_equals( exp = `*test*`  act = ls_range-low ).
@@ -319,7 +516,8 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_factory_gt.
 
-    DATA(ls_range) = zabaputil_cl_util_range=>gt( `100` ).
+    DATA ls_range TYPE zabaputil_cl_util_context=>ty_s_range.
+    ls_range = zabaputil_cl_util_range=>gt( `100` ).
 
     cl_abap_unit_assert=>assert_equals( exp = `GT`  act = ls_range-option ).
     cl_abap_unit_assert=>assert_equals( exp = `100` act = ls_range-low ).
@@ -328,7 +526,8 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_factory_ge.
 
-    DATA(ls_range) = zabaputil_cl_util_range=>ge( `50` ).
+    DATA ls_range TYPE zabaputil_cl_util_context=>ty_s_range.
+    ls_range = zabaputil_cl_util_range=>ge( `50` ).
 
     cl_abap_unit_assert=>assert_equals( exp = `GE` act = ls_range-option ).
     cl_abap_unit_assert=>assert_equals( exp = `50` act = ls_range-low ).
@@ -337,7 +536,8 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_factory_lt.
 
-    DATA(ls_range) = zabaputil_cl_util_range=>lt( `200` ).
+    DATA ls_range TYPE zabaputil_cl_util_context=>ty_s_range.
+    ls_range = zabaputil_cl_util_range=>lt( `200` ).
 
     cl_abap_unit_assert=>assert_equals( exp = `LT`  act = ls_range-option ).
     cl_abap_unit_assert=>assert_equals( exp = `200` act = ls_range-low ).
@@ -346,7 +546,8 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_factory_le.
 
-    DATA(ls_range) = zabaputil_cl_util_range=>le( `300` ).
+    DATA ls_range TYPE zabaputil_cl_util_context=>ty_s_range.
+    ls_range = zabaputil_cl_util_range=>le( `300` ).
 
     cl_abap_unit_assert=>assert_equals( exp = `LE`  act = ls_range-option ).
     cl_abap_unit_assert=>assert_equals( exp = `300` act = ls_range-low ).
@@ -355,7 +556,8 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_factory_exclude.
 
-    DATA(ls_range) = zabaputil_cl_util_range=>eq( val = `XX` sign = `E` ).
+    DATA ls_range TYPE zabaputil_cl_util_context=>ty_s_range.
+    ls_range = zabaputil_cl_util_range=>eq( val = `XX` sign = `E` ).
 
     cl_abap_unit_assert=>assert_equals( exp = `E`  act = ls_range-sign ).
     cl_abap_unit_assert=>assert_equals( exp = `EQ` act = ls_range-option ).
@@ -364,13 +566,20 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
   METHOD test_factory_with_sql.
 
-    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
-      ( zabaputil_cl_util_range=>eq( `AA` ) )
-      ( zabaputil_cl_util_range=>eq( `BB` ) ) ).
+    DATA temp44 TYPE zabaputil_cl_util_context=>ty_t_range.
+    DATA lt_range LIKE temp44.
+    DATA temp46 LIKE REF TO lt_range.
+DATA lo_range TYPE REF TO zabaputil_cl_util_range.
+    CLEAR temp44.
+    INSERT zabaputil_cl_util_range=>eq( `AA` ) INTO TABLE temp44.
+    INSERT zabaputil_cl_util_range=>eq( `BB` ) INTO TABLE temp44.
+    
+    lt_range = temp44.
 
-    DATA(lo_range) = NEW zabaputil_cl_util_range(
-      iv_fieldname = `CARRID`
-      ir_range     = REF #( lt_range ) ).
+    
+    GET REFERENCE OF lt_range INTO temp46.
+
+CREATE OBJECT lo_range TYPE zabaputil_cl_util_range EXPORTING iv_fieldname = `CARRID` ir_range = temp46.
 
     cl_abap_unit_assert=>assert_equals(
       exp = `( CARRID = 'AA' OR CARRID = 'BB' )`
@@ -382,13 +591,28 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
     " select-option semantics: one of the including rows and none of the
     " excluding ones - not an OR of all of them
-    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
-      ( sign = `I` option = `EQ` low = `AA` )
-      ( sign = `E` option = `EQ` low = `BB` ) ).
+    DATA temp47 TYPE zabaputil_cl_util_context=>ty_t_range.
+    DATA temp48 LIKE LINE OF temp47.
+    DATA lt_range LIKE temp47.
+    DATA temp49 LIKE REF TO lt_range.
+DATA lo_range TYPE REF TO zabaputil_cl_util_range.
+    CLEAR temp47.
+    
+    temp48-sign = `I`.
+    temp48-option = `EQ`.
+    temp48-low = `AA`.
+    INSERT temp48 INTO TABLE temp47.
+    temp48-sign = `E`.
+    temp48-option = `EQ`.
+    temp48-low = `BB`.
+    INSERT temp48 INTO TABLE temp47.
+    
+    lt_range = temp47.
 
-    DATA(lo_range) = NEW zabaputil_cl_util_range(
-      iv_fieldname = `CARRID`
-      ir_range     = REF #( lt_range ) ).
+    
+    GET REFERENCE OF lt_range INTO temp49.
+
+CREATE OBJECT lo_range TYPE zabaputil_cl_util_range EXPORTING iv_fieldname = `CARRID` ir_range = temp49.
 
     cl_abap_unit_assert=>assert_equals(
       exp = `( ( CARRID = 'AA' ) AND CARRID <> 'BB' )`
@@ -400,35 +624,100 @@ CLASS ltcl_unit_test IMPLEMENTATION.
 
     " the pattern is escaped for LIKE (a typed _ matches itself, + is one
     " character) and the caller's range keeps its CP form
-    DATA(lt_range) = VALUE zabaputil_cl_util_context=>ty_t_range(
-      ( sign = `I` option = `CP` low = `A_+*` ) ).
+    DATA temp50 TYPE zabaputil_cl_util_context=>ty_t_range.
+    DATA temp51 LIKE LINE OF temp50.
+    DATA lt_range LIKE temp50.
+    DATA temp52 LIKE REF TO lt_range.
+DATA lo_range TYPE REF TO zabaputil_cl_util_range.
+    FIELD-SYMBOLS <temp53> LIKE LINE OF lt_range.
+    DATA temp54 LIKE sy-tabix.
+    CLEAR temp50.
+    
+    temp51-sign = `I`.
+    temp51-option = `CP`.
+    temp51-low = `A_+*`.
+    INSERT temp51 INTO TABLE temp50.
+    
+    lt_range = temp50.
 
-    DATA(lo_range) = NEW zabaputil_cl_util_range(
-      iv_fieldname = `NAME`
-      ir_range     = REF #( lt_range ) ).
+    
+    GET REFERENCE OF lt_range INTO temp52.
+
+CREATE OBJECT lo_range TYPE zabaputil_cl_util_range EXPORTING iv_fieldname = `NAME` ir_range = temp52.
 
     cl_abap_unit_assert=>assert_equals(
       exp = `( NAME LIKE 'A#__%' ESCAPE '#' )`
       act = lo_range->get_sql( ) ).
+    
+    
+    temp54 = sy-tabix.
+    READ TABLE lt_range INDEX 1 ASSIGNING <temp53>.
+    sy-tabix = temp54.
+    IF sy-subrc <> 0.
+      ASSERT 1 = 0.
+    ENDIF.
     cl_abap_unit_assert=>assert_equals(
       exp = `A_+*`
-      act = lt_range[ 1 ]-low ).
+      act = <temp53>-low ).
 
   ENDMETHOD.
 
   METHOD test_get_sql_multi.
 
-    DATA(lt_r1) = VALUE zabaputil_cl_util_context=>ty_t_range( ( zabaputil_cl_util_range=>eq( `LH` ) ) ).
-    DATA(lt_r2) = VALUE zabaputil_cl_util_context=>ty_t_range( ( zabaputil_cl_util_range=>bt( low = `100` high = `500` ) ) ).
+    DATA temp55 TYPE zabaputil_cl_util_context=>ty_t_range.
+    DATA lt_r1 LIKE temp55.
+    DATA temp57 TYPE zabaputil_cl_util_context=>ty_t_range.
+    DATA lt_r2 LIKE temp57.
+    DATA temp59 LIKE REF TO lt_r1.
+DATA lv_sql1 TYPE string.
+DATA temp1 TYPE REF TO zabaputil_cl_util_range.
+    DATA temp60 LIKE REF TO lt_r2.
+DATA lv_sql2 TYPE string.
+DATA temp2 TYPE REF TO zabaputil_cl_util_range.
+    DATA temp61 TYPE string_table.
+    DATA lv_result TYPE string.
+    DATA temp3 TYPE xsdboolean.
+    DATA temp4 TYPE xsdboolean.
+    DATA temp5 TYPE xsdboolean.
+    CLEAR temp55.
+    INSERT zabaputil_cl_util_range=>eq( `LH` ) INTO TABLE temp55.
+    
+    lt_r1 = temp55.
+    
+    CLEAR temp57.
+    INSERT zabaputil_cl_util_range=>bt( low = `100` high = `500` ) INTO TABLE temp57.
+    
+    lt_r2 = temp57.
 
-    DATA(lv_sql1) = NEW zabaputil_cl_util_range( iv_fieldname = `CARRID` ir_range = REF #( lt_r1 ) )->get_sql( ).
-    DATA(lv_sql2) = NEW zabaputil_cl_util_range( iv_fieldname = `CONNID` ir_range = REF #( lt_r2 ) )->get_sql( ).
+    
+    GET REFERENCE OF lt_r1 INTO temp59.
 
-    DATA(lv_result) = zabaputil_cl_util_range=>get_sql_multi( VALUE #( ( lv_sql1 ) ( lv_sql2 ) ) ).
 
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_result CS `CARRID` ) ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_result CS `AND` ) ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_result CS `CONNID` ) ).
+CREATE OBJECT temp1 TYPE zabaputil_cl_util_range EXPORTING iv_fieldname = `CARRID` ir_range = temp59.
+lv_sql1 = temp1->get_sql( ).
+    
+    GET REFERENCE OF lt_r2 INTO temp60.
+
+
+CREATE OBJECT temp2 TYPE zabaputil_cl_util_range EXPORTING iv_fieldname = `CONNID` ir_range = temp60.
+lv_sql2 = temp2->get_sql( ).
+
+    
+    CLEAR temp61.
+    INSERT lv_sql1 INTO TABLE temp61.
+    INSERT lv_sql2 INTO TABLE temp61.
+    
+    lv_result = zabaputil_cl_util_range=>get_sql_multi( temp61 ).
+
+    
+    temp3 = boolc( lv_result CS `CARRID` ).
+    cl_abap_unit_assert=>assert_true( temp3 ).
+    
+    temp4 = boolc( lv_result CS `AND` ).
+    cl_abap_unit_assert=>assert_true( temp4 ).
+    
+    temp5 = boolc( lv_result CS `CONNID` ).
+    cl_abap_unit_assert=>assert_true( temp5 ).
 
   ENDMETHOD.
 

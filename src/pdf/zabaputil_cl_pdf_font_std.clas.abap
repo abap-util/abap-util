@@ -45,7 +45,7 @@ CLASS zabaputil_cl_pdf_font_std DEFINITION
     DATA mv_descent  TYPE i.
     " the widths of the codes 32 to 255 in thousandths of the font size;
     " empty for Courier, where every character is 600 wide
-    DATA mt_width    TYPE STANDARD TABLE OF i WITH EMPTY KEY.
+    DATA mt_width    TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
 
     "! The codes of a text in WinAnsiEncoding, a question mark for what
     "! the encoding does not have
@@ -71,6 +71,9 @@ CLASS zabaputil_cl_pdf_font_std IMPLEMENTATION.
 
     DATA lv_metrics TYPE string.
     DATA lv_width   TYPE i.
+    DATA lv_widths TYPE string.
+    DATA lt_width TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+    DATA lv_text LIKE LINE OF lt_width.
 
     mv_name = name.
     mv_resource = resource.
@@ -117,9 +120,12 @@ CLASS zabaputil_cl_pdf_font_std IMPLEMENTATION.
     IF lv_metrics IS INITIAL.
       RETURN.
     ENDIF.
-    DATA(lv_widths) = widths( lv_metrics ).
-    SPLIT lv_widths AT ` ` INTO TABLE DATA(lt_width).
-    LOOP AT lt_width INTO DATA(lv_text).
+    
+    lv_widths = widths( lv_metrics ).
+    
+    SPLIT lv_widths AT ` ` INTO TABLE lt_width.
+    
+    LOOP AT lt_width INTO lv_text.
       lv_width = lv_text.
       INSERT lv_width INTO TABLE mt_width.
     ENDLOOP.
@@ -138,7 +144,9 @@ CLASS zabaputil_cl_pdf_font_std IMPLEMENTATION.
     DATA lv_x    TYPE x LENGTH 1.
     DATA lv_hex  TYPE string.
 
-    LOOP AT codes( val ) INTO lv_code.
+    DATA temp6 TYPE zabaputil_cl_util_context=>ty_t_codepoint.
+    temp6 = codes( val ).
+    LOOP AT temp6 INTO lv_code.
       lv_x = lv_code.
       lv_hex = lv_x.
       result = result && lv_hex.
@@ -154,7 +162,11 @@ CLASS zabaputil_cl_pdf_font_std IMPLEMENTATION.
     DATA lv_size  TYPE f.
     DATA lv_index TYPE i.
 
-    LOOP AT codes( val ) INTO lv_code.
+    DATA temp7 TYPE zabaputil_cl_util_context=>ty_t_codepoint.
+        FIELD-SYMBOLS <temp8> LIKE LINE OF mt_width.
+        DATA temp9 LIKE sy-tabix.
+    temp7 = codes( val ).
+    LOOP AT temp7 INTO lv_code.
       IF lv_code < 32.
         CONTINUE.
       ENDIF.
@@ -162,7 +174,15 @@ CLASS zabaputil_cl_pdf_font_std IMPLEMENTATION.
         lv_sum = lv_sum + 600.
       ELSE.
         lv_index = lv_code - 31.
-        lv_sum = lv_sum + mt_width[ lv_index ].
+        
+        
+        temp9 = sy-tabix.
+        READ TABLE mt_width INDEX lv_index ASSIGNING <temp8>.
+        sy-tabix = temp9.
+        IF sy-subrc <> 0.
+          ASSERT 1 = 0.
+        ENDIF.
+        lv_sum = lv_sum + <temp8>.
       ENDIF.
     ENDLOOP.
 
@@ -201,7 +221,9 @@ CLASS zabaputil_cl_pdf_font_std IMPLEMENTATION.
     DATA lv_cp   TYPE i.
     DATA lv_code TYPE i.
 
-    LOOP AT zabaputil_cl_util_context=>c_get_codepoints( val ) INTO lv_cp.
+    DATA temp10 TYPE zabaputil_cl_util_context=>ty_t_codepoint.
+    temp10 = zabaputil_cl_util_context=>c_get_codepoints( val ).
+    LOOP AT temp10 INTO lv_cp.
       lv_code = winansi( lv_cp ).
       IF lv_code = 0.
         lv_code = 63.

@@ -105,55 +105,81 @@ CLASS zabaputil_cl_util_range IMPLEMENTATION.
 
   METHOD eq.
 
-    result = VALUE #( sign = sign option = `EQ` low = val ).
+    CLEAR result.
+    result-sign = sign.
+    result-option = `EQ`.
+    result-low = val.
 
   ENDMETHOD.
 
   METHOD ne.
 
-    result = VALUE #( sign = sign option = `NE` low = val ).
+    CLEAR result.
+    result-sign = sign.
+    result-option = `NE`.
+    result-low = val.
 
   ENDMETHOD.
 
   METHOD bt.
 
-    result = VALUE #( sign = sign option = `BT` low = low high = high ).
+    CLEAR result.
+    result-sign = sign.
+    result-option = `BT`.
+    result-low = low.
+    result-high = high.
 
   ENDMETHOD.
 
   METHOD cp.
 
-    result = VALUE #( sign = sign option = `CP` low = val ).
+    CLEAR result.
+    result-sign = sign.
+    result-option = `CP`.
+    result-low = val.
 
   ENDMETHOD.
 
   METHOD gt.
 
-    result = VALUE #( sign = sign option = `GT` low = val ).
+    CLEAR result.
+    result-sign = sign.
+    result-option = `GT`.
+    result-low = val.
 
   ENDMETHOD.
 
   METHOD ge.
 
-    result = VALUE #( sign = sign option = `GE` low = val ).
+    CLEAR result.
+    result-sign = sign.
+    result-option = `GE`.
+    result-low = val.
 
   ENDMETHOD.
 
   METHOD lt.
 
-    result = VALUE #( sign = sign option = `LT` low = val ).
+    CLEAR result.
+    result-sign = sign.
+    result-option = `LT`.
+    result-low = val.
 
   ENDMETHOD.
 
   METHOD le.
 
-    result = VALUE #( sign = sign option = `LE` low = val ).
+    CLEAR result.
+    result-sign = sign.
+    result-option = `LE`.
+    result-low = val.
 
   ENDMETHOD.
 
   METHOD get_sql_multi.
 
-    LOOP AT t_sql INTO DATA(lv_sql).
+    DATA lv_sql LIKE LINE OF t_sql.
+    LOOP AT t_sql INTO lv_sql.
       IF lv_sql IS INITIAL.
         CONTINUE.
       ENDIF.
@@ -181,6 +207,8 @@ CLASS zabaputil_cl_util_range IMPLEMENTATION.
     " caller's range
     DATA lt_range TYPE zabaputil_cl_util_context=>ty_t_range.
     FIELD-SYMBOLS <lt_range> TYPE ANY TABLE.
+    DATA temp63 TYPE zabaputil_cl_util_context=>ty_t_filter_multi.
+    DATA temp64 LIKE LINE OF temp63.
 
     ASSIGN mr_range->* TO <lt_range>.
     IF <lt_range> IS NOT ASSIGNED OR <lt_range> IS INITIAL.
@@ -190,9 +218,14 @@ CLASS zabaputil_cl_util_range IMPLEMENTATION.
     zabaputil_cl_util_context=>itab_corresponding( EXPORTING val = <lt_range>
                                                    CHANGING  tab = lt_range ).
 
+    
+    CLEAR temp63.
+    
+    temp64-name = mv_fieldname.
+    temp64-t_range = lt_range.
+    INSERT temp64 INTO TABLE temp63.
     result = zabaputil_cl_util_context=>filter_get_sql_where(
-                 VALUE #( ( name    = mv_fieldname
-                            t_range = lt_range ) ) ).
+                 temp63 ).
 
   ENDMETHOD.
 

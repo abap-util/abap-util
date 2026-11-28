@@ -35,8 +35,7 @@ ENDCLASS.
 CLASS ltcl_font_std IMPLEMENTATION.
 
   METHOD font.
-    result = NEW zabaputil_cl_pdf_font_std( name     = name
-                                            resource = `F1` ).
+    CREATE OBJECT result TYPE zabaputil_cl_pdf_font_std EXPORTING name = name resource = `F1`.
   ENDMETHOD.
 
   METHOD num.
@@ -44,33 +43,57 @@ CLASS ltcl_font_std IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD unknown_name.
+        DATA lx TYPE REF TO zabaputil_cx_util_error.
+        DATA temp1 TYPE xsdboolean.
     TRY.
         font( `Arial` ).
         cl_abap_unit_assert=>fail( ).
-      CATCH zabaputil_cx_util_error INTO DATA(lx).
-        cl_abap_unit_assert=>assert_true( xsdbool( lx->get_text( ) CS `Arial` ) ).
+        
+      CATCH zabaputil_cx_util_error INTO lx.
+        
+        temp1 = boolc( lx->get_text( ) CS `Arial` ).
+        cl_abap_unit_assert=>assert_true( temp1 ).
     ENDTRY.
   ENDMETHOD.
 
   METHOD every_name.
     DATA lt_name TYPE string_table.
-    lt_name = VALUE #( ( `Helvetica` ) ( `Helvetica-Bold` ) ( `Helvetica-Oblique` ) ( `Helvetica-BoldOblique` )
-                       ( `Times-Roman` ) ( `Times-Bold` ) ( `Times-Italic` ) ( `Times-BoldItalic` )
-                       ( `Courier` ) ( `Courier-Bold` ) ( `Courier-Oblique` ) ( `Courier-BoldOblique` ) ).
-    LOOP AT lt_name INTO DATA(lv_name).
-      DATA(lo_font) = font( lv_name ).
+    DATA temp1 TYPE string_table.
+    DATA lv_name LIKE LINE OF lt_name.
+      DATA lo_font TYPE REF TO zabaputil_if_pdf_font.
+      DATA temp2 TYPE xsdboolean.
+      DATA temp3 TYPE xsdboolean.
+    CLEAR temp1.
+    INSERT `Helvetica` INTO TABLE temp1.
+    INSERT `Helvetica-Bold` INTO TABLE temp1.
+    INSERT `Helvetica-Oblique` INTO TABLE temp1.
+    INSERT `Helvetica-BoldOblique` INTO TABLE temp1.
+    INSERT `Times-Roman` INTO TABLE temp1.
+    INSERT `Times-Bold` INTO TABLE temp1.
+    INSERT `Times-Italic` INTO TABLE temp1.
+    INSERT `Times-BoldItalic` INTO TABLE temp1.
+    INSERT `Courier` INTO TABLE temp1.
+    INSERT `Courier-Bold` INTO TABLE temp1.
+    INSERT `Courier-Oblique` INTO TABLE temp1.
+    INSERT `Courier-BoldOblique` INTO TABLE temp1.
+    lt_name = temp1.
+    
+    LOOP AT lt_name INTO lv_name.
+      
+      lo_font = font( lv_name ).
       " every font has a blank and a capital letter with a width
-      cl_abap_unit_assert=>assert_true( xsdbool( lo_font->width( val  = ` `
-                                                                 size = 10 ) > 0 ) ).
-      cl_abap_unit_assert=>assert_true( xsdbool( lo_font->width( val  = `M`
-                                                                 size = 10 ) > 5 ) ).
+      
+      temp2 = boolc( lo_font->width( val = ` ` size = 10 ) > 0 ).
+      cl_abap_unit_assert=>assert_true( temp2 ).
+      
+      temp3 = boolc( lo_font->width( val = `M` size = 10 ) > 5 ).
+      cl_abap_unit_assert=>assert_true( temp3 ).
     ENDLOOP.
   ENDMETHOD.
 
   METHOD resource_name.
     DATA lo_font TYPE REF TO zabaputil_if_pdf_font.
-    lo_font = NEW zabaputil_cl_pdf_font_std( name     = `Courier`
-                                             resource = `F7` ).
+    CREATE OBJECT lo_font TYPE zabaputil_cl_pdf_font_std EXPORTING name = `Courier` resource = `F7`.
     cl_abap_unit_assert=>assert_equals( exp = `F7` act = lo_font->resource( ) ).
   ENDMETHOD.
 
@@ -81,14 +104,22 @@ CLASS ltcl_font_std IMPLEMENTATION.
 
   METHOD encode_latin.
     " a-umlaut, sharp s, the euro sign, an en dash, a low double quote
-    DATA(lv_text) = zabaputil_cl_util_context=>conv_get_string_by_xstring(
-                        CONV xstring( `C3A4C39FE282ACE28093E2809E` ) ).
+    DATA temp3 TYPE xstring.
+    DATA lv_text TYPE string.
+    temp3 = `C3A4C39FE282ACE28093E2809E`.
+    
+    lv_text = zabaputil_cl_util_context=>conv_get_string_by_xstring(
+                        temp3 ).
     cl_abap_unit_assert=>assert_equals( exp = `<E4DF809684>` act = font( `Times-Roman` )->encode( lv_text ) ).
   ENDMETHOD.
 
   METHOD encode_outside.
     " a Greek alpha and a Cyrillic letter are not in WinAnsiEncoding
-    DATA(lv_text) = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `41CEB1D0964A` ) ).
+    DATA temp4 TYPE xstring.
+    DATA lv_text TYPE string.
+    temp4 = `41CEB1D0964A`.
+    
+    lv_text = zabaputil_cl_util_context=>conv_get_string_by_xstring( temp4 ).
     cl_abap_unit_assert=>assert_equals( exp = `<413F3F4A>` act = font( `Helvetica` )->encode( lv_text ) ).
   ENDMETHOD.
 
@@ -139,7 +170,11 @@ CLASS ltcl_font_std IMPLEMENTATION.
 
   METHOD width_latin.
     " the euro sign is 556 wide in Helvetica, a-umlaut as wide as a
-    DATA(lv_text) = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `E282ACC3A4` ) ).
+    DATA temp5 TYPE xstring.
+    DATA lv_text TYPE string.
+    temp5 = `E282ACC3A4`.
+    
+    lv_text = zabaputil_cl_util_context=>conv_get_string_by_xstring( temp5 ).
     cl_abap_unit_assert=>assert_equals( exp = `11.12`
                                         act = num( font( `Helvetica` )->width( val  = lv_text
                                                                                size = 10 ) ) ).
@@ -165,14 +200,23 @@ CLASS ltcl_font_std IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD write_object.
-    DATA(lo_writer) = NEW zabaputil_cl_pdf_writer( abap_false ).
-    DATA(lv_id) = font( `Times-BoldItalic` )->write( lo_writer ).
-    cl_abap_unit_assert=>assert_equals( exp = 1 act = lv_id ).
+    DATA lo_writer TYPE REF TO zabaputil_cl_pdf_writer.
+    DATA lv_id TYPE i.
     DATA lv_hex TYPE string.
+    DATA lv_expect TYPE string.
+    DATA temp4 TYPE xsdboolean.
+    CREATE OBJECT lo_writer TYPE zabaputil_cl_pdf_writer EXPORTING COMPRESS = abap_false.
+    
+    lv_id = font( `Times-BoldItalic` )->write( lo_writer ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lv_id ).
+    
     lv_hex = lo_writer->render( lv_id ).
-    DATA(lv_expect) = zabaputil_cl_pdf_writer=>hex(
+    
+    lv_expect = zabaputil_cl_pdf_writer=>hex(
         `<< /Type /Font /Subtype /Type1 /BaseFont /Times-BoldItalic /Encoding /WinAnsiEncoding >>` ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
+    
+    temp4 = boolc( lv_hex CS lv_expect ).
+    cl_abap_unit_assert=>assert_true( temp4 ).
   ENDMETHOD.
 
 ENDCLASS.
