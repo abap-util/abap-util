@@ -136,11 +136,11 @@ CLASS zabaputil_cl_pdf_form DEFINITION
       BEGIN OF ty_s_field,
         "! how a form names it: NAME, HEADER-CITY, T_ITEMS - for a column the
         "! component of the row
-        path  TYPE string,
+        path   TYPE string,
         "! one of cs_field_kind
-        kind  TYPE string,
+        kind   TYPE string,
         "! for a column: the path of its table
-        table TYPE string,
+        parent TYPE string,
       END OF ty_s_field.
     TYPES ty_t_field TYPE STANDARD TABLE OF ty_s_field WITH EMPTY KEY.
 
@@ -637,9 +637,9 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
           INSERT VALUE #( path = lv_path
                           kind = cs_field_kind-table ) INTO TABLE result.
           LOOP AT component_names( <component> ) INTO DATA(lv_column).
-            INSERT VALUE #( path  = lv_column
-                            kind  = cs_field_kind-column
-                            table = lv_path ) INTO TABLE result.
+            INSERT VALUE #( path   = lv_column
+                            kind   = cs_field_kind-column
+                            parent = lv_path ) INTO TABLE result.
           ENDLOOP.
 
         WHEN `u` OR `v` OR `r`.

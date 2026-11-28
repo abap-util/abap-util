@@ -561,7 +561,7 @@ CLASS ltcl_form IMPLEMENTATION.
         exp = VALUE zabaputil_cl_pdf_form=>ty_s_field( path = `T_ITEMS` kind = `TABLE` )
         act = lt_field[ 4 ] ).
     cl_abap_unit_assert=>assert_equals(
-        exp = VALUE zabaputil_cl_pdf_form=>ty_s_field( path = `TEXT` kind = `COLUMN` table = `T_ITEMS` )
+        exp = VALUE zabaputil_cl_pdf_form=>ty_s_field( path = `TEXT` kind = `COLUMN` parent = `T_ITEMS` )
         act = lt_field[ 6 ] ).
     " a text has no fields
     cl_abap_unit_assert=>assert_initial( zabaputil_cl_pdf_form=>fields( `text` ) ).
@@ -574,7 +574,7 @@ CLASS ltcl_form IMPLEMENTATION.
     cl_abap_unit_assert=>assert_true( xsdbool( line_exists( lt_field[ path = `ADDRESS-CITY` kind = `VALUE` ] ) ) ).
     cl_abap_unit_assert=>assert_true( xsdbool( line_exists( lt_field[ path = `T_ITEMS` kind = `TABLE` ] ) ) ).
     cl_abap_unit_assert=>assert_true(
-        xsdbool( line_exists( lt_field[ path = `MATNR` kind = `COLUMN` table = `T_ITEMS` ] ) ) ).
+        xsdbool( line_exists( lt_field[ path = `MATNR` kind = `COLUMN` parent = `T_ITEMS` ] ) ) ).
     " four values, three of the address, the table and its five columns
     cl_abap_unit_assert=>assert_equals( exp = 13 act = lines( lt_field ) ).
 
@@ -586,7 +586,7 @@ CLASS ltcl_form IMPLEMENTATION.
     cl_abap_unit_assert=>assert_false( xsdbool( line_exists( lt_local[ path = `GV_STATIC` ] ) ) ).
     " rows that are no structure: a table without columns
     cl_abap_unit_assert=>assert_true( xsdbool( line_exists( lt_local[ path = `T_ROWS` kind = `TABLE` ] ) ) ).
-    cl_abap_unit_assert=>assert_false( xsdbool( line_exists( lt_local[ table = `T_ROWS` ] ) ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( line_exists( lt_local[ parent = `T_ROWS` ] ) ) ).
   ENDMETHOD.
 
   METHOD fields_stop_at_a_cycle.
@@ -599,7 +599,10 @@ CLASS ltcl_form IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD data_sample_of_a_class.
-    DATA(li_data) = zabaputil_cl_pdf_form=>data_sample( `zabaputil_cl_pdf_data_demo` ).
+    " the name from a reference typed with the class: in a renamed copy of
+    " this repository it is the renamed class
+    DATA lo_demo TYPE REF TO zabaputil_cl_pdf_data_demo.
+    DATA(li_data) = zabaputil_cl_pdf_form=>data_sample( zabaputil_cl_util_context=>rtti_get_ref_type_name( lo_demo ) ).
     cl_abap_unit_assert=>assert_bound( li_data ).
     cl_abap_unit_assert=>assert_equals( exp = `Ada Lovelace`
                                         act = zabaputil_cl_pdf_form=>resolve( val  = `{NAME}`
@@ -609,7 +612,12 @@ CLASS ltcl_form IMPLEMENTATION.
   METHOD data_sample_refused.
     " a class that is no data class, a name that is no class, no name
     DATA lt_name TYPE string_table.
-    lt_name = VALUE #( ( `ZABAPUTIL_CL_PDF_WRITER` ) ( `ZABAPUTIL_IF_PDF_DATA` ) ( `ZABAPUTIL_NO_SUCH_CLASS` ) ( `` ) ).
+    DATA lo_writer TYPE REF TO zabaputil_cl_pdf_writer.
+    DATA li_data   TYPE REF TO zabaputil_if_pdf_data.
+    lt_name = VALUE #( ( zabaputil_cl_util_context=>rtti_get_ref_type_name( lo_writer ) )
+                       ( zabaputil_cl_util_context=>rtti_get_ref_type_name( li_data ) )
+                       ( `ZABAPUTIL_NO_SUCH_CLASS` )
+                       ( `` ) ).
     LOOP AT lt_name INTO DATA(lv_name).
       TRY.
           zabaputil_cl_pdf_form=>data_sample( lv_name ).
@@ -621,7 +629,8 @@ CLASS ltcl_form IMPLEMENTATION.
 
   METHOD form_with_its_data_class.
     " what an editor does for its preview: the form names its class
-    ms_form-data_class = `ZABAPUTIL_CL_PDF_DATA_DEMO`.
+    DATA lo_demo TYPE REF TO zabaputil_cl_pdf_data_demo.
+    ms_form-data_class = zabaputil_cl_util_context=>rtti_get_ref_type_name( lo_demo ).
     ms_form-t_element = VALUE #( ( type = zabaputil_cl_pdf_form=>cs_type-text
                                    text = `Order {BSTNK}` ) ).
     DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( val  = ms_form
