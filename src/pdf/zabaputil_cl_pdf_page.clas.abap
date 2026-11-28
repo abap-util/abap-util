@@ -334,6 +334,28 @@ CLASS zabaputil_cl_pdf_page DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
 
+    "! A page of another PDF file, from zabaputil_cl_pdf=>import_page, in
+    "! the box x, y, w, h - stretched to it
+    "! @parameter w | 0 for its own width, or what its height makes of it
+    "! @parameter h | 0 for its own height, or what its width makes of it
+    METHODS place
+      IMPORTING
+        page          TYPE REF TO zabaputil_cl_pdf_reader
+        x             TYPE numeric DEFAULT 0
+        y             TYPE numeric DEFAULT 0
+        w             TYPE numeric DEFAULT 0
+        h             TYPE numeric DEFAULT 0
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
+
+    "! A page of another PDF file under everything on this page - a
+    "! letterhead: at the top left corner, in its own size
+    METHODS background
+      IMPORTING
+        page          TYPE REF TO zabaputil_cl_pdf_reader
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
+
     "! The transparencies the page uses, by the names of their graphics
     "! states - `GS500 0.5 0.5` - for the resources of the document
     METHODS alphas
@@ -692,6 +714,51 @@ CLASS zabaputil_cl_pdf_page IMPLEMENTATION.
   METHOD gotos.
 
     result = mt_goto.
+
+  ENDMETHOD.
+
+  METHOD place.
+
+    DATA lv_w  TYPE f.
+    DATA lv_h  TYPE f.
+    DATA lv_sx TYPE f.
+    DATA lv_sy TYPE f.
+    DATA lv_y  TYPE f.
+
+    " in points: the size asked for, or the page's own
+    lv_w = w.
+    lv_h = h.
+    lv_w = lv_w * mv_scale.
+    lv_h = lv_h * mv_scale.
+    IF lv_w <= 0 AND lv_h <= 0.
+      lv_w = page->width( ).
+      lv_h = page->height( ).
+    ELSEIF lv_w <= 0.
+      lv_w = lv_h * page->width( ) / page->height( ).
+    ELSEIF lv_h <= 0.
+      lv_h = lv_w * page->height( ) / page->width( ).
+    ENDIF.
+    lv_sx = lv_w / page->width( ).
+    lv_sy = lv_h / page->height( ).
+    lv_y = y.
+    lv_y = mv_height - lv_y * mv_scale - lv_h.
+
+    " the box of the page moved to the lower left corner of the place
+    emit( |q { zabaputil_cl_pdf_writer=>num( lv_sx ) } 0 0 { zabaputil_cl_pdf_writer=>num( lv_sy ) } | &&
+          |{ zabaputil_cl_pdf_writer=>num( CONV f( x ) * mv_scale - page->origin_x( ) * lv_sx ) } | &&
+          |{ zabaputil_cl_pdf_writer=>num( lv_y - page->origin_y( ) * lv_sy ) } cm /{ page->resource( ) } Do Q| ).
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD background.
+
+    " drawn first: what the page draws covers it
+    DATA(lt_content) = mt_content.
+    CLEAR mt_content.
+    place( page ).
+    INSERT LINES OF lt_content INTO TABLE mt_content.
+    result = me.
 
   ENDMETHOD.
 

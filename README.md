@@ -624,6 +624,10 @@ lo_page->restore( ).
 zabaputil_cl_pdf_barcode=>draw( page = lo_page type = `QR` val = lv_url x = 150 y = 230 w = 30 h = 30 ).
 zabaputil_cl_pdf_barcode=>draw( page = lo_page type = `CODE128` val = `4711-0815` x = 20 y = 230 w = 60 h = 15 ).
 DATA(lt_rows) = zabaputil_cl_pdf_barcode=>qr( val = lv_url ecc = `H` ). " the modules, `1` dark
+" A page of an existing PDF - a letterhead - under the page, or anywhere in any size
+DATA(lo_letterhead) = lo_pdf->import_page( lv_letterhead_pdf ).
+lo_page->background( lo_letterhead ).
+lo_page->place( page = lo_letterhead x = 150 y = 250 w = 40 ).
 " Bookmarks (the outline beside the pages) and links to a page of the document
 lo_pdf->add_bookmark( title = `Delivery note` )->add_bookmark( title = `Items` level = 2 y = 80 ).
 lo_page->link_page( x = 20 y = 30 w = 80 h = 6 page = 2 ).
@@ -712,6 +716,7 @@ DATA(lv_sample) = zabaputil_cl_pdf_form=>render(
 | `zabaputil_cl_pdf_font_std` | the standard fonts (Helvetica, Times, Courier) with their metrics - Western European text, nothing embedded; other characters in a fallback font (`lo_pdf->set_fallback_font( lo_pdf->font_ttf( lv_ttf ) )`), `lo_pdf->missing_chars( )` lists what no font had |
 | `zabaputil_cl_pdf_font_ttf` | an embedded TrueType or OpenType font (`lo_pdf->font_ttf( lv_ttf )`) - any script the font has glyphs for; only the glyphs in use are embedded (`subset = abap_false` for the whole file). An .otf with PostScript outlines is embedded whole, of a collection (.ttc) the font of `index` |
 | `zabaputil_cl_pdf_barcode` | Code 128, EAN-13, QR (versions 1-40, L/M/Q/H) and Data Matrix (ECC 200) as modules and as rectangles on a page; a form element of type `BARCODE` |
+| `zabaputil_cl_pdf_reader` | a page of an existing PDF file (cross-reference tables or streams, object streams, incremental updates) as a form XObject - a letterhead; a form's `background` |
 | `zabaputil_cl_pdf_image` | JPEG and PNG images, PNG with transparency, interlaced PNG |
 | `zabaputil_cl_pdf_form` | a form as data - elements in the flow or at fixed positions, `{NAME}` placeholders for the components of the data - and its printout; an absolute form (`ty_s_form-absolute`) places every element at its x, y, w, h, as a designer with a canvas draws it, and moves what stands below a table - or below a text whose lines need more than its h - to where it ends |
 | `zabaputil_if_pdf_data`, `zabaputil_cl_pdf_data_demo` | the data class of a form - its public attributes are the form's interface - and one by example |

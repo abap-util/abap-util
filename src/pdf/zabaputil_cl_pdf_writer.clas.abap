@@ -58,6 +58,13 @@ CLASS zabaputil_cl_pdf_writer DEFINITION
         content  TYPE xstring
         compress TYPE abap_bool DEFAULT abap_true.
 
+    "! Write the body of a reserved object as it is: bytes in hex, a
+    "! dictionary with its stream, copied from another file
+    METHODS set_raw
+      IMPORTING
+        id  TYPE i
+        hex TYPE string.
+
     "! A new stream object, numbered here
     "! @parameter dict     | the entries of the stream dictionary, without the brackets
     "! @parameter content  | the bytes of the stream
@@ -194,6 +201,13 @@ CLASS zabaputil_cl_pdf_writer IMPLEMENTATION.
                 hex = hex( |{ id } 0 obj\n<< { lv_dict }/Length { xstrlen( lv_bytes ) }{ lv_filter } >>\nstream\n| ) &&
                       CONV string( lv_bytes ) &&
                       hex( |\nendstream\nendobj\n| ) ).
+
+  ENDMETHOD.
+
+  METHOD set_raw.
+
+    object_put( id  = id
+                hex = hex( |{ id } 0 obj\n| ) && hex && hex( |\nendobj\n| ) ).
 
   ENDMETHOD.
 

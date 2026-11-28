@@ -179,6 +179,18 @@ CLASS zabaputil_cl_pdf DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_cl_pdf.
 
+    "! A page of an existing PDF file - a letterhead - to be drawn with
+    "! zabaputil_cl_pdf_page=>place or =>background, on as many pages as
+    "! needed; the file holds it once
+    "! @parameter content | the bytes of the PDF file
+    "! @parameter page    | its page, from 1
+    METHODS import_page
+      IMPORTING
+        content       TYPE xstring
+        page          TYPE i DEFAULT 1
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_reader.
+
     METHODS set_info
       IMPORTING
         title         TYPE clike OPTIONAL
@@ -241,6 +253,7 @@ CLASS zabaputil_cl_pdf DEFINITION
       END OF ty_s_attachment.
     DATA mt_attachment TYPE STANDARD TABLE OF ty_s_attachment WITH EMPTY KEY.
     DATA mv_pdfa       TYPE abap_bool.
+    DATA mt_import     TYPE STANDARD TABLE OF REF TO zabaputil_cl_pdf_reader WITH EMPTY KEY.
     DATA mt_xmp        TYPE string_table.
 
     "! The size of a page format in points
@@ -600,6 +613,15 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
              |<pdfaSchema:property><rdf:Seq>{ lv_properties }</rdf:Seq></pdfaSchema:property>| &&
              |</rdf:li></rdf:Bag></pdfaExtension:schemas></rdf:Description>| ).
     result = me.
+
+  ENDMETHOD.
+
+  METHOD import_page.
+
+    result = NEW #( content  = content
+                    page     = page
+                    resource = |P{ lines( mt_import ) + 1 }| ).
+    INSERT result INTO TABLE mt_import.
 
   ENDMETHOD.
 
@@ -966,6 +988,11 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
     LOOP AT mt_image INTO DATA(lo_image).
       lv_id = lo_image->write( lo_writer ).
       lv_images = lv_images && | /{ lo_image->resource( ) } { lv_id } 0 R|.
+    ENDLOOP.
+    " the pages of other files, as forms
+    LOOP AT mt_import INTO DATA(lo_import).
+      lv_id = lo_import->write( lo_writer ).
+      lv_images = lv_images && | /{ lo_import->resource( ) } { lv_id } 0 R|.
     ENDLOOP.
     " the transparencies of all pages, a graphics state each
     DATA lt_alpha TYPE string_table.

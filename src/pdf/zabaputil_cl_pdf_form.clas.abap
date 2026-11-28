@@ -214,6 +214,10 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         "! a TrueType file (.ttf) for the characters the standard fonts do not
         "! have - Polish, Greek, Cyrillic, ...; without it they are question marks
         fallback_font TYPE xstring,
+        "! a PDF file whose first page is under every page - a letterhead
+        background       TYPE xstring,
+        "! a PDF file whose first page is under the first page instead
+        background_first TYPE xstring,
         "! write PDF/A-3b, for archiving: every text in the fallback font, as
         "! PDF/A embeds every font - the standard fonts are not
         pdfa          TYPE abap_bool,
@@ -833,6 +837,27 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
                                   first_page = abap_true ).
     ENDIF.
     lo_layout->finish( ).
+
+    " the letterhead under everything, once in the file however many pages
+    IF val-background IS NOT INITIAL OR val-background_first IS NOT INITIAL.
+      DATA lo_background TYPE REF TO zabaputil_cl_pdf_reader.
+      DATA lo_first      TYPE REF TO zabaputil_cl_pdf_reader.
+      IF val-background IS NOT INITIAL.
+        lo_background = result->import_page( val-background ).
+      ENDIF.
+      IF val-background_first IS NOT INITIAL.
+        lo_first = result->import_page( val-background_first ).
+      ENDIF.
+      lv_number = 1.
+      WHILE lv_number <= result->page_count( ).
+        IF lv_number = 1 AND lo_first IS BOUND.
+          result->page( lv_number )->background( lo_first ).
+        ELSEIF lo_background IS BOUND.
+          result->page( lv_number )->background( lo_background ).
+        ENDIF.
+        lv_number = lv_number + 1.
+      ENDWHILE.
+    ENDIF.
 
     " the fixed elements go over the flow, on the first or on every page.
     " Of an absolute form the ones of every page are left: the others are
