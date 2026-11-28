@@ -140,7 +140,8 @@ Every action in `.github/workflows/` is pinned to a commit sha with the tag as a
 - **Reading goes row by row** (`sheet_read_row`) and never builds the whole sheet in memory for `get_table( )`.
 - **`xml_reader_create` sets no option on the sXML reader**: as it comes it reports a text of blanks only where it is all an element holds and leaves out the indentation between elements, and the transpiled runtime implements no `set_option`.
 - **The reading tests are slow in the transpiled runtime by its XML parser** (it searches the document from the start for every token) - keep the workbooks of the tests small; a system parses in the kernel.
-- `zabaputil_cl_util_context=>conv_get_xlsx_by_itab` stays as the one-sheet writer of a trimmed context copy; `conv_get_itab_by_xlsx` stays a stub that raises, because the context class cannot call the class that calls it.
+- `zabaputil_cl_util_context=>conv_get_xlsx_by_itab` stays as the one-sheet writer of a trimmed context copy (`zabaputil_cl_util_log` writes its log with it). `conv_get_itab_by_xlsx` is deprecated and stays a stub that raises, because the context class cannot call the class that calls it - decided in 2026-11: no consumer calls it (checked: abap2UI5, abap-cloud-gui, table-content-loader), removing it would only turn a runtime error into an activation error for an unknown caller. Read a workbook with the XLSX class.
+- **The parts of a workbook that was read are unpacked when they are read** (`zip_load`, `zip_get` of the context class), not all at once: a sheet that is not read is never unpacked.
 
 ## One class per purpose
 

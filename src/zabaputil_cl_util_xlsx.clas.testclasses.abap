@@ -653,6 +653,7 @@ CLASS ltcl_write_sheet DEFINITION FINAL
     METHODS images               FOR TESTING RAISING cx_static_check.
     METHODS shared_strings       FOR TESTING RAISING cx_static_check.
     METHODS conversion_exit      FOR TESTING RAISING cx_static_check.
+    METHODS currency_and_unit    FOR TESTING RAISING cx_static_check.
 
 ENDCLASS.
 
@@ -1324,6 +1325,39 @@ CLASS ltcl_write_sheet IMPLEMENTATION.
                                         act = lt_back[ 3 ]-text ).
   ENDMETHOD.
 
+  METHOD currency_and_unit.
+    TYPES:
+      BEGIN OF ty_s_amount,
+        amount   TYPE p LENGTH 8 DECIMALS 2,
+        currency TYPE c LENGTH 5,
+        qty      TYPE p LENGTH 8 DECIMALS 3,
+        unit     TYPE c LENGTH 3,
+      END OF ty_s_amount.
+    DATA lt_amount TYPE STANDARD TABLE OF ty_s_amount WITH EMPTY KEY.
+
+    lt_amount = VALUE #( ( amount = `12.50` currency = `EUR` qty = `1.5` unit = `KG` ) ).
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>xlsx_by_itab(
+        val    = lt_amount
+        layout = VALUE #( t_column = VALUE #( ( name = `AMOUNT` currency = `currency` )
+                                              ( name = `QTY` unit = `UNIT` ) ) ) ).
+    " a currency the system does not list has two decimals; a unit it does
+    " not list the decimals of the field
+    cl_abap_unit_assert=>assert_true( xsdbool( sheet( lv_file ) CS `<c r="A2" s="2"><v>12.5</v></c>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( sheet( lv_file ) CS `<c r="B2" s="3"><v>1.5</v></c>` ) ).
+    DATA(lv_styles) = ltcl_file=>part( file = lv_file
+                                       name = `xl/styles.xml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_styles CS `formatCode="#,##0.00"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_styles CS `formatCode="#,##0.000"/>` ) ).
+
+    TRY.
+        zabaputil_cl_util_xlsx=>xlsx_by_itab( val    = lt_amount
+                                              layout = VALUE #( t_column = VALUE #( ( name = `AMOUNT` currency = `WAERS` ) ) ) ).
+        cl_abap_unit_assert=>fail( `a currency component the row does not have has to raise` ).
+      CATCH zabaputil_cx_util_error INTO DATA(x).
+        cl_abap_unit_assert=>assert_true( xsdbool( x->get_text( ) CS `XLSX_COLUMN_UNKNOWN` ) ).
+    ENDTRY.
+  ENDMETHOD.
+
   METHOD conversion_exit.
     TYPES:
       BEGIN OF ty_s_doc,
@@ -1411,6 +1445,7 @@ CLASS ltcl_read_more DEFINITION FINAL
     METHODS names_and_tables     FOR TESTING RAISING cx_static_check.
     METHODS table_by_name        FOR TESTING RAISING cx_static_check.
     METHODS text_notations       FOR TESTING RAISING cx_static_check.
+    METHODS cell_formats         FOR TESTING RAISING cx_static_check.
 
 ENDCLASS.
 
@@ -1663,6 +1698,33 @@ CLASS ltcl_read_more IMPLEMENTATION.
       CATCH zabaputil_cx_util_error INTO DATA(x).
         cl_abap_unit_assert=>assert_true( xsdbool( x->get_text( ) CS `XLSX_NAME_UNKNOWN` ) ).
     ENDTRY.
+  ENDMETHOD.
+
+  METHOD cell_formats.
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>xlsx_by_itab(
+        val    = rows( )
+        layout = VALUE #( header_style = VALUE #( fill = `1F4E78` color = `FFFFFF` )
+                          t_column     = VALUE #( ( name = `TEXT` style = VALUE #( wrap = abap_true halign = `center` ) )
+                                                  ( name = `NUM` format = `#,##0.00` ) ) ) ).
+    DATA(lt_format) = zabaputil_cl_util_xlsx=>factory_by_xlsx( lv_file )->get_cell_formats( ).
+
+    DATA(ls_head) = lt_format[ row = 1 col = 1 ].
+    cl_abap_unit_assert=>assert_equals( exp = abap_true
+                                        act = ls_head-bold ).
+    cl_abap_unit_assert=>assert_equals( exp = `FFFFFF`
+                                        act = ls_head-color ).
+    cl_abap_unit_assert=>assert_equals( exp = `1F4E78`
+                                        act = ls_head-fill ).
+    DATA(ls_text) = lt_format[ row = 2 col = 1 ].
+    cl_abap_unit_assert=>assert_equals( exp = abap_true
+                                        act = ls_text-wrap ).
+    cl_abap_unit_assert=>assert_equals( exp = `center`
+                                        act = ls_text-halign ).
+    cl_abap_unit_assert=>assert_equals( exp = `#,##0.00`
+                                        act = lt_format[ row = 3 col = 2 ]-format ).
+    " the two header cells and the cells of the two columns of three rows
+    cl_abap_unit_assert=>assert_equals( exp = 8
+                                        act = lines( lt_format ) ).
   ENDMETHOD.
 
   METHOD text_notations.

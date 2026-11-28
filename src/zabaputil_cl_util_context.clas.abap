@@ -3000,6 +3000,11 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE xstring.
 
+    "! Deprecated - raises always. A workbook is read with
+    "! zabaputil_cl_util_xlsx (itab_by_xlsx( ), get_table_ref( )): this
+    "! class cannot call the class that calls it. Kept so that a caller of
+    "! the old signature still activates; nothing in the catalog or its
+    "! consumers calls it.
     CLASS-METHODS conv_get_itab_by_xlsx
       IMPORTING
         val    TYPE xstring
@@ -3017,6 +3022,31 @@ CLASS zabaputil_cl_util_context DEFINITION
         !val          TYPE xstring
       RETURNING
         VALUE(result) TYPE ty_t_zip_file.
+
+    "! A ZIP archive opened, its files unpacked one at a time with
+    "! zip_get( ) - for an archive of which a few files are read. Raises,
+    "! like zip_unpack( ), for data that is no ZIP archive.
+    CLASS-METHODS zip_load
+      IMPORTING
+        !val          TYPE xstring
+      RETURNING
+        VALUE(result) TYPE REF TO object.
+
+    "! the names of the files of an archive opened with zip_load( )
+    CLASS-METHODS zip_names
+      IMPORTING
+        !zip          TYPE REF TO object
+      RETURNING
+        VALUE(result) TYPE string_table.
+
+    "! one file of an archive opened with zip_load( ), unpacked - raises
+    "! for a name the archive does not have, or a file that cannot be unpacked
+    CLASS-METHODS zip_get
+      IMPORTING
+        !zip          TYPE REF TO object
+        !name         TYPE clike
+      RETURNING
+        VALUE(result) TYPE xstring.
 
     " ========== XML pull reader ==========
 
@@ -3655,6 +3685,24 @@ CLASS zabaputil_cl_util_context DEFINITION
         val           TYPE xstring
       RETURNING
         VALUE(result) TYPE string.
+
+    "! The decimals of a currency: TCURX on premise, I_Currency on ABAP
+    "! Cloud - 2 for one the system does not list (SAP's rule: a currency
+    "! without an entry has two), and for one that cannot be read.
+    CLASS-METHODS currency_get_decimals
+      IMPORTING
+        currency      TYPE clike
+      RETURNING
+        VALUE(result) TYPE i.
+
+    "! The decimals a unit of measure is shown with: T006-DECAN on premise,
+    "! I_UnitOfMeasure on ABAP Cloud - -1 for a unit the system does not
+    "! list, or that cannot be read.
+    CLASS-METHODS unit_get_decimals
+      IMPORTING
+        unit          TYPE clike
+      RETURNING
+        VALUE(result) TYPE i.
 
   PROTECTED SECTION.
 
@@ -15240,6 +15288,93 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD zip_load.
+
+    CONSTANTS lc_signature TYPE x LENGTH 2 VALUE '504B'.
+    DATA lv_error TYPE string.
+
+    IF xstrlen( val ) < 4 OR val(2) <> lc_signature.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = `ZIP_PARSE_ERROR - the data is no ZIP archive`.
+    ENDIF.
+
+    TRY.
+        CREATE OBJECT result TYPE ('CL_ABAP_ZIP').
+        " a broken archive is reported with a classic exception, which
+        " would end the program with a dump
+        CALL METHOD result->('LOAD')
+          EXPORTING
+            zip             = val
+          EXCEPTIONS
+            zip_parse_error = 1
+            OTHERS          = 2.
+        IF sy-subrc <> 0.
+          lv_error = `ZIP_PARSE_ERROR - the data is no ZIP archive`.
+        ENDIF.
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val      = `ZIP_PARSE_ERROR - the ZIP archive cannot be read`
+            previous = x.
+    ENDTRY.
+    IF lv_error IS NOT INITIAL.
+      CLEAR result.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = lv_error.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD zip_names.
+
+    FIELD-SYMBOLS <files> TYPE ANY TABLE.
+    FIELD-SYMBOLS <file>  TYPE any.
+    FIELD-SYMBOLS <name>  TYPE any.
+
+    ASSIGN zip->('FILES') TO <files>.
+    IF <files> IS NOT ASSIGNED.
+      RETURN.
+    ENDIF.
+    LOOP AT <files> ASSIGNING <file>.
+      ASSIGN COMPONENT `NAME` OF STRUCTURE <file> TO <name>.
+      INSERT CONV string( <name> ) INTO TABLE result.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD zip_get.
+
+    DATA lv_name TYPE string.
+
+    lv_name = name.
+    TRY.
+        CALL METHOD zip->('GET')
+          EXPORTING
+            name                    = lv_name
+          IMPORTING
+            content                 = result
+          EXCEPTIONS
+            zip_index_error         = 1
+            zip_decompression_error = 2
+            OTHERS                  = 3.
+        DATA(lv_subrc) = sy-subrc.
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val      = |ZIP_PARSE_ERROR - the file { lv_name } of the archive cannot be unpacked|
+            previous = x.
+    ENDTRY.
+    IF lv_subrc <> 0.
+      CLEAR result.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |ZIP_PARSE_ERROR - the file { lv_name } of the archive cannot be unpacked|.
+    ENDIF.
+
+  ENDMETHOD.
+
   METHOD gzip_compress.
 
     DATA lv_class TYPE c LENGTH 12.
@@ -17022,6 +17157,101 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
       result = ( val * lv_factor_from + lv_add_from - lv_add_to ) / lv_factor_to.
 
     ENDIF.
+
+  ENDMETHOD.
+
+  METHOD currency_get_decimals.
+
+    DATA lr_row TYPE REF TO data.
+    FIELD-SYMBOLS <row>  TYPE any.
+    FIELD-SYMBOLS <comp> TYPE any.
+
+    result = 2.
+    DATA(lv_key) = to_upper( c_trim( currency ) ).
+    IF lv_key IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        IF check_abap_cloud( ) = abap_true.
+          DATA(lv_tab) = `I_CURRENCY`.
+        ELSE.
+          lv_tab = `TCURX`.
+        ENDIF.
+        CREATE DATA lr_row TYPE (lv_tab).
+        ASSIGN lr_row->* TO <row>.
+        IF check_abap_cloud( ) = abap_true.
+          SELECT SINGLE *
+            FROM (lv_tab)
+            WHERE currency = @lv_key
+            INTO CORRESPONDING FIELDS OF @<row>.
+        ELSE.
+          SELECT SINGLE *
+            FROM (lv_tab)
+            WHERE currkey = @lv_key
+            INTO CORRESPONDING FIELDS OF @<row>.
+        ENDIF.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+        ASSIGN COMPONENT `DECIMALS` OF STRUCTURE <row> TO <comp>.
+        IF <comp> IS NOT ASSIGNED.
+          ASSIGN COMPONENT `CURRDEC` OF STRUCTURE <row> TO <comp>.
+        ENDIF.
+        IF <comp> IS ASSIGNED.
+          result = <comp>.
+        ENDIF.
+      CATCH cx_root ##NO_HANDLER.
+        " no table to read - the rule of the system: two
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD unit_get_decimals.
+
+    DATA lr_row TYPE REF TO data.
+    FIELD-SYMBOLS <row>  TYPE any.
+    FIELD-SYMBOLS <comp> TYPE any.
+
+    result = -1.
+    DATA(lv_key) = to_upper( c_trim( unit ) ).
+    IF lv_key IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        IF check_abap_cloud( ) = abap_true.
+          DATA(lv_tab) = `I_UNITOFMEASURE`.
+        ELSE.
+          lv_tab = `T006`.
+        ENDIF.
+        CREATE DATA lr_row TYPE (lv_tab).
+        ASSIGN lr_row->* TO <row>.
+        IF check_abap_cloud( ) = abap_true.
+          SELECT SINGLE *
+            FROM (lv_tab)
+            WHERE unitofmeasure = @lv_key
+            INTO CORRESPONDING FIELDS OF @<row>.
+        ELSE.
+          SELECT SINGLE *
+            FROM (lv_tab)
+            WHERE msehi = @lv_key
+            INTO CORRESPONDING FIELDS OF @<row>.
+        ENDIF.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+        " the decimals for display - the view names them one way, T006 another
+        ASSIGN COMPONENT `UNITOFMEASUREDSPNMBROFDCMLS` OF STRUCTURE <row> TO <comp>.
+        IF <comp> IS NOT ASSIGNED.
+          ASSIGN COMPONENT `DECAN` OF STRUCTURE <row> TO <comp>.
+        ENDIF.
+        IF <comp> IS ASSIGNED.
+          result = <comp>.
+        ENDIF.
+      CATCH cx_root ##NO_HANDLER.
+        " no table to read - unknown
+    ENDTRY.
 
   ENDMETHOD.
 
