@@ -23,6 +23,11 @@ CLASS zabaputil_cl_pdf_form DEFINITION
     " `{HEADER-CITY}` for a component of a component. A name the data does
     " not have stays as it is written, so a form shows its placeholders
     " when it is printed without data.
+    "
+    " The data is a structure, or an object: its PUBLIC attributes are then
+    " what the form prints. A form names the class of such an object as its
+    " data class (zabaputil_if_pdf_data), which is how an editor knows the
+    " fields it can offer and what to show in a preview.
 
     CONSTANTS:
       BEGIN OF cs_type,
@@ -111,8 +116,33 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         header        TYPE string,
         "! a line in the bottom margin of every page
         footer        TYPE string,
+        "! the class whose public attributes the form prints - it implements
+        "! zabaputil_if_pdf_data; empty for a form that is printed from a structure
+        data_class    TYPE string,
         t_element     TYPE ty_t_element,
       END OF ty_s_form.
+
+    CONSTANTS:
+      BEGIN OF cs_field_kind,
+        "! a single value, to be named in a text
+        value  TYPE string VALUE `VALUE`,
+        "! an internal table, the rows of a table element
+        table  TYPE string VALUE `TABLE`,
+        "! a component of the rows of a table, a column
+        column TYPE string VALUE `COLUMN`,
+      END OF cs_field_kind.
+
+    TYPES:
+      BEGIN OF ty_s_field,
+        "! how a form names it: NAME, HEADER-CITY, T_ITEMS - for a column the
+        "! component of the row
+        path  TYPE string,
+        "! one of cs_field_kind
+        kind  TYPE string,
+        "! for a column: the path of its table
+        table TYPE string,
+      END OF ty_s_field.
+    TYPES ty_t_field TYPE STANDARD TABLE OF ty_s_field WITH EMPTY KEY.
 
     "! An empty form: A4 portrait, 20 mm margins
     CLASS-METHODS new_form
@@ -121,7 +151,8 @@ CLASS zabaputil_cl_pdf_form DEFINITION
 
     "! The document of a form, to add to it or to look at its pages
     "! @parameter val  | the form
-    "! @parameter data | a structure with the components the form names
+    "! @parameter data | a structure with the components the form names, or an
+    "!                   object with them as public attributes
     CLASS-METHODS build
       IMPORTING
         val           TYPE ty_s_form
@@ -131,7 +162,8 @@ CLASS zabaputil_cl_pdf_form DEFINITION
 
     "! The PDF file of a form
     "! @parameter val  | the form
-    "! @parameter data | a structure with the components the form names
+    "! @parameter data | a structure with the components the form names, or an
+    "!                   object with them as public attributes
     CLASS-METHODS render
       IMPORTING
         val           TYPE ty_s_form
@@ -139,9 +171,28 @@ CLASS zabaputil_cl_pdf_form DEFINITION
       RETURNING
         VALUE(result) TYPE xstring.
 
+    "! What the data offers a form: its values, its tables and their columns
+    "! @parameter data | a structure, or an object with public attributes
+    CLASS-METHODS fields
+      IMPORTING
+        data          TYPE any
+      RETURNING
+        VALUE(result) TYPE ty_t_field.
+
+    "! An instance of a data class with the values for a preview. Raises
+    "! when the name is no class that implements zabaputil_if_pdf_data, or
+    "! one that cannot be created without parameters
+    "! @parameter val | the name of the class, as a form carries it
+    CLASS-METHODS data_sample
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_if_pdf_data.
+
     "! A text with its placeholders replaced by the components of the data
     "! @parameter val  | the text, `Dear {NAME}`
-    "! @parameter data | a structure; without it the text comes back as it is
+    "! @parameter data | a structure or an object; without it the text comes
+    "!                   back as it is
     CLASS-METHODS resolve
       IMPORTING
         val           TYPE clike
@@ -167,6 +218,33 @@ CLASS zabaputil_cl_pdf_form DEFINITION
       EXPORTING
         found TYPE abap_bool
         text  TYPE string.
+
+    "! A component of a structure, or a public attribute of an object
+    "! @parameter node   | the structure or the object reference
+    "! @parameter name   | the name, upper case
+    "! @parameter result | the component; initial when the node has none of that name
+    CLASS-METHODS component_of
+      IMPORTING
+        node          TYPE any
+        name          TYPE string
+      RETURNING
+        VALUE(result) TYPE REF TO data.
+
+    "! The names of the components of a structure, or of the public instance
+    "! attributes of an object
+    CLASS-METHODS component_names
+      IMPORTING
+        node          TYPE any
+      RETURNING
+        VALUE(result) TYPE string_table.
+
+    CLASS-METHODS fields_of
+      IMPORTING
+        node   TYPE any
+        prefix TYPE string
+        depth  TYPE i
+      CHANGING
+        result TYPE ty_t_field.
 
     "! The font of an element
     CLASS-METHODS element_font
@@ -417,9 +495,9 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
   METHOD component_text.
 
     DATA lv_path TYPE string.
+    DATA lr_node TYPE REF TO data.
 
-    FIELD-SYMBOLS <node>      TYPE any.
-    FIELD-SYMBOLS <component> TYPE any.
+    FIELD-SYMBOLS <node> TYPE any.
 
     CLEAR found.
     CLEAR text.
@@ -436,26 +514,186 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
     ASSIGN data TO <node>.
     LOOP AT lt_part INTO DATA(lv_part).
-      " only a structure has components
-      DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( <node> ).
-      IF lv_kind <> `u` AND lv_kind <> `v`.
+      lr_node = component_of( node = <node>
+                              name = lv_part ).
+      IF lr_node IS NOT BOUND.
         RETURN.
       ENDIF.
-      UNASSIGN <component>.
-      ASSIGN COMPONENT lv_part OF STRUCTURE <node> TO <component>.
-      IF <component> IS NOT ASSIGNED.
-        RETURN.
-      ENDIF.
-      ASSIGN <component> TO <node>.
+      ASSIGN lr_node->* TO <node>.
     ENDLOOP.
 
     " a structure, a table or a reference is no text
-    lv_kind = zabaputil_cl_util_context=>rtti_get_type_kind( <node> ).
+    DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( <node> ).
     IF lv_kind = `u` OR lv_kind = `v` OR lv_kind = `h` OR lv_kind = `l` OR lv_kind = `r`.
       RETURN.
     ENDIF.
     text = |{ <node> }|.
     found = abap_true.
+
+  ENDMETHOD.
+
+  METHOD component_of.
+
+    DATA lo_object TYPE REF TO object.
+
+    FIELD-SYMBOLS <component> TYPE any.
+
+    DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( node ).
+    CASE lv_kind.
+
+      WHEN `u` OR `v`.
+        ASSIGN COMPONENT name OF STRUCTURE node TO <component>.
+
+      WHEN `r`.
+        " an attribute of an object - a public one: what a class keeps to
+        " itself is no part of its interface to a form
+        TRY.
+            lo_object ?= node.
+          CATCH cx_sy_move_cast_error.
+            RETURN.
+        ENDTRY.
+        IF lo_object IS NOT BOUND.
+          RETURN.
+        ENDIF.
+        DATA(lt_name) = component_names( lo_object ).
+        IF NOT line_exists( lt_name[ table_line = name ] ).
+          RETURN.
+        ENDIF.
+        ASSIGN lo_object->(name) TO <component>.
+
+    ENDCASE.
+
+    IF <component> IS ASSIGNED.
+      result = REF #( <component> ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD component_names.
+
+    DATA lo_object TYPE REF TO object.
+
+    DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( node ).
+    CASE lv_kind.
+
+      WHEN `u` OR `v` OR `h`.
+        " of a table: the components of its rows
+        TRY.
+            LOOP AT zabaputil_cl_util_context=>rtti_get_t_attri_by_any( node ) ASSIGNING FIELD-SYMBOL(<component>).
+              INSERT CONV string( <component>-name ) INTO TABLE result.
+            ENDLOOP.
+          CATCH cx_root ##NO_HANDLER.
+            " rows that are no structure have no components
+        ENDTRY.
+
+      WHEN `r`.
+        TRY.
+            lo_object ?= node.
+          CATCH cx_sy_move_cast_error.
+            RETURN.
+        ENDTRY.
+        IF lo_object IS NOT BOUND.
+          RETURN.
+        ENDIF.
+        LOOP AT zabaputil_cl_util_context=>rtti_get_t_attri_by_oref( lo_object ) ASSIGNING FIELD-SYMBOL(<attribute>).
+          IF <attribute>-visibility = zabaputil_cl_util_context=>cv_objectdescr_public
+              AND <attribute>-is_class = abap_false AND <attribute>-is_constant = abap_false.
+            INSERT CONV string( <attribute>-name ) INTO TABLE result.
+          ENDIF.
+        ENDLOOP.
+
+    ENDCASE.
+
+  ENDMETHOD.
+
+  METHOD fields.
+
+    fields_of( EXPORTING node   = data
+                         prefix = ``
+                         depth  = 1
+               CHANGING  result = result ).
+
+  ENDMETHOD.
+
+  METHOD fields_of.
+
+    DATA lr_component TYPE REF TO data.
+
+    FIELD-SYMBOLS <component> TYPE any.
+
+    LOOP AT component_names( node ) INTO DATA(lv_name).
+      lr_component = component_of( node = node
+                                   name = lv_name ).
+      IF lr_component IS NOT BOUND.
+        CONTINUE.
+      ENDIF.
+      ASSIGN lr_component->* TO <component>.
+      DATA(lv_path) = prefix && lv_name.
+
+      DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( <component> ).
+      CASE lv_kind.
+
+        WHEN `h`.
+          INSERT VALUE #( path = lv_path
+                          kind = cs_field_kind-table ) INTO TABLE result.
+          LOOP AT component_names( <component> ) INTO DATA(lv_column).
+            INSERT VALUE #( path  = lv_column
+                            kind  = cs_field_kind-column
+                            table = lv_path ) INTO TABLE result.
+          ENDLOOP.
+
+        WHEN `u` OR `v` OR `r`.
+          " three levels are what a form can reasonably name, and an object
+          " that points back at its owner must not be followed for ever
+          IF depth < 3.
+            fields_of( EXPORTING node   = <component>
+                                 prefix = |{ lv_path }-|
+                                 depth  = depth + 1
+                       CHANGING  result = result ).
+          ENDIF.
+
+        WHEN `l`.
+          " a data reference is no value a text can name
+          CONTINUE.
+
+        WHEN OTHERS.
+          INSERT VALUE #( path = lv_path
+                          kind = cs_field_kind-value ) INTO TABLE result.
+
+      ENDCASE.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD data_sample.
+
+    DATA lo_object TYPE REF TO object.
+    DATA li_data   TYPE REF TO zabaputil_if_pdf_data.
+
+    " the name of the interface from a reference typed with it: a renamed
+    " copy of this class asks for its own interface
+    DATA(lv_interface) = zabaputil_cl_util_context=>rtti_get_ref_type_name( li_data ).
+    DATA(lv_class) = to_upper( condense( val ) ).
+
+    " asked of the class descriptor, before anything is created: a class
+    " that is no data class is never instantiated from a name somebody typed
+    IF lv_class IS INITIAL OR zabaputil_cl_util_context=>rtti_check_class_impl_intf( class = lv_class
+                                                                                   intf  = lv_interface ) = abap_false.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |PDF: { lv_class } is no class that implements { lv_interface }|.
+    ENDIF.
+
+    TRY.
+        CREATE OBJECT lo_object TYPE (lv_class).
+        result ?= lo_object.
+      CATCH cx_root INTO DATA(lx_create).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val      = |PDF: { lv_class } cannot be created - a data class needs a constructor without parameters|
+            previous = lx_create.
+    ENDTRY.
+    result->fill_sample( ).
 
   ENDMETHOD.
 
@@ -517,16 +755,14 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
     lv_bytes = element-image.
     IF with_data = abap_true AND element-source IS NOT INITIAL.
-      DATA(lv_source) = to_upper( element-source ).
-      DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( data ).
-      IF lv_kind = `u` OR lv_kind = `v`.
-        ASSIGN COMPONENT lv_source OF STRUCTURE data TO <component>.
-        IF <component> IS ASSIGNED.
-          " an xstring, or raw bytes of a fixed length
-          lv_kind = zabaputil_cl_util_context=>rtti_get_type_kind( <component> ).
-          IF lv_kind = `y` OR lv_kind = `X`.
-            lv_bytes = <component>.
-          ENDIF.
+      DATA(lr_component) = component_of( node = data
+                                         name = to_upper( element-source ) ).
+      IF lr_component IS BOUND.
+        ASSIGN lr_component->* TO <component>.
+        " an xstring, or raw bytes of a fixed length
+        DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( <component> ).
+        IF lv_kind = `y` OR lv_kind = `X`.
+          lv_bytes = <component>.
         ENDIF.
       ENDIF.
     ENDIF.
@@ -630,15 +866,13 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
     " the rows: the table the data has under the name of the source
     IF with_data = abap_true AND element-source IS NOT INITIAL.
-      DATA(lv_source) = to_upper( element-source ).
-      DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( data ).
-      IF lv_kind = `u` OR lv_kind = `v`.
-        ASSIGN COMPONENT lv_source OF STRUCTURE data TO <component>.
-        IF <component> IS ASSIGNED.
-          lv_kind = zabaputil_cl_util_context=>rtti_get_type_kind( <component> ).
-          IF lv_kind = `h`.
-            ASSIGN <component> TO <rows>.
-          ENDIF.
+      DATA(lr_component) = component_of( node = data
+                                         name = to_upper( element-source ) ).
+      IF lr_component IS BOUND.
+        ASSIGN lr_component->* TO <component>.
+        DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( <component> ).
+        IF lv_kind = `h`.
+          ASSIGN <component> TO <rows>.
         ENDIF.
       ENDIF.
     ENDIF.

@@ -1,3 +1,39 @@
+"! An object as the data of a form: what is public is printed, the rest is not
+CLASS lcl_data DEFINITION FINAL.
+
+  PUBLIC SECTION.
+
+    TYPES:
+      BEGIN OF ty_s_head,
+        city TYPE string,
+      END OF ty_s_head.
+
+    CONSTANTS c_fixed TYPE string VALUE `constant`.
+    CLASS-DATA gv_static TYPE string.
+    DATA shown  TYPE string.
+    DATA head   TYPE ty_s_head.
+    DATA t_rows TYPE string_table.
+    DATA other  TYPE REF TO lcl_data.
+
+    METHODS constructor.
+
+  PRIVATE SECTION.
+
+    DATA hidden TYPE string.
+
+ENDCLASS.
+
+CLASS lcl_data IMPLEMENTATION.
+
+  METHOD constructor.
+    shown = `visible`.
+    hidden = `secret`.
+    head-city = `Bonn`.
+    gv_static = `static`.
+  ENDMETHOD.
+
+ENDCLASS.
+
 CLASS ltcl_form DEFINITION FINAL
   FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
 
@@ -49,6 +85,15 @@ CLASS ltcl_form DEFINITION FINAL
     METHODS title_of_the_document   FOR TESTING.
     METHODS render_file             FOR TESTING.
     METHODS unknown_type_is_skipped FOR TESTING.
+    METHODS object_public_attributes FOR TESTING.
+    METHODS object_through_reference FOR TESTING.
+    METHODS object_table_rows       FOR TESTING.
+    METHODS fields_of_a_structure   FOR TESTING.
+    METHODS fields_of_an_object     FOR TESTING.
+    METHODS fields_stop_at_a_cycle  FOR TESTING.
+    METHODS data_sample_of_a_class  FOR TESTING.
+    METHODS data_sample_refused     FOR TESTING.
+    METHODS form_with_its_data_class FOR TESTING.
 
     " a PNG file of 2 x 2 pixels
     METHODS image_rgb
@@ -437,6 +482,154 @@ CLASS ltcl_form IMPLEMENTATION.
     DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( ms_form ).
     cl_abap_unit_assert=>assert_equals( exp = 1 act = lo_pdf->page_count( ) ).
     cl_abap_unit_assert=>assert_initial( lo_pdf->page( 1 )->content( ) ).
+  ENDMETHOD.
+
+  METHOD object_public_attributes.
+    DATA(lo_data) = NEW lcl_data( ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = `visible in Bonn`
+        act = zabaputil_cl_pdf_form=>resolve( val  = `{SHOWN} in {head-city}`
+                                              data = lo_data ) ).
+    " private, static, a constant, a method name, nothing at all: no part
+    " of what the object hands to a form
+    cl_abap_unit_assert=>assert_equals(
+        exp = `{HIDDEN} {GV_STATIC} {C_FIXED} {CONSTRUCTOR} {NONE}`
+        act = zabaputil_cl_pdf_form=>resolve( val  = `{HIDDEN} {GV_STATIC} {C_FIXED} {CONSTRUCTOR} {NONE}`
+                                              data = lo_data ) ).
+    " a table and an object are no text
+    cl_abap_unit_assert=>assert_equals(
+        exp = `{T_ROWS} {OTHER}`
+        act = zabaputil_cl_pdf_form=>resolve( val  = `{T_ROWS} {OTHER}`
+                                              data = lo_data ) ).
+  ENDMETHOD.
+
+  METHOD object_through_reference.
+    " an attribute that is an object is a level of the path like a structure
+    DATA(lo_data) = NEW lcl_data( ).
+    lo_data->other = NEW lcl_data( ).
+    lo_data->other->shown = `inner`.
+    cl_abap_unit_assert=>assert_equals(
+        exp = `inner Bonn`
+        act = zabaputil_cl_pdf_form=>resolve( val  = `{OTHER-SHOWN} {OTHER-HEAD-CITY}`
+                                              data = lo_data ) ).
+    " an initial reference leads nowhere
+    CLEAR lo_data->other.
+    cl_abap_unit_assert=>assert_equals(
+        exp = `{OTHER-SHOWN}`
+        act = zabaputil_cl_pdf_form=>resolve( val  = `{OTHER-SHOWN}`
+                                              data = lo_data ) ).
+  ENDMETHOD.
+
+  METHOD object_table_rows.
+    DATA(lo_demo) = NEW zabaputil_cl_pdf_data_demo( ).
+    lo_demo->zabaputil_if_pdf_data~fill_sample( ).
+    ms_form-t_element = VALUE #(
+        ( type     = zabaputil_cl_pdf_form=>cs_type-text
+          text     = `Delivery {VBELN} to {ADDRESS-CITY}` )
+        ( type     = zabaputil_cl_pdf_form=>cs_type-table
+          source   = `t_items`
+          t_column = VALUE #( ( name = `posnr` title = `Item`     width = 20 align = `R` )
+                              ( name = `arktx` title = `Material` width = 0  align = `L` ) ) ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                 data = lo_demo ).
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = shown( pdf  = lo_pdf
+                                                     page = 1
+                                                     text = `Delivery 80004711 to Bonn` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = shown( pdf  = lo_pdf
+                                                     page = 1
+                                                     text = `Washer 8.4 mm` ) ).
+    " the text, a header row and four rows of two cells
+    cl_abap_unit_assert=>assert_equals( exp = 11
+                                        act = count( val = lo_pdf->page( 1 )->content( )
+                                                     sub = ` Tj` ) ).
+  ENDMETHOD.
+
+  METHOD fields_of_a_structure.
+    DATA(lt_field) = zabaputil_cl_pdf_form=>fields( ms_data ).
+    cl_abap_unit_assert=>assert_equals( exp = 7 act = lines( lt_field ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = VALUE zabaputil_cl_pdf_form=>ty_s_field( path = `NAME` kind = `VALUE` )
+        act = lt_field[ 1 ] ).
+    " a structure is a level of the path, not a field of its own
+    cl_abap_unit_assert=>assert_equals(
+        exp = VALUE zabaputil_cl_pdf_form=>ty_s_field( path = `HEAD-CITY` kind = `VALUE` )
+        act = lt_field[ 3 ] ).
+    " a table, then one row per component of its rows
+    cl_abap_unit_assert=>assert_equals(
+        exp = VALUE zabaputil_cl_pdf_form=>ty_s_field( path = `T_ITEMS` kind = `TABLE` )
+        act = lt_field[ 4 ] ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = VALUE zabaputil_cl_pdf_form=>ty_s_field( path = `TEXT` kind = `COLUMN` table = `T_ITEMS` )
+        act = lt_field[ 6 ] ).
+    " a text has no fields
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_pdf_form=>fields( `text` ) ).
+  ENDMETHOD.
+
+  METHOD fields_of_an_object.
+    DATA(lo_demo) = NEW zabaputil_cl_pdf_data_demo( ).
+    DATA(lt_field) = zabaputil_cl_pdf_form=>fields( lo_demo ).
+    cl_abap_unit_assert=>assert_true( xsdbool( line_exists( lt_field[ path = `VBELN` kind = `VALUE` ] ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( line_exists( lt_field[ path = `ADDRESS-CITY` kind = `VALUE` ] ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( line_exists( lt_field[ path = `T_ITEMS` kind = `TABLE` ] ) ) ).
+    cl_abap_unit_assert=>assert_true(
+        xsdbool( line_exists( lt_field[ path = `MATNR` kind = `COLUMN` table = `T_ITEMS` ] ) ) ).
+    " four values, three of the address, the table and its five columns
+    cl_abap_unit_assert=>assert_equals( exp = 13 act = lines( lt_field ) ).
+
+    " only what is public: no private attribute, no constant, no static
+    DATA(lt_local) = zabaputil_cl_pdf_form=>fields( NEW lcl_data( ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( line_exists( lt_local[ path = `SHOWN` ] ) ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( line_exists( lt_local[ path = `HIDDEN` ] ) ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( line_exists( lt_local[ path = `C_FIXED` ] ) ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( line_exists( lt_local[ path = `GV_STATIC` ] ) ) ).
+    " rows that are no structure: a table without columns
+    cl_abap_unit_assert=>assert_true( xsdbool( line_exists( lt_local[ path = `T_ROWS` kind = `TABLE` ] ) ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( line_exists( lt_local[ table = `T_ROWS` ] ) ) ).
+  ENDMETHOD.
+
+  METHOD fields_stop_at_a_cycle.
+    " an object that points at itself is followed three levels deep
+    DATA(lo_data) = NEW lcl_data( ).
+    lo_data->other = lo_data.
+    DATA(lt_field) = zabaputil_cl_pdf_form=>fields( lo_data ).
+    cl_abap_unit_assert=>assert_true( xsdbool( line_exists( lt_field[ path = `OTHER-OTHER-SHOWN` ] ) ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( line_exists( lt_field[ path = `OTHER-OTHER-OTHER-SHOWN` ] ) ) ).
+  ENDMETHOD.
+
+  METHOD data_sample_of_a_class.
+    DATA(li_data) = zabaputil_cl_pdf_form=>data_sample( `zabaputil_cl_pdf_data_demo` ).
+    cl_abap_unit_assert=>assert_bound( li_data ).
+    cl_abap_unit_assert=>assert_equals( exp = `Ada Lovelace`
+                                        act = zabaputil_cl_pdf_form=>resolve( val  = `{NAME}`
+                                                                              data = li_data ) ).
+  ENDMETHOD.
+
+  METHOD data_sample_refused.
+    " a class that is no data class, a name that is no class, no name
+    DATA lt_name TYPE string_table.
+    lt_name = VALUE #( ( `ZABAPUTIL_CL_PDF_WRITER` ) ( `ZABAPUTIL_IF_PDF_DATA` ) ( `ZABAPUTIL_NO_SUCH_CLASS` ) ( `` ) ).
+    LOOP AT lt_name INTO DATA(lv_name).
+      TRY.
+          zabaputil_cl_pdf_form=>data_sample( lv_name ).
+          cl_abap_unit_assert=>fail( lv_name ).
+        CATCH zabaputil_cx_util_error ##NO_HANDLER.
+      ENDTRY.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD form_with_its_data_class.
+    " what an editor does for its preview: the form names its class
+    ms_form-data_class = `ZABAPUTIL_CL_PDF_DATA_DEMO`.
+    ms_form-t_element = VALUE #( ( type = zabaputil_cl_pdf_form=>cs_type-text
+                                   text = `Order {BSTNK}` ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                 data = zabaputil_cl_pdf_form=>data_sample( ms_form-data_class ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = shown( pdf  = lo_pdf
+                                                     page = 1
+                                                     text = `Order PO-2026-118` ) ).
   ENDMETHOD.
 
 ENDCLASS.
