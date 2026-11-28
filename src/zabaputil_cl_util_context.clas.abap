@@ -15117,22 +15117,23 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     CONSTANTS lc_signature TYPE x LENGTH 2 VALUE '504B'.
     DATA lo_zip    TYPE REF TO object.
     DATA lv_name   TYPE string.
+    DATA lv_error  TYPE string.
     DATA ls_result LIKE LINE OF result.
 
     FIELD-SYMBOLS <files> TYPE ANY TABLE.
     FIELD-SYMBOLS <file>  TYPE any.
     FIELD-SYMBOLS <name>  TYPE any.
 
-    TRY.
+    " every ZIP archive starts with PK. Checked here, for the same answer
+    " on every runtime: what the ZIP class does with other bytes differs,
+    " and the transpiled one takes them without a word
+    IF xstrlen( val ) < 4 OR val(2) <> lc_signature.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = `ZIP_PARSE_ERROR - the data is no ZIP archive`.
+    ENDIF.
 
-        " every ZIP archive starts with PK. Checked here, for the same
-        " answer on every runtime: what the ZIP class does with other
-        " bytes differs, and the transpiled one takes them without a word
-        IF xstrlen( val ) < 4 OR val(2) <> lc_signature.
-          RAISE EXCEPTION TYPE zabaputil_cx_util_error
-            EXPORTING
-              val = `ZIP_PARSE_ERROR - the data is no ZIP archive`.
-        ENDIF.
+    TRY.
 
         CREATE OBJECT lo_zip TYPE ('CL_ABAP_ZIP').
         " LOAD and GET report a broken archive with a classic exception -
@@ -15145,40 +15146,45 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
             zip_parse_error = 1
             OTHERS          = 2.
         IF sy-subrc <> 0.
-          RAISE EXCEPTION TYPE zabaputil_cx_util_error
-            EXPORTING
-              val = `ZIP_PARSE_ERROR - the data is no ZIP archive`.
+          lv_error = `ZIP_PARSE_ERROR - the data is no ZIP archive`.
+        ELSE.
+          ASSIGN lo_zip->('FILES') TO <files>.
+          LOOP AT <files> ASSIGNING <file>.
+            ASSIGN COMPONENT `NAME` OF STRUCTURE <file> TO <name>.
+            lv_name = <name>.
+
+            ls_result = VALUE #( name = lv_name ).
+            CALL METHOD lo_zip->('GET')
+              EXPORTING
+                name                    = lv_name
+              IMPORTING
+                content                 = ls_result-content
+              EXCEPTIONS
+                zip_index_error         = 1
+                zip_decompression_error = 2
+                OTHERS                  = 3.
+            IF sy-subrc <> 0.
+              lv_error = |ZIP_PARSE_ERROR - the file { lv_name } of the archive cannot be unpacked|.
+              EXIT.
+            ENDIF.
+            INSERT ls_result INTO TABLE result.
+          ENDLOOP.
         ENDIF.
 
-        ASSIGN lo_zip->('FILES') TO <files>.
-        LOOP AT <files> ASSIGNING <file>.
-          ASSIGN COMPONENT `NAME` OF STRUCTURE <file> TO <name>.
-          lv_name = <name>.
-
-          ls_result = VALUE #( name = lv_name ).
-          CALL METHOD lo_zip->('GET')
-            EXPORTING
-              name                    = lv_name
-            IMPORTING
-              content                 = ls_result-content
-            EXCEPTIONS
-              zip_index_error         = 1
-              zip_decompression_error = 2
-              OTHERS                  = 3.
-          IF sy-subrc <> 0.
-            RAISE EXCEPTION TYPE zabaputil_cx_util_error
-              EXPORTING
-                val = |ZIP_PARSE_ERROR - the file { lv_name } of the archive cannot be unpacked|.
-          ENDIF.
-          INSERT ls_result INTO TABLE result.
-        ENDLOOP.
-
-      CATCH zabaputil_cx_util_error INTO DATA(lx_own).
-        " raised above, with its text - not wrapped once more
-        RAISE EXCEPTION lx_own.
       CATCH cx_root INTO DATA(x).
-        RAISE EXCEPTION TYPE zabaputil_cx_util_error EXPORTING val = x.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val      = `ZIP_PARSE_ERROR - the ZIP archive cannot be read`
+            previous = x.
     ENDTRY.
+
+    " raised behind the TRY: in it, the handler above would wrap it again
+    IF lv_error IS NOT INITIAL.
+      CLEAR result.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = lv_error.
+    ENDIF.
 
   ENDMETHOD.
 

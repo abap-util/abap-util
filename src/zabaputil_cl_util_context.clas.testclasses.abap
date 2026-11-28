@@ -3268,7 +3268,8 @@ CLASS ltcl_tab_by_names IMPLEMENTATION.
                      occ = 500 ).
     cl_abap_unit_assert=>assert_equals( exp = 500
                                         act = strlen( <text> ) ).
-    ASSIGN COMPONENT 3 OF STRUCTURE <row> TO FIELD-SYMBOL(<none>).
+    " two names, two components
+    ASSIGN COMPONENT 3 OF STRUCTURE <row> TO <text>.
     cl_abap_unit_assert=>assert_subrc( exp = 4 ).
   ENDMETHOD.
 

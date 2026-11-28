@@ -393,6 +393,14 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
       RETURNING
         VALUE(result) TYPE ty_t_out_col.
 
+    "! the field of that name - initial when the row has none
+    CLASS-METHODS field_find
+      IMPORTING
+        t_field       TYPE ty_t_field
+        name          TYPE string
+      RETURNING
+        VALUE(result) TYPE ty_s_field.
+
     "! a function of a totals row and its number in SUBTOTAL( ) - code 0
     "! for a text that is none, a label
     CLASS-METHODS total_function
@@ -509,6 +517,16 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
         eof    TYPE abap_bool
       CHANGING
         row    TYPE i.
+
+    "! what a c element holds: its text by the type the element names
+    METHODS cell_read
+      IMPORTING
+        cell_type TYPE string
+        style     TYPE string
+        text      TYPE string
+      EXPORTING
+        kind      TYPE string
+        value     TYPE string.
 
     "! a number cell by the format it is shown in: a number, a date, a time
     METHODS number_cell
@@ -1083,6 +1101,14 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     ELSEIF type_kind = zabaputil_cl_util_context=>cv_typedescr_typekind_hex
         OR type_kind = zabaputil_cl_util_context=>cv_typedescr_typekind_xstring.
       result = cs_cat-hex.
+    ELSEIF type_kind <> zabaputil_cl_util_context=>cv_typedescr_typekind_table
+        AND type_kind <> zabaputil_cl_util_context=>cv_typedescr_typekind_dref
+        AND type_kind <> zabaputil_cl_util_context=>cv_typedescr_typekind_oref
+        AND type_kind <> zabaputil_cl_util_context=>cv_typedescr_typekind_struct1
+        AND type_kind <> zabaputil_cl_util_context=>cv_typedescr_typekind_struct2.
+      " an elementary type a later release added (utclong) - written the
+      " way a string template shows it
+      result = cs_cat-text.
     ENDIF.
 
   ENDMETHOD.
@@ -1123,12 +1149,8 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
                                       off = 1 ).
         ENDIF.
       ELSE.
-        LOOP AT t_field INTO ls_field.
-          IF ls_field-name = lv_name.
-            EXIT.
-          ENDIF.
-          CLEAR ls_field.
-        ENDLOOP.
+        ls_field = field_find( t_field = t_field
+                               name    = lv_name ).
         IF ls_field IS INITIAL.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
             EXPORTING
@@ -1210,6 +1232,17 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
 
       INSERT ls_col INTO TABLE result.
     ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD field_find.
+
+    LOOP AT t_field INTO result.
+      IF result-name = name.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+    CLEAR result.
 
   ENDMETHOD.
 
@@ -1928,19 +1961,20 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
               " the formats a cell names - cellStyleXfs holds xf elements too
               lv_cell = abap_true.
             WHEN `xf`.
-              IF lv_cell = abap_true.
-                lv_id = hex_to_int( attr( t_attribute = lt_attr
-                                          name        = `numFmtId` ) ).
-                DATA(lv_code) = ``.
-                LOOP AT lt_fmt REFERENCE INTO DATA(lr_fmt).
-                  IF lr_fmt->id = lv_id.
-                    lv_code = lr_fmt->code.
-                    EXIT.
-                  ENDIF.
-                ENDLOOP.
-                INSERT format_kind( id   = lv_id
-                                    code = lv_code ) INTO TABLE mt_style_kind.
+              IF lv_cell = abap_false.
+                CONTINUE.
               ENDIF.
+              lv_id = hex_to_int( attr( t_attribute = lt_attr
+                                        name        = `numFmtId` ) ).
+              DATA(lv_code) = ``.
+              LOOP AT lt_fmt REFERENCE INTO DATA(lr_fmt).
+                IF lr_fmt->id = lv_id.
+                  lv_code = lr_fmt->code.
+                  EXIT.
+                ENDIF.
+              ENDLOOP.
+              INSERT format_kind( id   = lv_id
+                                  code = lv_code ) INTO TABLE mt_style_kind.
           ENDCASE.
         WHEN zabaputil_cl_util_context=>cs_xml_node-close.
           IF lv_name = `cellXfs`.
@@ -2097,7 +2131,6 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     DATA lv_text   TYPE string.
     DATA lv_take   TYPE abap_bool.
     DATA lv_ruby   TYPE abap_bool.
-    DATA lv_in_row TYPE abap_bool.
     DATA lv_col    TYPE i.
     DATA lv_type   TYPE string.
     DATA lv_style  TYPE string.
@@ -2126,7 +2159,6 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
               ELSE.
                 row = row + 1.
               ENDIF.
-              lv_in_row = abap_true.
               lv_col = 0.
             WHEN `c`.
               lv_ref = attr( t_attribute = lt_attr
@@ -2165,55 +2197,16 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
               CLEAR ls_cell.
               ls_cell-row = row.
               ls_cell-col = lv_col.
-              CASE lv_type.
-                WHEN `s`.
-                  " the index of the text in the shared strings, from 0
-                  IF lv_text IS NOT INITIAL AND lv_text CO cv_digits.
-                    DATA(lv_index) = CONV i( lv_text ) + 1.
-                    IF lv_index <= lines( mt_shared ).
-                      ls_cell-value = mt_shared[ lv_index ].
-                    ENDIF.
-                  ENDIF.
-                  ls_cell-kind = cs_kind-text.
-                WHEN `inlineStr` OR `str`.
-                  ls_cell-value = text_decode( lv_text ).
-                  ls_cell-kind = cs_kind-text.
-                WHEN `b`.
-                  ls_cell-kind = cs_kind-boolean.
-                  IF lv_text = `1`.
-                    ls_cell-value = `X`.
-                  ELSE.
-                    " a FALSE is a value: the cell is there, and empty
-                    INSERT ls_cell INTO TABLE t_cell.
-                  ENDIF.
-                WHEN `e`.
-                  ls_cell-value = lv_text.
-                  ls_cell-kind = cs_kind-error.
-                WHEN `d`.
-                  " a date in ISO 8601, as a strict workbook writes it
-                  ls_cell-value = lv_text.
-                  IF strlen( lv_text ) > 10.
-                    ls_cell-kind = cs_kind-timestamp.
-                    IF strlen( lv_text ) > 19.
-                      ls_cell-value = substring( val = lv_text
-                                                 len = 19 ).
-                    ENDIF.
-                  ELSE.
-                    ls_cell-kind = cs_kind-date.
-                  ENDIF.
-                WHEN OTHERS.
-                  IF lv_text IS NOT INITIAL.
-                    number_cell( EXPORTING val   = lv_text
-                                           style = lv_style
-                                 IMPORTING kind  = ls_cell-kind
-                                           value = ls_cell-value ).
-                  ENDIF.
-              ENDCASE.
-              IF ls_cell-value IS NOT INITIAL.
+              cell_read( EXPORTING cell_type = lv_type
+                                   style     = lv_style
+                                   text      = lv_text
+                         IMPORTING kind      = ls_cell-kind
+                                   value     = ls_cell-value ).
+              " a FALSE is a value: its cell is there, and empty
+              IF ls_cell-value IS NOT INITIAL OR ls_cell-kind = cs_kind-boolean.
                 INSERT ls_cell INTO TABLE t_cell.
               ENDIF.
             WHEN `row`.
-              lv_in_row = abap_false.
               IF t_cell IS NOT INITIAL.
                 RETURN.
               ENDIF.
@@ -2228,6 +2221,55 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
 
       ENDCASE.
     ENDDO.
+
+  ENDMETHOD.
+
+  METHOD cell_read.
+
+    CLEAR kind.
+    CLEAR value.
+
+    CASE cell_type.
+      WHEN `s`.
+        " the index of the text in the shared strings, from 0
+        kind = cs_kind-text.
+        IF text IS NOT INITIAL AND text CO cv_digits.
+          DATA(lv_index) = CONV i( text ) + 1.
+          IF lv_index <= lines( mt_shared ).
+            value = mt_shared[ lv_index ].
+          ENDIF.
+        ENDIF.
+      WHEN `inlineStr` OR `str`.
+        kind = cs_kind-text.
+        value = text_decode( text ).
+      WHEN `b`.
+        kind = cs_kind-boolean.
+        IF text = `1`.
+          value = `X`.
+        ENDIF.
+      WHEN `e`.
+        kind = cs_kind-error.
+        value = text.
+      WHEN `d`.
+        " a date in ISO 8601, as a strict workbook writes it
+        value = text.
+        IF strlen( text ) > 10.
+          kind = cs_kind-timestamp.
+          IF strlen( text ) > 19.
+            value = substring( val = text
+                               len = 19 ).
+          ENDIF.
+        ELSE.
+          kind = cs_kind-date.
+        ENDIF.
+      WHEN OTHERS.
+        IF text IS NOT INITIAL.
+          number_cell( EXPORTING val   = text
+                                 style = style
+                       IMPORTING kind  = kind
+                                 value = value ).
+        ENDIF.
+    ENDCASE.
 
   ENDMETHOD.
 
@@ -2346,14 +2388,15 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     IF lv_text IS INITIAL.
       RETURN.
     ENDIF.
-    IF lv_text(1) = `-`.
-      lv_sign = `-`.
-      lv_text = substring( val = lv_text
-                           off = 1 ).
-    ELSEIF lv_text(1) = `+`.
-      lv_text = substring( val = lv_text
-                           off = 1 ).
-    ENDIF.
+    CASE lv_text(1).
+      WHEN `-`.
+        lv_sign = `-`.
+        lv_text = substring( val = lv_text
+                             off = 1 ).
+      WHEN `+`.
+        lv_text = substring( val = lv_text
+                             off = 1 ).
+    ENDCASE.
 
     " mantissa and exponent
     IF lv_text CS `E`.
@@ -2370,7 +2413,7 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
         lv_exp_text = substring( val = lv_exp_text
                                  off = 1 ).
       ENDIF.
-      IF lv_exp_text IS INITIAL OR NOT lv_exp_text CO cv_digits OR strlen( lv_exp_text ) > 4.
+      IF lv_exp_text IS INITIAL OR lv_exp_text CN cv_digits OR strlen( lv_exp_text ) > 4.
         RETURN.
       ENDIF.
       lv_exp = lv_exp_text.
@@ -2387,7 +2430,7 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
                                  sub = `.` ).
     ENDIF.
     DATA(lv_digits) = lv_whole && lv_part.
-    IF lv_digits IS INITIAL OR NOT lv_digits CO cv_digits.
+    IF lv_digits IS INITIAL OR lv_digits CN cv_digits.
       RETURN.
     ENDIF.
     lv_point = strlen( lv_whole ) + lv_exp.
@@ -2462,8 +2505,6 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
       ENDIF.
       INSERT LINES OF lt_row INTO TABLE result.
     ENDDO.
-    " a FALSE cell came along empty - a cell without a value is none
-    DELETE result WHERE value IS INITIAL AND kind <> cs_kind-boolean.
 
   ENDMETHOD.
 
@@ -2535,21 +2576,22 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
               EXIT.
             ENDIF.
           ENDLOOP.
-          ASSIGN lt_field[ name = lv_name ] TO FIELD-SYMBOL(<ls_field>).
-          IF sy-subrc <> 0.
+          DATA(ls_field) = field_find( t_field = lt_field
+                                       name    = lv_name ).
+          IF ls_field IS INITIAL.
             " `Order Id` for ORDER_ID
-            lv_name = name_by_header( lv_header ).
-            ASSIGN lt_field[ name = lv_name ] TO <ls_field>.
-            IF sy-subrc <> 0.
-              CONTINUE.
-            ENDIF.
+            ls_field = field_find( t_field = lt_field
+                                   name    = name_by_header( lv_header ) ).
+          ENDIF.
+          IF ls_field IS INITIAL.
+            CONTINUE.
           ENDIF.
           WHILE lines( lt_map ) < <cell>-col.
             INSERT VALUE #( ) INTO TABLE lt_map.
           ENDWHILE.
           ASSIGN lt_map[ <cell>-col ] TO <map>.
-          <map>-name = <ls_field>-name.
-          <map>-cat = <ls_field>-cat.
+          <map>-name = ls_field-name.
+          <map>-cat = ls_field-cat.
         ENDLOOP.
         CONTINUE.
       ENDIF.
@@ -2657,7 +2699,7 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
               lv_number = digits_only( lv_number ).
             ENDIF.
         ENDCASE.
-        IF strlen( lv_number ) <> 8 OR NOT lv_number CO cv_digits.
+        IF strlen( lv_number ) <> 8 OR lv_number CN cv_digits.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
             EXPORTING
               val = |XLSX_CELL_TYPE - cell { lv_address }: { lv_value } is no date|.
@@ -2692,7 +2734,7 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
               lv_number = lv_number && `00`.
             ENDIF.
         ENDCASE.
-        IF strlen( lv_number ) <> 6 OR NOT lv_number CO cv_digits.
+        IF strlen( lv_number ) <> 6 OR lv_number CN cv_digits.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
             EXPORTING
               val = |XLSX_CELL_TYPE - cell { lv_address }: { lv_value } is no time|.
