@@ -606,7 +606,7 @@ DATA(lv_sample) = zabaputil_cl_pdf_form=>render(
 | `zabaputil_cl_pdf_font_std` | the standard fonts (Helvetica, Times, Courier) with their metrics - Western European text, nothing embedded |
 | `zabaputil_cl_pdf_font_ttf` | an embedded TrueType font (`lo_pdf->font_ttf( lv_ttf )`) - any script the font has glyphs for |
 | `zabaputil_cl_pdf_image` | JPEG and PNG images, PNG with transparency |
-| `zabaputil_cl_pdf_form` | a form as data - elements in the flow or at fixed positions, `{NAME}` placeholders for the components of the data - and its printout |
+| `zabaputil_cl_pdf_form` | a form as data - elements in the flow or at fixed positions, `{NAME}` placeholders for the components of the data - and its printout; an absolute form (`ty_s_form-absolute`) places every element at its x, y, w, h, as a designer with a canvas draws it, and moves what stands below a table to where the table ends |
 | `zabaputil_if_pdf_data`, `zabaputil_cl_pdf_data_demo` | the data class of a form - its public attributes are the form's interface - and one by example |
 | `zabaputil_cl_pdf_writer` | the file format: objects, streams, cross-reference table |
 

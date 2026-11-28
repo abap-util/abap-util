@@ -19,6 +19,12 @@ CLASS zabaputil_cl_pdf_form DEFINITION
     " page (a logo, an address, a frame). All lengths are millimetres from
     " the top left corner of the page; a font size is in points.
     "
+    " An absolute form (ty_s_form-absolute) has no flow: every element
+    " stands where its x, y, w and h say, which is what a designer with a
+    " canvas draws. A table is as high as its rows make it and goes on on
+    " the next page; what stands below it on the canvas follows where it
+    " ends, at the same distance.
+    "
     " A text may name components of the data in braces: `Dear {NAME}`,
     " `{HEADER-CITY}` for a component of a component. A name the data does
     " not have stays as it is written, so a form shows its placeholders
@@ -119,6 +125,9 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         "! the class whose public attributes the form prints - it implements
         "! zabaputil_if_pdf_data; empty for a form that is printed from a structure
         data_class    TYPE string,
+        "! every element at its x, y, w, h instead of in the flow; what stands
+        "! below a table follows where the table ends
+        absolute      TYPE abap_bool,
         t_element     TYPE ty_t_element,
       END OF ty_s_form.
 
@@ -284,6 +293,16 @@ CLASS zabaputil_cl_pdf_form DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_cl_pdf_image.
 
+    "! The elements of an absolute form, each at its position: page by page
+    "! what the tables above it make of it
+    CLASS-METHODS absolute_elements
+      IMPORTING
+        pdf       TYPE REF TO zabaputil_cl_pdf
+        layout    TYPE REF TO zabaputil_cl_pdf_layout
+        form      TYPE ty_s_form
+        data      TYPE any
+        with_data TYPE abap_bool.
+
     CLASS-METHODS flow_element
       IMPORTING
         pdf       TYPE REF TO zabaputil_cl_pdf
@@ -386,17 +405,25 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     lo_layout->set_font( font = result->font( c_font )
                          size = c_size ).
 
-    LOOP AT val-t_element ASSIGNING FIELD-SYMBOL(<element>).
-      IF <element>-fixed = abap_true OR <element>-type = cs_type-rect.
-        CONTINUE.
-      ENDIF.
-      flow_element( pdf       = result
-                    layout    = lo_layout
-                    element   = <element>
-                    left      = val-margin_left
-                    data      = <data>
-                    with_data = lv_with_data ).
-    ENDLOOP.
+    IF val-absolute = abap_true.
+      absolute_elements( pdf       = result
+                         layout    = lo_layout
+                         form      = val
+                         data      = <data>
+                         with_data = lv_with_data ).
+    ELSE.
+      LOOP AT val-t_element ASSIGNING FIELD-SYMBOL(<element>).
+        IF <element>-fixed = abap_true OR <element>-type = cs_type-rect.
+          CONTINUE.
+        ENDIF.
+        flow_element( pdf       = result
+                      layout    = lo_layout
+                      element   = <element>
+                      left      = val-margin_left
+                      data      = <data>
+                      with_data = lv_with_data ).
+      ENDLOOP.
+    ENDIF.
 
     " a form without anything in the flow still has its first page
     lo_layout->page( ).
@@ -422,9 +449,15 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     ENDIF.
     lo_layout->finish( ).
 
-    " the fixed elements go over the flow, on the first or on every page
+    " the fixed elements go over the flow, on the first or on every page.
+    " Of an absolute form the ones of every page are left: the others are
+    " on the page the tables above them left them on
     LOOP AT val-t_element ASSIGNING <element>.
-      IF <element>-fixed = abap_false AND <element>-type <> cs_type-rect.
+      IF val-absolute = abap_true.
+        IF <element>-every_page = abap_false.
+          CONTINUE.
+        ENDIF.
+      ELSEIF <element>-fixed = abap_false AND <element>-type <> cs_type-rect.
         CONTINUE.
       ENDIF.
       lv_number = 1.
@@ -771,6 +804,118 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
       RETURN.
     ENDIF.
     result = pdf->image( lv_bytes ).
+
+  ENDMETHOD.
+
+  METHOD absolute_elements.
+
+    " where a table ended: what stood below its bottom edge on the canvas
+    " is on that page, moved by as much as the table grew or shrank
+    TYPES:
+      BEGIN OF ty_s_anchor,
+        bottom TYPE f,
+        page   TYPE i,
+        y      TYPE f,
+      END OF ty_s_anchor.
+
+    DATA lt_anchor  TYPE STANDARD TABLE OF ty_s_anchor WITH EMPTY KEY.
+    DATA ls_anchor  TYPE ty_s_anchor.
+    DATA lt_element TYPE ty_t_element.
+    DATA ls_element TYPE ty_s_element.
+    DATA lv_page    TYPE i.
+    DATA lv_shift   TYPE f.
+    DATA lv_top     TYPE f.
+    DATA lv_width   TYPE f.
+    DATA lv_height  TYPE f.
+    DATA lv_left    TYPE f.
+    DATA lv_right   TYPE f.
+
+    DATA(lo_first) = layout->page( ).
+    lv_width = lo_first->width( ).
+    lv_height = lo_first->height( ).
+
+    " from the top of the canvas down: a table is printed before what
+    " stands below it
+    LOOP AT form-t_element INTO ls_element.
+      IF ls_element-every_page = abap_true.
+        CONTINUE.
+      ENDIF.
+      CASE ls_element-type.
+        WHEN cs_type-text OR cs_type-table OR cs_type-line OR cs_type-rect OR cs_type-image.
+          INSERT ls_element INTO TABLE lt_element.
+      ENDCASE.
+    ENDLOOP.
+    SORT lt_element STABLE BY y ASCENDING.
+
+    LOOP AT lt_element INTO ls_element.
+
+      " the last table that ended above the element
+      lv_top = ls_element-y.
+      lv_page = 1.
+      lv_shift = 0.
+      LOOP AT lt_anchor INTO ls_anchor.
+        IF ls_anchor-bottom <= lv_top.
+          lv_page = ls_anchor-page.
+          lv_shift = ls_anchor-y - ls_anchor-bottom.
+        ENDIF.
+      ENDLOOP.
+      ls_element-y = lv_top + lv_shift.
+
+      IF ls_element-type = cs_type-table.
+        " the flow of the layout, between the edges of the table and from
+        " its top edge on; it goes on on the last page of the document
+        lv_left = ls_element-x.
+        lv_right = form-margin_right.
+        IF ls_element-w > 0.
+          lv_right = lv_width - ls_element-x - ls_element-w.
+        ELSEIF lv_left <= 0.
+          lv_left = form-margin_left.
+        ENDIF.
+        layout->set_margins( left   = lv_left
+                             top    = form-margin_top
+                             right  = lv_right
+                             bottom = form-margin_bottom ).
+        layout->set_y( ls_element-y ).
+        flow_table( pdf       = pdf
+                    layout    = layout
+                    element   = ls_element
+                    data      = data
+                    with_data = with_data ).
+        layout->set_margins( left   = form-margin_left
+                             top    = form-margin_top
+                             right  = form-margin_right
+                             bottom = form-margin_bottom ).
+        CLEAR ls_anchor.
+        ls_anchor-bottom = lv_top + ls_element-h.
+        ls_anchor-page = pdf->page_count( ).
+        ls_anchor-y = layout->y( ).
+        INSERT ls_anchor INTO TABLE lt_anchor.
+        CONTINUE.
+      ENDIF.
+
+      " an element a table pushed over the bottom margin starts the next
+      " page, and what stood below it on the canvas follows it there
+      IF lv_shift > 0 AND ls_element-y + ls_element-h > lv_height - form-margin_bottom.
+        IF lv_page >= pdf->page_count( ).
+          layout->page_break( ).
+        ENDIF.
+        lv_page = lv_page + 1.
+        ls_element-y = form-margin_top.
+        CLEAR ls_anchor.
+        ls_anchor-bottom = lv_top.
+        ls_anchor-page = lv_page.
+        ls_anchor-y = form-margin_top.
+        INSERT ls_anchor INTO TABLE lt_anchor.
+      ENDIF.
+
+      fixed_element( pdf       = pdf
+                     layout    = layout
+                     page      = pdf->page( lv_page )
+                     element   = ls_element
+                     data      = data
+                     with_data = with_data ).
+
+    ENDLOOP.
 
   ENDMETHOD.
 

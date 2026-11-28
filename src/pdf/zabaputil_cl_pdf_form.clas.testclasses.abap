@@ -94,6 +94,18 @@ CLASS ltcl_form DEFINITION FINAL
     METHODS data_sample_of_a_class  FOR TESTING.
     METHODS data_sample_refused     FOR TESTING.
     METHODS form_with_its_data_class FOR TESTING.
+    METHODS absolute_text_position  FOR TESTING.
+    METHODS absolute_has_no_flow    FOR TESTING.
+    METHODS absolute_table_position FOR TESTING.
+    METHODS absolute_below_a_table  FOR TESTING.
+    METHODS absolute_table_pages    FOR TESTING.
+    METHODS absolute_pushed_over    FOR TESTING.
+    METHODS absolute_every_page     FOR TESTING.
+
+    "! the table of the test data with as many rows as asked for
+    METHODS items
+      IMPORTING
+        val TYPE i.
 
     " a PNG file of 2 x 2 pixels
     METHODS image_rgb
@@ -639,6 +651,191 @@ CLASS ltcl_form IMPLEMENTATION.
                                         act = shown( pdf  = lo_pdf
                                                      page = 1
                                                      text = `Order PO-2026-118` ) ).
+  ENDMETHOD.
+
+  METHOD items.
+    CLEAR ms_data-t_items.
+    DO val TIMES.
+      INSERT VALUE #( pos  = sy-index
+                      text = `Nut` ) INTO TABLE ms_data-t_items.
+    ENDDO.
+  ENDMETHOD.
+
+  METHOD absolute_text_position.
+    " an element of an absolute form stands at its position without being
+    " marked as fixed - the same line fixed_text_position expects
+    ms_form-absolute = abap_true.
+    ms_form-t_element = VALUE #( ( type = zabaputil_cl_pdf_form=>cs_type-text
+                                   x    = 10
+                                   y    = 30
+                                   text = `No. {NUMBER}` ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                 data = ms_data ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = |BT /F1 10 Tf 28.346 749.671 Td { lo_pdf->font( `Helvetica` )->encode( `No. 4711` ) } Tj ET|
+        act = lo_pdf->page( 1 )->content( ) ).
+  ENDMETHOD.
+
+  METHOD absolute_has_no_flow.
+    " a space and a page break mean nothing on a canvas
+    ms_form-absolute = abap_true.
+    ms_form-t_element = VALUE #( ( type = zabaputil_cl_pdf_form=>cs_type-space h = 50 )
+                                 ( type = zabaputil_cl_pdf_form=>cs_type-page_break )
+                                 ( type = zabaputil_cl_pdf_form=>cs_type-text x = 10 y = 30 text = `Here` ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( ms_form ).
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = lo_pdf->page_count( ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = |BT /F1 10 Tf 28.346 749.671 Td { lo_pdf->font( `Helvetica` )->encode( `Here` ) } Tj ET|
+        act = lo_pdf->page( 1 )->content( ) ).
+  ENDMETHOD.
+
+  METHOD absolute_table_position.
+    " a table 30 mm from the left and 100 mm from the top is the table of
+    " a flow that has this left margin and 80 mm of space above it
+    DATA(lt_column) = VALUE zabaputil_cl_pdf_form=>ty_t_column(
+        ( name = `pos`  title = `Pos`  width = 20 align = `R` )
+        ( name = `text` title = `Item` width = 0  align = `L` ) ).
+
+    DATA(ls_flow) = ms_form.
+    ls_flow-margin_left = 30.
+    ls_flow-t_element = VALUE #( ( type = zabaputil_cl_pdf_form=>cs_type-space h = 80 )
+                                 ( type     = zabaputil_cl_pdf_form=>cs_type-table
+                                   source   = `t_items`
+                                   t_column = lt_column ) ).
+    DATA(lo_flow) = zabaputil_cl_pdf_form=>build( val  = ls_flow
+                                                  data = ms_data ).
+
+    " without a width it ends at the right margin of the form
+    ms_form-absolute = abap_true.
+    ms_form-t_element = VALUE #( ( type     = zabaputil_cl_pdf_form=>cs_type-table
+                                   x        = 30
+                                   y        = 100
+                                   h        = 20
+                                   source   = `t_items`
+                                   t_column = lt_column ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                 data = ms_data ).
+    cl_abap_unit_assert=>assert_equals( exp = lo_flow->page( 1 )->content( )
+                                        act = lo_pdf->page( 1 )->content( ) ).
+
+    " 100 mm wide: 20 mm for the first column, 80 mm (226.772 points) for
+    " the second, which starts 50 mm (141.732 points) from the left. The
+    " header row is 18.5 points high, its top edge 100 mm from the top
+    ms_form-t_element[ 1 ]-w = 100.
+    lo_pdf = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                           data = ms_data ).
+    DATA(lv_content) = lo_pdf->page( 1 )->content( ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS `85.039 539.925 56.693 18.5 re B` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS `141.732 539.925 226.772 18.5 re B` ) ).
+  ENDMETHOD.
+
+  METHOD absolute_below_a_table.
+    " what stands below a table keeps its distance to the end of the
+    " table, however high the table was drawn on the canvas; what stands
+    " beside it stays where it is
+    DATA(lt_column) = VALUE zabaputil_cl_pdf_form=>ty_t_column(
+        ( name = `pos`  title = `Pos`  width = 20 align = `R` )
+        ( name = `text` title = `Item` width = 0  align = `L` ) ).
+
+    ms_form-absolute = abap_true.
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text x = 20 y = 115 text = `Below` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text x = 150 y = 102 text = `Beside` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-table x = 20 y = 100 w = 100 h = 10
+          source = `t_items` t_column = lt_column ) ).
+    DATA(lo_low) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                 data = ms_data ).
+
+    ms_form-t_element[ 1 ]-y = 135.
+    ms_form-t_element[ 3 ]-h = 30.
+    DATA(lo_high) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                  data = ms_data ).
+    cl_abap_unit_assert=>assert_equals( exp = lo_low->page( 1 )->content( )
+                                        act = lo_high->page( 1 )->content( ) ).
+
+    " Beside: 150 mm from the left, the top of the line 102 mm from the top
+    cl_abap_unit_assert=>assert_true(
+        xsdbool( lo_low->page( 1 )->content( ) CS
+                 |425.197 545.576 Td { lo_low->font( `Helvetica` )->encode( `Beside` ) } Tj| ) ).
+
+    " without rows the table is its header row, and Below moves up with it
+    CLEAR ms_data-t_items.
+    DATA(lo_empty) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                   data = ms_data ).
+    cl_abap_unit_assert=>assert_differs( exp = lo_high->page( 1 )->content( )
+                                         act = lo_empty->page( 1 )->content( ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = shown( pdf  = lo_empty
+                                                     page = 1
+                                                     text = `Below` ) ).
+  ENDMETHOD.
+
+  METHOD absolute_table_pages.
+    " a table that goes on on the next page takes what is below it along
+    items( 80 ).
+    ms_form-absolute = abap_true.
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text x = 20 y = 30 text = `Above` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text x = 20 y = 115 text = `Below` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-table x = 20 y = 100 w = 100 h = 10
+          source = `t_items`
+          t_column = VALUE #( ( name = `pos` title = `Pos` width = 20 align = `R` ) ) ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                 data = ms_data ).
+    DATA(lv_last) = lo_pdf->page_count( ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_last > 1 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = shown( pdf = lo_pdf page = 1 text = `Above` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 0
+                                        act = shown( pdf = lo_pdf page = 1 text = `Below` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = shown( pdf = lo_pdf page = lv_last text = `Below` ) ).
+  ENDMETHOD.
+
+  METHOD absolute_pushed_over.
+    " an element the table pushed over the bottom margin starts the next
+    " page at the top margin, and what was below it follows at its distance
+    items( 10 ).
+    ms_form-absolute = abap_true.
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text x = 10 y = 115 h = 160 text = `Box` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text x = 10 y = 125 text = `After` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-table x = 20 y = 100 w = 100 h = 10
+          source = `t_items`
+          t_column = VALUE #( ( name = `pos` title = `Pos` width = 20 align = `R` ) ) ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                 data = ms_data ).
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = lo_pdf->page_count( ) ).
+
+    " the second page is the page of two fixed texts, 20 and 30 mm from the top
+    DATA(ls_fixed) = zabaputil_cl_pdf_form=>new_form( ).
+    ls_fixed-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text fixed = abap_true x = 10 y = 20 text = `Box` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text fixed = abap_true x = 10 y = 30 text = `After` ) ).
+    DATA(lo_fixed) = zabaputil_cl_pdf_form=>build( ls_fixed ).
+    cl_abap_unit_assert=>assert_equals( exp = lo_fixed->page( 1 )->content( )
+                                        act = lo_pdf->page( 2 )->content( ) ).
+  ENDMETHOD.
+
+  METHOD absolute_every_page.
+    items( 80 ).
+    ms_form-absolute = abap_true.
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text every_page = abap_true x = 150 y = 10 text = `Letterhead` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-table x = 20 y = 100 w = 100 h = 10
+          source = `t_items`
+          t_column = VALUE #( ( name = `pos` title = `Pos` width = 20 align = `R` ) ) ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                 data = ms_data ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lo_pdf->page_count( ) > 1 ) ).
+    DO lo_pdf->page_count( ) TIMES.
+      cl_abap_unit_assert=>assert_equals( exp = 1
+                                          act = shown( pdf  = lo_pdf
+                                                       page = sy-index
+                                                       text = `Letterhead` ) ).
+    ENDDO.
   ENDMETHOD.
 
 ENDCLASS.
