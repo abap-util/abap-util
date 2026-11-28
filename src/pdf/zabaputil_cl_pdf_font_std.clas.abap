@@ -27,6 +27,22 @@ CLASS zabaputil_cl_pdf_font_std DEFINITION
         name     TYPE clike
         resource TYPE clike.
 
+    "! The name of the font, `Helvetica-Bold`
+    METHODS name
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! The name of the cut of a standard font: bold, italic or both, or
+    "! the upright one - `Times-Roman` bold is `Times-Bold`
+    "! @parameter name   | a standard font, any of its cuts
+    CLASS-METHODS styled
+      IMPORTING
+        name          TYPE clike
+        bold          TYPE abap_bool
+        italic        TYPE abap_bool
+      RETURNING
+        VALUE(result) TYPE string.
+
     "! The WinAnsiEncoding code of a Unicode code point, 0 for a character
     "! the encoding does not have
     CLASS-METHODS winansi
@@ -66,6 +82,49 @@ ENDCLASS.
 
 
 CLASS zabaputil_cl_pdf_font_std IMPLEMENTATION.
+
+  METHOD name.
+
+    result = mv_name.
+
+  ENDMETHOD.
+
+  METHOD styled.
+
+    DATA lv_family TYPE string.
+
+    DATA(lv_name) = CONV string( name ).
+    IF lv_name CP `Times*`.
+      lv_family = `Times`.
+    ELSEIF lv_name CP `Courier*`.
+      lv_family = `Courier`.
+    ELSE.
+      lv_family = `Helvetica`.
+    ENDIF.
+
+    IF lv_family = `Times`.
+      IF bold = abap_true AND italic = abap_true.
+        result = `Times-BoldItalic`.
+      ELSEIF bold = abap_true.
+        result = `Times-Bold`.
+      ELSEIF italic = abap_true.
+        result = `Times-Italic`.
+      ELSE.
+        result = `Times-Roman`.
+      ENDIF.
+    ELSE.
+      IF bold = abap_true AND italic = abap_true.
+        result = lv_family && `-BoldOblique`.
+      ELSEIF bold = abap_true.
+        result = lv_family && `-Bold`.
+      ELSEIF italic = abap_true.
+        result = lv_family && `-Oblique`.
+      ELSE.
+        result = lv_family.
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
 
   METHOD constructor.
 

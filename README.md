@@ -617,6 +617,7 @@ DATA(lv_file) = lo_pdf->render( ). " => xstring
 DATA(lo_layout) = NEW zabaputil_cl_pdf_layout( lo_pdf ).
 lo_layout->set_font( font = lo_pdf->font( ) size = 10 ).
 lo_layout->text( `A paragraph that wraps at the right margin ...` ).
+lo_layout->rich_text( `Markup: <b>bold</b>, <i>italic</i>, <u>underlined</u>, <color=CC0000>red</color>` ).
 lo_layout->table( columns = VALUE #( ( name = `MATNR` title = `Material`    width = 40 align = `L` )
                                      ( name = `MAKTX` title = `Description` width = 0  align = `L` )
                                      ( name = `MENGE` title = `Quantity`    width = 25 align = `R` ) )

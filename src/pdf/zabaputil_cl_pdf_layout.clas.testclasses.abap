@@ -53,6 +53,10 @@ CLASS ltcl_layout DEFINITION FINAL
     METHODS area_lines_and_parts    FOR TESTING.
     METHODS area_first_page         FOR TESTING.
     METHODS area_image              FOR TESTING.
+    METHODS markup_wraps            FOR TESTING.
+    METHODS markup_plain_brackets   FOR TESTING.
+    METHODS markup_fonts_and_lines  FOR TESTING.
+    METHODS markup_font_styles      FOR TESTING.
     METHODS finish_page_numbers     FOR TESTING.
     METHODS finish_header           FOR TESTING.
     METHODS finish_once             FOR TESTING.
@@ -697,6 +701,65 @@ CLASS ltcl_layout IMPLEMENTATION.
     mo_layout->finish( ).
     cl_abap_unit_assert=>assert_true(
         xsdbool( mo_pdf->page( 1 )->content( ) CS `q 20 0 0 20 525.28 806.89 cm /I1 Do Q` ) ).
+  ENDMETHOD.
+
+  METHOD markup_wraps.
+    " the blanks between the words keep their style; a line is markup of
+    " its own
+    cl_abap_unit_assert=>assert_equals(
+        exp = VALUE string_table( ( `a <b>bold</b> c` ) )
+        act = mo_layout->wrap_markup( val   = `a <b>bold</b> c`
+                                      width = 500 ) ).
+    " ten characters a line - Courier-Bold is as wide as Courier
+    cl_abap_unit_assert=>assert_equals(
+        exp = VALUE string_table( ( `<b>aaaa</b> bbbb` ) ( `<i>cc</i>cc` ) )
+        act = mo_layout->wrap_markup( val   = `<b>aaaa</b> bbbb <i>cc</i>cc`
+                                      width = 60 ) ).
+    " nested, and a colour inside of it
+    cl_abap_unit_assert=>assert_equals(
+        exp = VALUE string_table( ( `<b>x</b><b><i>y</i></b><color=FF0000><b><u>z</u></b></color>` ) )
+        act = mo_layout->wrap_markup( val   = `<B>x<i>y</i><color=ff0000><u>z</u></color></b>`
+                                      width = 500 ) ).
+  ENDMETHOD.
+
+  METHOD markup_plain_brackets.
+    " a < that opens no markup is a <, a tag that is never closed lasts to
+    " the end
+    cl_abap_unit_assert=>assert_equals(
+        exp = VALUE string_table( ( `a < b <x> c<d` ) )
+        act = mo_layout->wrap_markup( val   = `a < b <x> c<d`
+                                      width = 500 ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = VALUE string_table( ( `<u>open</u>` ) )
+        act = mo_layout->wrap_markup( val   = `<u>open`
+                                      width = 500 ) ).
+  ENDMETHOD.
+
+  METHOD markup_fonts_and_lines.
+    mo_layout->rich_text( `x <b>y</b> <u>u</u> <color=FF0000>r</color>` ).
+    DATA(lv_content) = mo_pdf->page( 1 )->content( ).
+    " the bold cut of Courier is the second font of the document
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS |BT /F1 10 Tf 50 783.28 Td { mo_font->encode( `x ` ) } Tj ET| ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS |BT /F2 10 Tf 62 783.28 Td { mo_font->encode( `y` ) } Tj ET| ) ).
+    " underlined: a line a point below the baseline, from 74 to 80
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS `74 782.28 m 80 782.28 l S` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS |q 1 0 0 rg BT /F1 10 Tf 86 783.28 Td { mo_font->encode( `r` ) } Tj ET Q| ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `62.5` act = num( mo_layout->y( ) ) ).
+  ENDMETHOD.
+
+  METHOD markup_font_styles.
+    " a cut of its own: here Times-Roman for the bold text
+    mo_layout->set_font_styles( bold = mo_pdf->font( `Times-Roman` ) ).
+    mo_layout->rich_text( `<b>t</b>` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( mo_pdf->page( 1 )->content( ) CS `/F2 10 Tf` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `Times-Roman`
+                                        act = zabaputil_cl_pdf_font_std=>styled( name   = `Times-BoldItalic`
+                                                                                 bold   = abap_false
+                                                                                 italic = abap_false ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `Helvetica-BoldOblique`
+                                        act = zabaputil_cl_pdf_font_std=>styled( name   = `Helvetica`
+                                                                                 bold   = abap_true
+                                                                                 italic = abap_true ) ).
   ENDMETHOD.
 
 ENDCLASS.

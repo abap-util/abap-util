@@ -117,6 +117,7 @@ CLASS ltcl_form DEFINITION FINAL
     METHODS check_block_and_condition FOR TESTING.
     METHODS table_options           FOR TESTING.
     METHODS header_footer_areas     FOR TESTING.
+    METHODS markup_text             FOR TESTING.
 
     "! the table of the test data with as many rows as asked for
     METHODS items
@@ -1203,6 +1204,23 @@ CLASS ltcl_form IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( exp = lt_exp
                                         act = zabaputil_cl_pdf_form=>check( val  = ms_form
                                                                             data = ms_data ) ).
+  ENDMETHOD.
+
+  METHOD markup_text.
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text markup = abap_true text = `Dear <b>{NAME}</b>` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text fixed = abap_true markup = abap_true x = 20 y = 100 w = 50
+          text = `<i>fixed</i>` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `<b>plain</b>` ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                 data = ms_data ).
+    DATA(lv_content) = lo_pdf->page( 1 )->content( ).
+    cl_abap_unit_assert=>assert_true(
+        xsdbool( lv_content CS |{ lo_pdf->font( `Helvetica-Bold` )->encode( `Ada` ) } Tj| ) ).
+    cl_abap_unit_assert=>assert_true(
+        xsdbool( lv_content CS |{ lo_pdf->font( `Helvetica-Oblique` )->encode( `fixed` ) } Tj| ) ).
+    " without markup the tags are text
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 1 text = `<b>plain</b>` ) ).
   ENDMETHOD.
 
   METHOD absolute_pushed_over.

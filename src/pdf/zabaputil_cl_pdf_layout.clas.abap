@@ -18,8 +18,9 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
     "   lo_layout->set_footer( `Page {page} of {pages}` ).
     "   lo_layout->finish( ).
     "
-    " Lengths are in the unit of the document, font sizes in points. One
-    " font per paragraph: no bold or italic words inside a line.
+    " Lengths are in the unit of the document, font sizes in points.
+    " text( ) has one font per paragraph; rich_text( ) takes markup for
+    " bold, italic, underlined and coloured words inside a line.
 
     TYPES:
       BEGIN OF ty_s_column,
@@ -273,6 +274,50 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_cl_pdf_layout.
 
+    "! The fonts of the cuts that markup asks for (<b>, <i>, both); a cut
+    "! that is not set is the current font - of a standard font its cut
+    METHODS set_font_styles
+      IMPORTING
+        bold          TYPE REF TO zabaputil_if_pdf_font OPTIONAL
+        italic        TYPE REF TO zabaputil_if_pdf_font OPTIONAL
+        bold_italic   TYPE REF TO zabaputil_if_pdf_font OPTIONAL
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_layout.
+
+    "! A text with markup, wrapped at the right margin like text( ):
+    "! <b>bold</b>, <i>italic</i>, <u>underlined</u>, <color=CC0000>red</color>,
+    "! nested as they are opened; a `<` that opens none of them is a `<`
+    "! @parameter val   | the text
+    "! @parameter align | L, C or R
+    METHODS rich_text
+      IMPORTING
+        val           TYPE clike
+        align         TYPE clike DEFAULT `L`
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_layout.
+
+    "! The lines a text with markup breaks into at a width; every line is
+    "! a text with markup of its own, for markup_line( )
+    "! @parameter val   | the text, without line feeds
+    "! @parameter width | the width of a line
+    METHODS wrap_markup
+      IMPORTING
+        val           TYPE clike
+        width         TYPE numeric
+      RETURNING
+        VALUE(result) TYPE string_table.
+
+    "! One line of a text with markup on a page, in the current font and size
+    "! @parameter y     | the baseline
+    "! @parameter align | L: x is where it starts, R: where it ends, C: its middle
+    METHODS markup_line
+      IMPORTING
+        page  TYPE REF TO zabaputil_cl_pdf_page
+        x     TYPE numeric
+        y     TYPE numeric
+        val   TYPE clike
+        align TYPE clike DEFAULT `L`.
+
     "! The lines a text breaks into at a width, in the current font. A
     "! word that is wider than the line is cut
     "! @parameter val   | the text, without line feeds
@@ -314,6 +359,17 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
       END OF ty_s_line.
     TYPES ty_t_line TYPE STANDARD TABLE OF ty_s_line WITH EMPTY KEY.
 
+    "! a piece of a text with markup in one style
+    TYPES:
+      BEGIN OF ty_s_run,
+        text      TYPE string,
+        bold      TYPE abap_bool,
+        italic    TYPE abap_bool,
+        underline TYPE abap_bool,
+        color     TYPE string,
+      END OF ty_s_run.
+    TYPES ty_t_run TYPE STANDARD TABLE OF ty_s_run WITH EMPTY KEY.
+
     " the lines of a rule and of the table cells: half a point, grey
     CONSTANTS c_line_width TYPE f VALUE '0.5'.
     CONSTANTS c_line_color TYPE string VALUE `999999`.
@@ -348,6 +404,9 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
     DATA mt_carry        TYPE string_table.
     " data rows written, for the zebra stripes
     DATA mv_data_rows    TYPE i.
+    DATA mo_bold         TYPE REF TO zabaputil_if_pdf_font.
+    DATA mo_italic       TYPE REF TO zabaputil_if_pdf_font.
+    DATA mo_bold_italic  TYPE REF TO zabaputil_if_pdf_font.
 
     METHODS new_page.
 
@@ -451,6 +510,35 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
         area   TYPE ty_s_area
         number TYPE i
         middle TYPE f.
+
+    "! The pieces of a text with markup
+    CLASS-METHODS runs
+      IMPORTING
+        val           TYPE string
+      RETURNING
+        VALUE(result) TYPE ty_t_run.
+
+    "! Pieces as a text with markup
+    CLASS-METHODS markup
+      IMPORTING
+        runs          TYPE ty_t_run
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! The font of a style
+    METHODS style_font
+      IMPORTING
+        bold          TYPE abap_bool
+        italic        TYPE abap_bool
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_if_pdf_font.
+
+    "! The width of pieces in points
+    METHODS runs_width
+      IMPORTING
+        runs          TYPE ty_t_run
+      RETURNING
+        VALUE(result) TYPE f.
 
     CLASS-METHODS area_is_empty
       IMPORTING
@@ -1364,6 +1452,383 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
       ms_footer = val.
     ENDIF.
     result = me.
+
+  ENDMETHOD.
+
+  METHOD set_font_styles.
+
+    mo_bold = bold.
+    mo_italic = italic.
+    mo_bold_italic = bold_italic.
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD style_font.
+
+    DATA lo_std TYPE REF TO zabaputil_cl_pdf_font_std.
+
+    IF bold = abap_true AND italic = abap_true.
+      result = mo_bold_italic.
+    ELSEIF bold = abap_true.
+      result = mo_bold.
+    ELSEIF italic = abap_true.
+      result = mo_italic.
+    ELSE.
+      result = mo_font.
+      RETURN.
+    ENDIF.
+    IF result IS BOUND.
+      RETURN.
+    ENDIF.
+
+    " a standard font has its cuts; any other font is what it is
+    result = mo_font.
+    TRY.
+        lo_std ?= mo_font.
+        result = mo_pdf->font( zabaputil_cl_pdf_font_std=>styled( name   = lo_std->name( )
+                                                                bold   = bold
+                                                                italic = italic ) ).
+      CATCH cx_sy_move_cast_error ##NO_HANDLER.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD runs.
+
+    DATA ls_run    TYPE ty_s_run.
+    DATA lv_rest   TYPE string.
+    DATA lv_tag    TYPE string.
+    DATA lv_close  TYPE i.
+    DATA lv_bold   TYPE i.
+    DATA lv_italic TYPE i.
+    DATA lv_under  TYPE i.
+    DATA lt_color  TYPE string_table.
+    DATA lv_known  TYPE abap_bool.
+
+    lv_rest = val.
+    WHILE lv_rest IS NOT INITIAL.
+      DATA(lv_open) = find( val = lv_rest
+                            sub = `<` ).
+      IF lv_open < 0.
+        ls_run-text = ls_run-text && lv_rest.
+        EXIT.
+      ENDIF.
+      ls_run-text = ls_run-text && substring( val = lv_rest
+                                              len = lv_open ).
+      lv_rest = substring( val = lv_rest
+                           off = lv_open ).
+      lv_close = find( val = lv_rest
+                       sub = `>` ).
+      lv_known = abap_false.
+      IF lv_close > 0.
+        lv_tag = to_lower( substring( val = lv_rest
+                                      off = 1
+                                      len = lv_close - 1 ) ).
+        lv_known = abap_true.
+        IF lv_tag = `b` OR lv_tag = `i` OR lv_tag = `u` OR lv_tag = `/b` OR lv_tag = `/i` OR lv_tag = `/u`
+            OR lv_tag = `/color` OR ( strlen( lv_tag ) = 12 AND lv_tag CP `color=*` ).
+          " the text so far in the style so far
+          IF ls_run-text IS NOT INITIAL.
+            INSERT ls_run INTO TABLE result.
+          ENDIF.
+          CLEAR ls_run-text.
+          CASE lv_tag.
+            WHEN `b`.
+              lv_bold = lv_bold + 1.
+            WHEN `/b`.
+              lv_bold = nmax( val1 = 0
+                              val2 = lv_bold - 1 ).
+            WHEN `i`.
+              lv_italic = lv_italic + 1.
+            WHEN `/i`.
+              lv_italic = nmax( val1 = 0
+                                val2 = lv_italic - 1 ).
+            WHEN `u`.
+              lv_under = lv_under + 1.
+            WHEN `/u`.
+              lv_under = nmax( val1 = 0
+                               val2 = lv_under - 1 ).
+            WHEN `/color`.
+              IF lt_color IS NOT INITIAL.
+                DELETE lt_color INDEX lines( lt_color ).
+              ENDIF.
+            WHEN OTHERS.
+              INSERT to_upper( substring( val = lv_tag
+                                          off = 6 ) ) INTO TABLE lt_color.
+          ENDCASE.
+          ls_run-bold = xsdbool( lv_bold > 0 ).
+          ls_run-italic = xsdbool( lv_italic > 0 ).
+          ls_run-underline = xsdbool( lv_under > 0 ).
+          CLEAR ls_run-color.
+          IF lt_color IS NOT INITIAL.
+            ls_run-color = lt_color[ lines( lt_color ) ].
+          ENDIF.
+          lv_rest = substring( val = lv_rest
+                               off = lv_close + 1 ).
+        ELSE.
+          lv_known = abap_false.
+        ENDIF.
+      ENDIF.
+      IF lv_known = abap_false.
+        " a `<` of the text
+        ls_run-text = ls_run-text && `<`.
+        lv_rest = substring( val = lv_rest
+                             off = 1 ).
+      ENDIF.
+    ENDWHILE.
+    IF ls_run-text IS NOT INITIAL.
+      INSERT ls_run INTO TABLE result.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD markup.
+
+    LOOP AT runs ASSIGNING FIELD-SYMBOL(<run>).
+      DATA(lv_open) = ``.
+      DATA(lv_close) = ``.
+      IF <run>-color IS NOT INITIAL.
+        lv_open = |{ lv_open }<color={ <run>-color }>|.
+        lv_close = |</color>{ lv_close }|.
+      ENDIF.
+      IF <run>-bold = abap_true.
+        lv_open = |{ lv_open }<b>|.
+        lv_close = |</b>{ lv_close }|.
+      ENDIF.
+      IF <run>-italic = abap_true.
+        lv_open = |{ lv_open }<i>|.
+        lv_close = |</i>{ lv_close }|.
+      ENDIF.
+      IF <run>-underline = abap_true.
+        lv_open = |{ lv_open }<u>|.
+        lv_close = |</u>{ lv_close }|.
+      ENDIF.
+      result = result && lv_open && <run>-text && lv_close.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD runs_width.
+
+    LOOP AT runs ASSIGNING FIELD-SYMBOL(<run>).
+      result = result + style_font( bold   = <run>-bold
+                                    italic = <run>-italic )->width( val  = <run>-text
+                                                                    size = mv_size ).
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD wrap_markup.
+
+    " a word is the pieces between two blanks; a blank keeps the style it
+    " has in the text, an underlined one is underlined
+    DATA lt_line  TYPE ty_t_run.
+    DATA lt_word  TYPE ty_t_run.
+    DATA ls_blank TYPE ty_s_run.
+    DATA ls_piece TYPE ty_s_run.
+    DATA lv_line  TYPE f.
+    DATA lv_word  TYPE f.
+    DATA lv_off   TYPE i.
+    DATA lv_char  TYPE string.
+
+    font_check( ).
+    DATA(lv_max) = CONV f( width ) * mv_scale.
+
+    " the pieces split at the blanks: a blank is a piece of its own
+    DATA(lt_run) = runs( CONV string( val ) ).
+    DATA lt_token TYPE ty_t_run.
+    LOOP AT lt_run INTO DATA(ls_run).
+      SPLIT ls_run-text AT ` ` INTO TABLE DATA(lt_part).
+      " SPLIT drops a blank at the end
+      IF strlen( ls_run-text ) > 0 AND substring( val = ls_run-text
+                                                 off = strlen( ls_run-text ) - 1 ) = ` `.
+        INSERT `` INTO TABLE lt_part.
+      ENDIF.
+      LOOP AT lt_part INTO DATA(lv_part).
+        IF sy-tabix > 1.
+          ls_piece = ls_run.
+          ls_piece-text = ` `.
+          INSERT ls_piece INTO TABLE lt_token.
+        ENDIF.
+        IF lv_part IS NOT INITIAL.
+          ls_piece = ls_run.
+          ls_piece-text = lv_part.
+          INSERT ls_piece INTO TABLE lt_token.
+        ENDIF.
+      ENDLOOP.
+    ENDLOOP.
+    " the end of the text ends the last word
+    CLEAR ls_piece.
+    ls_piece-text = ` `.
+    INSERT ls_piece INTO TABLE lt_token.
+
+    LOOP AT lt_token INTO ls_piece.
+      IF ls_piece-text <> ` `.
+        INSERT ls_piece INTO TABLE lt_word.
+        CONTINUE.
+      ENDIF.
+
+      " a blank: the word before it is complete
+      IF lt_word IS NOT INITIAL.
+        lv_word = runs_width( lt_word ).
+        DATA(lv_blank) = COND f( WHEN lt_line IS INITIAL THEN 0
+                                 ELSE runs_width( VALUE #( ( ls_blank ) ) ) ).
+
+        IF lv_word > lv_max.
+          " wider than a line of its own: cut it, character by character
+          IF lt_line IS NOT INITIAL.
+            INSERT markup( lt_line ) INTO TABLE result.
+          ENDIF.
+          CLEAR lt_line.
+          lv_line = 0.
+          LOOP AT lt_word INTO DATA(ls_part).
+            lv_off = 0.
+            WHILE lv_off < strlen( ls_part-text ).
+              lv_char = substring( val = ls_part-text
+                                   off = lv_off
+                                   len = 1 ).
+              DATA(ls_char) = ls_part.
+              ls_char-text = lv_char.
+              DATA(lv_char_width) = runs_width( VALUE #( ( ls_char ) ) ).
+              IF lv_line + lv_char_width > lv_max AND lt_line IS NOT INITIAL.
+                INSERT markup( lt_line ) INTO TABLE result.
+                CLEAR lt_line.
+                lv_line = 0.
+              ENDIF.
+              INSERT ls_char INTO TABLE lt_line.
+              lv_line = lv_line + lv_char_width.
+              lv_off = lv_off + 1.
+            ENDWHILE.
+          ENDLOOP.
+        ELSEIF lt_line IS INITIAL.
+          lt_line = lt_word.
+          lv_line = lv_word.
+        ELSEIF lv_line + lv_blank + lv_word <= lv_max.
+          INSERT ls_blank INTO TABLE lt_line.
+          INSERT LINES OF lt_word INTO TABLE lt_line.
+          lv_line = lv_line + lv_blank + lv_word.
+        ELSE.
+          INSERT markup( lt_line ) INTO TABLE result.
+          lt_line = lt_word.
+          lv_line = lv_word.
+        ENDIF.
+        CLEAR lt_word.
+      ENDIF.
+      ls_blank = ls_piece.
+    ENDLOOP.
+
+    IF lt_line IS NOT INITIAL.
+      INSERT markup( lt_line ) INTO TABLE result.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD markup_line.
+
+    DATA lv_x TYPE f.
+    DATA lv_y TYPE f.
+
+    font_check( ).
+    DATA(lt_run) = runs( CONV string( val ) ).
+    " pieces of the same style are one
+    DATA lt_merged TYPE ty_t_run.
+    LOOP AT lt_run INTO DATA(ls_run).
+      DATA(lv_last) = lines( lt_merged ).
+      IF lv_last > 0.
+        ASSIGN lt_merged[ lv_last ] TO FIELD-SYMBOL(<last>).
+        IF <last>-bold = ls_run-bold AND <last>-italic = ls_run-italic
+            AND <last>-underline = ls_run-underline AND <last>-color = ls_run-color.
+          <last>-text = <last>-text && ls_run-text.
+          CONTINUE.
+        ENDIF.
+      ENDIF.
+      INSERT ls_run INTO TABLE lt_merged.
+    ENDLOOP.
+
+    lv_x = x.
+    lv_y = y.
+    DATA(lv_width) = runs_width( lt_merged ) / mv_scale.
+    DATA(lv_align) = to_upper( align ).
+    CASE lv_align.
+      WHEN `R`.
+        lv_x = lv_x - lv_width.
+      WHEN `C`.
+        lv_x = lv_x - lv_width / 2.
+    ENDCASE.
+
+    LOOP AT lt_merged INTO ls_run.
+      DATA(lo_font) = style_font( bold   = ls_run-bold
+                                  italic = ls_run-italic ).
+      DATA(lv_color) = ls_run-color.
+      IF lv_color IS INITIAL.
+        lv_color = mv_color.
+      ENDIF.
+      page->set_font( font = lo_font
+                      size = mv_size ).
+      page->set_text_color( lv_color ).
+      page->text( x   = lv_x
+                  y   = lv_y
+                  val = ls_run-text ).
+      DATA(lv_run_width) = lo_font->width( val  = ls_run-text
+                                           size = mv_size ) / mv_scale.
+      IF ls_run-underline = abap_true.
+        " a tenth of the size below the baseline, a twentieth thick
+        page->set_draw_color( lv_color ).
+        page->set_line_width( mv_size / 20 ).
+        page->line( x1 = lv_x
+                    y1 = lv_y + mv_size / 10 / mv_scale
+                    x2 = lv_x + lv_run_width
+                    y2 = lv_y + mv_size / 10 / mv_scale ).
+      ENDIF.
+      lv_x = lv_x + lv_run_width.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD rich_text.
+
+    DATA lv_x TYPE f.
+
+    result = me.
+    font_check( ).
+
+    DATA(lv_text) = CONV string( val ).
+    DATA(lv_line_feed) = |\n|.
+    lv_text = replace( val  = lv_text
+                       sub  = |\r\n|
+                       with = lv_line_feed
+                       occ  = 0 ).
+    SPLIT lv_text AT lv_line_feed INTO TABLE DATA(lt_paragraph).
+
+    DATA(lv_align) = to_upper( align ).
+    DATA(lv_height) = line_height( ).
+
+    LOOP AT lt_paragraph INTO DATA(lv_paragraph).
+      page( ).
+      DATA(lt_line) = wrap_markup( val   = lv_paragraph
+                                   width = mo_page->width( ) - mv_left - mv_right ).
+      IF lt_line IS INITIAL.
+        INSERT `` INTO TABLE lt_line.
+      ENDIF.
+      LOOP AT lt_line INTO DATA(lv_line).
+        ensure( lv_height ).
+        CASE lv_align.
+          WHEN `R`.
+            lv_x = mo_page->width( ) - mv_right.
+          WHEN `C`.
+            lv_x = ( mv_left + mo_page->width( ) - mv_right ) / 2.
+          WHEN OTHERS.
+            lv_x = mv_left.
+        ENDCASE.
+        markup_line( page  = mo_page
+                     x     = lv_x
+                     y     = mv_y + baseline( mo_font )
+                     val   = lv_line
+                     align = lv_align ).
+        mv_y = mv_y + lv_height.
+      ENDLOOP.
+    ENDLOOP.
 
   ENDMETHOD.
 

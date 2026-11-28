@@ -127,6 +127,9 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         "! (and of the data, when the row has no component of that name);
         "! in an absolute form its y is from the top of the block
         block      TYPE string,
+        "! the text has markup: <b>bold</b>, <i>italic</i>, <u>underlined</u>,
+        "! <color=CC0000>red</color> - of the font of the element, its cuts
+        markup     TYPE abap_bool,
         "! of a table: the components that are added up (a total row, a
         "! subtotal row per group, a carry-over at a page break), zebra
         "! stripes and the lines of the cells
@@ -608,6 +611,7 @@ CLASS zabaputil_cl_pdf_form DEFINITION
     CLASS-METHODS text_draw
       IMPORTING
         pdf     TYPE REF TO zabaputil_cl_pdf
+        layout  TYPE REF TO zabaputil_cl_pdf_layout
         page    TYPE REF TO zabaputil_cl_pdf_page
         element TYPE ty_s_element
         lines   TYPE string_table
@@ -1941,8 +1945,13 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
                                                element = element )
                           size = element_size( element ) ).
         layout->set_color( element_color( element ) ).
-        layout->text( val   = lv_text
-                      align = element-align ).
+        IF element-markup = abap_true.
+          layout->rich_text( val   = lv_text
+                             align = element-align ).
+        ELSE.
+          layout->text( val   = lv_text
+                        align = element-align ).
+        ENDIF.
 
       WHEN cs_type-table.
         flow_table( pdf       = pdf
@@ -2117,6 +2126,7 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
   METHOD fixed_text.
 
     text_draw( pdf     = pdf
+               layout  = layout
                page    = page
                element = element
                lines   = text_lines( pdf     = pdf
@@ -2141,8 +2151,13 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     SPLIT lv_text AT lv_line_feed INTO TABLE DATA(lt_paragraph).
     LOOP AT lt_paragraph INTO DATA(lv_paragraph).
       IF element-w > 0.
-        DATA(lt_wrapped) = layout->wrap( val   = lv_paragraph
-                                         width = element-w ).
+        IF element-markup = abap_true.
+          DATA(lt_wrapped) = layout->wrap_markup( val   = lv_paragraph
+                                                  width = element-w ).
+        ELSE.
+          lt_wrapped = layout->wrap( val   = lv_paragraph
+                                     width = element-w ).
+        ENDIF.
         IF lt_wrapped IS INITIAL.
           INSERT `` INTO TABLE result.
         ELSE.
@@ -2186,6 +2201,23 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     " y is the top of the first line
     lv_y = y + lo_font->ascent( lv_size ) / pdf->scale( ).
 
+    IF element-markup = abap_true.
+      " the layout knows the cuts of the font
+      layout->set_font( font = lo_font
+                        size = lv_size ).
+      layout->set_color( element_color( element ) ).
+      LOOP AT lines INTO DATA(lv_rich).
+        layout->markup_line( page  = page
+                             x     = lv_x
+                             y     = lv_y
+                             val   = lv_rich
+                             align = lv_align ).
+        lv_y = lv_y + line_height( pdf     = pdf
+                                   element = element ).
+      ENDLOOP.
+      RETURN.
+    ENDIF.
+
     page->set_font( font = lo_font
                     size = lv_size ).
     page->set_text_color( element_color( element ) ).
@@ -2219,6 +2251,7 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
       " page - unless it is the first one of the page
       IF lv_y + lv_line_height > lv_bottom AND lt_chunk IS NOT INITIAL.
         text_draw( pdf     = pdf
+                   layout  = layout
                    page    = pdf->page( end_page )
                    element = element
                    lines   = lt_chunk
@@ -2236,6 +2269,7 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     ENDLOOP.
 
     text_draw( pdf     = pdf
+               layout  = layout
                page    = pdf->page( end_page )
                element = element
                lines   = lt_chunk
