@@ -639,6 +639,14 @@ DATA(lv_pdf) = zabaputil_cl_pdf_form=>render( val = ls_form data = ls_delivery )
 "   {BSTDK:date}  {UZEIT:time}  {RATE:number}  {RATE:number:2}
 "   {NETWR:amount:WAERS}  {MENGE:quantity:MEINS}  {NETWR:amount:EUR}
 
+" An element is printed only when a component is filled (condition = `NAME`, or
+" `!NAME` when it is empty); a REPEAT element prints the elements of its block once
+" per row of a table - placeholders in the block name the components of the row
+ls_form-t_element = VALUE #( BASE ls_form-t_element
+    ( type = zabaputil_cl_pdf_form=>cs_type-text   text = `Remark: {REMARK}` condition = `REMARK` )
+    ( type = zabaputil_cl_pdf_form=>cs_type-repeat name = `item` source = `T_ITEMS` )
+    ( type = zabaputil_cl_pdf_form=>cs_type-text   block = `item` text = `{POSNR} {MATNR} {MENGE:quantity:MEINS}` ) ).
+
 " What the form names that the data does not have - placeholders, table and image
 " sources, table columns - with the element they are in (an editor marks them)
 DATA(lt_unknown) = zabaputil_cl_pdf_form=>check( val = ls_form data = ls_delivery ).

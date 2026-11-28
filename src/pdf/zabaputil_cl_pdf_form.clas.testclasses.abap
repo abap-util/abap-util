@@ -108,6 +108,13 @@ CLASS ltcl_form DEFINITION FINAL
     METHODS absolute_every_page     FOR TESTING.
     METHODS absolute_text_grows     FOR TESTING.
     METHODS absolute_text_next_page FOR TESTING.
+    METHODS condition_flow          FOR TESTING.
+    METHODS condition_absolute      FOR TESTING.
+    METHODS repeat_flow             FOR TESTING.
+    METHODS repeat_flow_without_data FOR TESTING.
+    METHODS repeat_absolute         FOR TESTING.
+    METHODS repeat_absolute_pages   FOR TESTING.
+    METHODS check_block_and_condition FOR TESTING.
 
     "! the table of the test data with as many rows as asked for
     METHODS items
@@ -985,6 +992,172 @@ CLASS ltcl_form IMPLEMENTATION.
     lo_fixed = zabaputil_cl_pdf_form=>build( ls_fixed ).
     cl_abap_unit_assert=>assert_equals( exp = lo_fixed->page( 1 )->content( )
                                         act = lo_pdf->page( 2 )->content( ) ).
+  ENDMETHOD.
+
+  METHOD condition_flow.
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `Name` condition = `NAME` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `City` condition = `head.city` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `Items` condition = `T_ITEMS` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `No items` condition = `!T_ITEMS` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `Unknown` condition = `NONE` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `Not unknown` condition = `! NONE` ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                 data = ms_data ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 1 text = `Name` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 1 text = `City` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 1 text = `Items` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = shown( pdf = lo_pdf page = 1 text = `No items` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = shown( pdf = lo_pdf page = 1 text = `Unknown` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 1 text = `Not unknown` ) ).
+
+    " what is shown moves up: Items is where Name was without Name
+    CLEAR ms_data-name.
+    DATA(lo_without) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                     data = ms_data ).
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = shown( pdf = lo_without page = 1 text = `Name` ) ).
+
+    " without data a form shows all it has
+    lo_pdf = zabaputil_cl_pdf_form=>build( ms_form ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 1 text = `No items` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 1 text = `Unknown` ) ).
+  ENDMETHOD.
+
+  METHOD condition_absolute.
+    ms_form-absolute = abap_true.
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text x = 20 y = 30 text = `Name` condition = `NAME` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-rect x = 20 y = 40 w = 10 h = 10 condition = `!NAME` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text x = 20 y = 50 text = `Every` every_page = abap_true
+          condition = `NONE` ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                 data = ms_data ).
+    DATA(ls_fixed) = zabaputil_cl_pdf_form=>new_form( ).
+    ls_fixed-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text fixed = abap_true x = 20 y = 30 text = `Name` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = zabaputil_cl_pdf_form=>build( ls_fixed )->page( 1 )->content( )
+                                        act = lo_pdf->page( 1 )->content( ) ).
+  ENDMETHOD.
+
+  METHOD repeat_flow.
+    INSERT VALUE #( pos = 30 ) INTO TABLE ms_data-t_items.
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `Before` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-repeat name = `item` source = `t_items` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `After` )
+        " the block: anywhere in the form, printed where its REPEAT element is
+        ( type = zabaputil_cl_pdf_form=>cs_type-text block = `ITEM` text = `Item {POS}: {TEXT} for {NAME}` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text block = `item` text = `({TEXT})` condition = `TEXT` ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                 data = ms_data ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 1 text = `Item 10: Nut for Ada` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 1 text = `Item 20: Bolt for Ada` ) ).
+    " the wrapping of the flow joins the words with one blank
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 1 text = `Item 30: for Ada` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 1 text = `(Nut)` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 1 text = `(Bolt)` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = shown( pdf = lo_pdf page = 1 text = `()` ) ).
+
+    " in the flow, in the order of the rows, between Before and After
+    DATA(ls_flow) = zabaputil_cl_pdf_form=>new_form( ).
+    ls_flow-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `Before` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `Item 10: Nut for Ada` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `(Nut)` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `Item 20: Bolt for Ada` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `(Bolt)` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `Item 30:  for Ada` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `After` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = zabaputil_cl_pdf_form=>build( ls_flow )->page( 1 )->content( )
+                                        act = lo_pdf->page( 1 )->content( ) ).
+  ENDMETHOD.
+
+  METHOD repeat_flow_without_data.
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-repeat name = `item` source = `T_ITEMS` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text block = `item` text = `Item {POS}` ) ).
+    " without data the block once, with its placeholders
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( ms_form ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 1 text = `Item {POS}` ) ).
+    " a table without rows: no block
+    CLEAR ms_data-t_items.
+    lo_pdf = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                           data = ms_data ).
+    cl_abap_unit_assert=>assert_initial( lo_pdf->page( 1 )->content( ) ).
+  ENDMETHOD.
+
+  METHOD repeat_absolute.
+    " a block of 10 mm per row from 100 mm on; its elements are placed
+    " from the top of the block. What stood 5 mm below the first block
+    " follows the last one at that distance
+    items( 3 ).
+    ms_form-absolute = abap_true.
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text x = 20 y = 115 text = `Below` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-repeat name = `rows` x = 20 y = 100 h = 10 source = `T_ITEMS` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text block = `rows` x = 30 y = 2 text = `Item {POS}` ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                 data = ms_data ).
+
+    DATA(ls_fixed) = zabaputil_cl_pdf_form=>new_form( ).
+    ls_fixed-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text fixed = abap_true x = 30 y = 102 text = `Item 1` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text fixed = abap_true x = 30 y = 112 text = `Item 2` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text fixed = abap_true x = 30 y = 122 text = `Item 3` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text fixed = abap_true x = 20 y = 135 text = `Below` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = zabaputil_cl_pdf_form=>build( ls_fixed )->page( 1 )->content( )
+                                        act = lo_pdf->page( 1 )->content( ) ).
+  ENDMETHOD.
+
+  METHOD repeat_absolute_pages.
+    " blocks of 10 mm from 100 mm on: 17 fit above the bottom margin at
+    " 277 mm, the 18th starts the next page at the top margin
+    items( 30 ).
+    ms_form-absolute = abap_true.
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-repeat name = `rows` x = 20 y = 100 h = 10 source = `T_ITEMS` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text block = `rows` x = 30 y = 2 text = `Item {POS}` ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                 data = ms_data ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lo_pdf->page_count( ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 1 text = `Item 17` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = shown( pdf = lo_pdf page = 1 text = `Item 18` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 2 text = `Item 18` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 2 text = `Item 30` ) ).
+
+    DATA(ls_fixed) = zabaputil_cl_pdf_form=>new_form( ).
+    ls_fixed-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text fixed = abap_true x = 30 y = 22 text = `Item 18` ) ).
+    DATA(lv_first) = zabaputil_cl_pdf_form=>build( ls_fixed )->page( 1 )->content( ).
+    cl_abap_unit_assert=>assert_equals( exp = lv_first
+                                        act = substring( val = lo_pdf->page( 2 )->content( )
+                                                         len = strlen( lv_first ) ) ).
+  ENDMETHOD.
+
+  METHOD check_block_and_condition.
+
+    DATA lt_exp TYPE zabaputil_cl_pdf_form=>ty_t_unknown.
+
+    " a block names the components of a row - also when the table is
+    " empty - and those of the data
+    CLEAR ms_data-t_items.
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-repeat name = `item` source = `T_ITEMS` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text block = `item` text = `{POS} {TEXT} {NAME} {PRICE}`
+          condition = `!TEXT` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text block = `lost` text = `x` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `{POS}` condition = `HEAD-NONE` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-repeat name = `bad` source = `NAME` ) ).
+    lt_exp = VALUE #(
+        ( name = `PRICE`     part = zabaputil_cl_pdf_form=>cs_part-text      element = 2 )
+        ( name = `lost`      part = zabaputil_cl_pdf_form=>cs_part-block     element = 3 )
+        ( name = `HEAD-NONE` part = zabaputil_cl_pdf_form=>cs_part-condition element = 4 )
+        ( name = `POS`       part = zabaputil_cl_pdf_form=>cs_part-text      element = 4 )
+        ( name = `NAME`      part = zabaputil_cl_pdf_form=>cs_part-source    element = 5 label = `bad` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = lt_exp
+                                        act = zabaputil_cl_pdf_form=>check( val  = ms_form
+                                                                            data = ms_data ) ).
+
   ENDMETHOD.
 
   METHOD absolute_pushed_over.

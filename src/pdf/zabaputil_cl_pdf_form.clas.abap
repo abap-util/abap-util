@@ -64,6 +64,10 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         space      TYPE string VALUE `SPACE`,
         "! the flow goes on on a new page
         page_break TYPE string VALUE `PAGE_BREAK`,
+        "! the elements of the block of its name, once per row of a table of
+        "! the data (source): in the flow one after the other, in an absolute
+        "! form every h mm from its y on
+        repeat     TYPE string VALUE `REPEAT`,
       END OF cs_type.
 
     TYPES ty_length TYPE p LENGTH 8 DECIMALS 2.
@@ -115,6 +119,14 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         t_column   TYPE ty_t_column,
         "! the bytes of an image that belongs to the form (a logo)
         image      TYPE xstring,
+        "! printed only when this component of the data is filled - a table
+        "! when it has rows; `!NAME` only when it is empty
+        condition  TYPE string,
+        "! the name of the REPEAT element the element belongs to: printed
+        "! once per row, its placeholders name the components of the row
+        "! (and of the data, when the row has no component of that name);
+        "! in an absolute form its y is from the top of the block
+        block      TYPE string,
       END OF ty_s_element.
     TYPES ty_t_element TYPE STANDARD TABLE OF ty_s_element WITH EMPTY KEY.
 
@@ -178,6 +190,10 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         header TYPE string VALUE `HEADER`,
         "! a placeholder in the footer line
         footer TYPE string VALUE `FOOTER`,
+        "! the condition of an element
+        condition TYPE string VALUE `CONDITION`,
+        "! an element of a block no REPEAT element has the name of
+        block  TYPE string VALUE `BLOCK`,
       END OF cs_part.
 
     TYPES:
@@ -294,16 +310,103 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         found  TYPE abap_bool
         text   TYPE string.
 
-    "! The placeholders of a text that the data does not have
+    "! The placeholders of a text that neither the data nor the outer
+    "! data (of a block: the data of the form) has
     CLASS-METHODS check_text
       IMPORTING
         text    TYPE string
         data    TYPE any
+        outer   TYPE any
         part    TYPE string
         element TYPE i
         label   TYPE string
       CHANGING
         result  TYPE ty_t_unknown.
+
+    "! What one element names that the data does not have
+    CLASS-METHODS check_element
+      IMPORTING
+        element TYPE ty_s_element
+        index   TYPE i
+        data    TYPE any
+        outer   TYPE any
+      CHANGING
+        result  TYPE ty_t_unknown.
+
+    "! A component of the data by its path: NAME, HEAD-CITY; initial when
+    "! the data has none
+    CLASS-METHODS component_ref
+      IMPORTING
+        data          TYPE any
+        path          TYPE string
+      RETURNING
+        VALUE(result) TYPE REF TO data.
+
+    "! The rows of a table element or a REPEAT element: the table the
+    "! data has under the name of its source; initial when it has none
+    CLASS-METHODS rows_of
+      IMPORTING
+        element       TYPE ty_s_element
+        data          TYPE any
+      RETURNING
+        VALUE(result) TYPE REF TO data.
+
+    "! The condition of an element holds - always without data, so that a
+    "! form printed without data shows all of it
+    CLASS-METHODS is_shown
+      IMPORTING
+        element       TYPE ty_s_element
+        data          TYPE any
+        outer         TYPE any
+        with_data     TYPE abap_bool
+      RETURNING
+        VALUE(result) TYPE abap_bool.
+
+    "! An element of a block with its text resolved: first with the row,
+    "! then with the data of the form
+    CLASS-METHODS block_element
+      IMPORTING
+        element       TYPE ty_s_element
+        row           TYPE any
+        data          TYPE any
+      RETURNING
+        VALUE(result) TYPE ty_s_element.
+
+    "! The elements of a block, in the order of the form
+    CLASS-METHODS block_elements
+      IMPORTING
+        form          TYPE ty_s_form
+        name          TYPE string
+      RETURNING
+        VALUE(result) TYPE ty_t_element.
+
+    "! A REPEAT element in the flow: its block once per row
+    CLASS-METHODS flow_repeat
+      IMPORTING
+        pdf       TYPE REF TO zabaputil_cl_pdf
+        layout    TYPE REF TO zabaputil_cl_pdf_layout
+        form      TYPE ty_s_form
+        element   TYPE ty_s_element
+        data      TYPE any
+        with_data TYPE abap_bool.
+
+    "! A REPEAT element of an absolute form: its block every h mm, on the
+    "! next page at the top margin when it does not fit above the bottom one
+    "! @parameter page     | the page it starts on
+    "! @parameter end_page | the page its last block is on
+    "! @parameter end_y    | where its last block ends
+    CLASS-METHODS absolute_repeat
+      IMPORTING
+        pdf       TYPE REF TO zabaputil_cl_pdf
+        layout    TYPE REF TO zabaputil_cl_pdf_layout
+        form      TYPE ty_s_form
+        element   TYPE ty_s_element
+        page      TYPE i
+        data      TYPE any
+        with_data TYPE abap_bool
+      EXPORTING
+        end_page  TYPE i
+        end_y     TYPE f.
 
     "! The data has a component of that path: NAME, HEAD-CITY
     CLASS-METHODS has_component
@@ -559,7 +662,22 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
                          with_data = lv_with_data ).
     ELSE.
       LOOP AT val-t_element ASSIGNING FIELD-SYMBOL(<element>).
-        IF <element>-fixed = abap_true OR <element>-type = cs_type-rect.
+        IF <element>-fixed = abap_true OR <element>-type = cs_type-rect OR <element>-block IS NOT INITIAL.
+          CONTINUE.
+        ENDIF.
+        IF is_shown( element   = <element>
+                     data      = <data>
+                     outer     = <data>
+                     with_data = lv_with_data ) = abap_false.
+          CONTINUE.
+        ENDIF.
+        IF <element>-type = cs_type-repeat.
+          flow_repeat( pdf       = result
+                       layout    = lo_layout
+                       form      = val
+                       element   = <element>
+                       data      = <data>
+                       with_data = lv_with_data ).
           CONTINUE.
         ENDIF.
         flow_element( pdf       = result
@@ -599,6 +717,13 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     " Of an absolute form the ones of every page are left: the others are
     " on the page the tables above them left them on
     LOOP AT val-t_element ASSIGNING <element>.
+      IF <element>-block IS NOT INITIAL OR <element>-type = cs_type-repeat
+          OR is_shown( element   = <element>
+                       data      = <data>
+                       outer     = <data>
+                       with_data = lv_with_data ) = abap_false.
+        CONTINUE.
+      ENDIF.
       IF val-absolute = abap_true.
         IF <element>-every_page = abap_false.
           CONTINUE.
@@ -654,18 +779,23 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
   METHOD check.
 
     DATA lv_index TYPE i.
-    DATA lt_name  TYPE string_table.
+    DATA lr_rows  TYPE REF TO data.
+    DATA lr_line  TYPE REF TO data.
 
-    FIELD-SYMBOLS <rows> TYPE any.
+    FIELD-SYMBOLS <rows>   TYPE ANY TABLE.
+    FIELD-SYMBOLS <line>   TYPE any.
+    FIELD-SYMBOLS <repeat> TYPE ty_s_element.
 
     check_text( EXPORTING text    = val-header
                           data    = data
+                          outer   = data
                           part    = cs_part-header
                           element = 0
                           label   = ``
                 CHANGING  result  = result ).
     check_text( EXPORTING text    = val-footer
                           data    = data
+                          outer   = data
                           part    = cs_part-footer
                           element = 0
                           label   = ``
@@ -674,57 +804,350 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     LOOP AT val-t_element ASSIGNING FIELD-SYMBOL(<element>).
       lv_index = sy-tabix.
 
-      CASE <element>-type.
+      IF <element>-block IS INITIAL.
+        check_element( EXPORTING element = <element>
+                                 index   = lv_index
+                                 data    = data
+                                 outer   = data
+                       CHANGING  result  = result ).
+        CONTINUE.
+      ENDIF.
 
-        WHEN cs_type-text.
-          check_text( EXPORTING text    = <element>-text
-                                data    = data
-                                part    = cs_part-text
-                                element = lv_index
-                                label   = <element>-name
-                      CHANGING  result  = result ).
-
-        WHEN cs_type-table.
-          " a component of the data itself, as flow_table looks for it
-          UNASSIGN <rows>.
-          DATA(lr_rows) = component_of( node = data
-                                        name = to_upper( <element>-source ) ).
-          IF lr_rows IS BOUND.
-            ASSIGN lr_rows->* TO <rows>.
-            IF zabaputil_cl_util_context=>rtti_get_type_kind( <rows> ) <> `h`.
-              UNASSIGN <rows>.
-            ENDIF.
-          ENDIF.
-          IF <rows> IS NOT ASSIGNED.
-            INSERT VALUE #( name    = <element>-source
-                            part    = cs_part-source
-                            element = lv_index
-                            label   = <element>-name ) INTO TABLE result.
-            CONTINUE.
-          ENDIF.
-          " the columns: components of the rows, also of a table without rows
-          lt_name = component_names( <rows> ).
-          LOOP AT <element>-t_column ASSIGNING FIELD-SYMBOL(<column>).
-            IF NOT line_exists( lt_name[ table_line = to_upper( condense( <column>-name ) ) ] ).
-              INSERT VALUE #( name    = <column>-name
-                              part    = cs_part-column
-                              element = lv_index
-                              label   = <element>-name ) INTO TABLE result.
-            ENDIF.
-          ENDLOOP.
-
-        WHEN cs_type-image.
-          " an image the form carries needs no source
-          IF <element>-source IS NOT INITIAL AND component_of( node = data
-                                                               name = to_upper( <element>-source ) ) IS NOT BOUND.
-            INSERT VALUE #( name    = <element>-source
-                            part    = cs_part-source
-                            element = lv_index
-                            label   = <element>-name ) INTO TABLE result.
-          ENDIF.
-
-      ENDCASE.
+      " an element of a block: its placeholders name a row of the table
+      " of its REPEAT element, also when the table has no rows
+      UNASSIGN <repeat>.
+      LOOP AT val-t_element ASSIGNING <repeat>
+          WHERE type = cs_type-repeat.
+        IF to_upper( condense( <repeat>-name ) ) = to_upper( condense( <element>-block ) ).
+          EXIT.
+        ENDIF.
+        UNASSIGN <repeat>.
+      ENDLOOP.
+      IF <repeat> IS NOT ASSIGNED.
+        INSERT VALUE #( name    = <element>-block
+                        part    = cs_part-block
+                        element = lv_index
+                        label   = <element>-name ) INTO TABLE result.
+        CONTINUE.
+      ENDIF.
+      CLEAR lr_line.
+      lr_rows = rows_of( element = <repeat>
+                         data    = data ).
+      IF lr_rows IS BOUND.
+        ASSIGN lr_rows->* TO <rows>.
+        CREATE DATA lr_line LIKE LINE OF <rows>.
+      ENDIF.
+      IF lr_line IS NOT BOUND.
+        " the REPEAT element reports its source
+        CONTINUE.
+      ENDIF.
+      ASSIGN lr_line->* TO <line>.
+      check_element( EXPORTING element = <element>
+                               index   = lv_index
+                               data    = <line>
+                               outer   = data
+                     CHANGING  result  = result ).
     ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD check_element.
+
+    DATA lt_name TYPE string_table.
+
+    FIELD-SYMBOLS <rows> TYPE any.
+
+    IF element-condition IS NOT INITIAL.
+      DATA(lv_condition) = condense( element-condition ).
+      IF strlen( lv_condition ) > 0 AND lv_condition(1) = `!`.
+        lv_condition = condense( substring( val = lv_condition
+                                            off = 1 ) ).
+      ENDIF.
+      IF component_ref( data = data
+                        path = lv_condition ) IS NOT BOUND AND component_ref( data = outer
+                                                                             path = lv_condition ) IS NOT BOUND.
+        INSERT VALUE #( name    = element-condition
+                        part    = cs_part-condition
+                        element = index
+                        label   = element-name ) INTO TABLE result.
+      ENDIF.
+    ENDIF.
+
+    CASE element-type.
+
+      WHEN cs_type-text.
+        check_text( EXPORTING text    = element-text
+                              data    = data
+                              outer   = outer
+                              part    = cs_part-text
+                              element = index
+                              label   = element-name
+                    CHANGING  result  = result ).
+
+      WHEN cs_type-table OR cs_type-repeat.
+        DATA(lr_rows) = rows_of( element = element
+                                 data    = data ).
+        IF lr_rows IS NOT BOUND.
+          INSERT VALUE #( name    = element-source
+                          part    = cs_part-source
+                          element = index
+                          label   = element-name ) INTO TABLE result.
+          RETURN.
+        ENDIF.
+        " the columns: components of the rows, also of a table without rows
+        ASSIGN lr_rows->* TO <rows>.
+        lt_name = component_names( <rows> ).
+        LOOP AT element-t_column ASSIGNING FIELD-SYMBOL(<column>).
+          IF NOT line_exists( lt_name[ table_line = to_upper( condense( <column>-name ) ) ] ).
+            INSERT VALUE #( name    = <column>-name
+                            part    = cs_part-column
+                            element = index
+                            label   = element-name ) INTO TABLE result.
+          ENDIF.
+        ENDLOOP.
+
+      WHEN cs_type-image.
+        " an image the form carries needs no source
+        IF element-source IS NOT INITIAL AND component_of( node = data
+                                                           name = to_upper( element-source ) ) IS NOT BOUND.
+          INSERT VALUE #( name    = element-source
+                          part    = cs_part-source
+                          element = index
+                          label   = element-name ) INTO TABLE result.
+        ENDIF.
+
+    ENDCASE.
+
+  ENDMETHOD.
+
+  METHOD component_ref.
+
+    FIELD-SYMBOLS <node> TYPE any.
+
+    DATA(lv_path) = to_upper( condense( path ) ).
+    lv_path = replace( val  = lv_path
+                       sub  = `.`
+                       with = `-`
+                       occ  = 0 ).
+    IF lv_path IS INITIAL.
+      RETURN.
+    ENDIF.
+    SPLIT lv_path AT `-` INTO TABLE DATA(lt_part).
+
+    ASSIGN data TO <node>.
+    LOOP AT lt_part INTO DATA(lv_part).
+      result = component_of( node = <node>
+                             name = lv_part ).
+      IF result IS NOT BOUND.
+        RETURN.
+      ENDIF.
+      ASSIGN result->* TO <node>.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD rows_of.
+
+    FIELD-SYMBOLS <component> TYPE any.
+
+    IF element-source IS INITIAL.
+      RETURN.
+    ENDIF.
+    DATA(lr_component) = component_of( node = data
+                                       name = to_upper( element-source ) ).
+    IF lr_component IS NOT BOUND.
+      RETURN.
+    ENDIF.
+    ASSIGN lr_component->* TO <component>.
+    IF zabaputil_cl_util_context=>rtti_get_type_kind( <component> ) = `h`.
+      result = lr_component.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD is_shown.
+
+    DATA lv_negate TYPE abap_bool.
+    DATA lv_filled TYPE abap_bool.
+
+    FIELD-SYMBOLS <value> TYPE any.
+
+    result = abap_true.
+    DATA(lv_condition) = condense( element-condition ).
+    IF lv_condition IS INITIAL OR with_data = abap_false.
+      RETURN.
+    ENDIF.
+    IF lv_condition(1) = `!`.
+      lv_negate = abap_true.
+      lv_condition = condense( substring( val = lv_condition
+                                          off = 1 ) ).
+    ENDIF.
+
+    DATA(lr_value) = component_ref( data = data
+                                    path = lv_condition ).
+    IF lr_value IS NOT BOUND.
+      lr_value = component_ref( data = outer
+                                path = lv_condition ).
+    ENDIF.
+    IF lr_value IS BOUND.
+      ASSIGN lr_value->* TO <value>.
+      lv_filled = xsdbool( <value> IS NOT INITIAL ).
+    ENDIF.
+
+    IF lv_negate = abap_true.
+      result = xsdbool( lv_filled = abap_false ).
+    ELSE.
+      result = lv_filled.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD block_element.
+
+    result = element.
+    result-text = resolve( val  = resolve( val  = element-text
+                                           data = row )
+                           data = data ).
+
+  ENDMETHOD.
+
+  METHOD block_elements.
+
+    DATA(lv_name) = to_upper( condense( name ) ).
+    IF lv_name IS INITIAL.
+      RETURN.
+    ENDIF.
+    LOOP AT form-t_element ASSIGNING FIELD-SYMBOL(<element>).
+      IF to_upper( condense( <element>-block ) ) = lv_name AND <element>-type <> cs_type-repeat.
+        INSERT <element> INTO TABLE result.
+      ENDIF.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD flow_repeat.
+
+    FIELD-SYMBOLS <rows> TYPE ANY TABLE.
+
+    DATA(lt_block) = block_elements( form = form
+                                     name = element-name ).
+
+    DATA(lr_rows) = rows_of( element = element
+                             data    = data ).
+    IF with_data = abap_false OR lr_rows IS NOT BOUND.
+      " printed without its rows: the block once, with its placeholders
+      LOOP AT lt_block ASSIGNING FIELD-SYMBOL(<element>) WHERE fixed = abap_false.
+        flow_element( pdf       = pdf
+                      layout    = layout
+                      element   = <element>
+                      left      = form-margin_left
+                      data      = data
+                      with_data = abap_false ).
+      ENDLOOP.
+      RETURN.
+    ENDIF.
+
+    ASSIGN lr_rows->* TO <rows>.
+    LOOP AT <rows> ASSIGNING FIELD-SYMBOL(<row>).
+      LOOP AT lt_block ASSIGNING <element> WHERE fixed = abap_false.
+        IF is_shown( element   = <element>
+                     data      = <row>
+                     outer     = data
+                     with_data = abap_true ) = abap_false.
+          CONTINUE.
+        ENDIF.
+        flow_element( pdf       = pdf
+                      layout    = layout
+                      element   = block_element( element = <element>
+                                                 row     = <row>
+                                                 data    = data )
+                      left      = form-margin_left
+                      data      = <row>
+                      with_data = abap_true ).
+      ENDLOOP.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD absolute_repeat.
+
+    DATA lv_y      TYPE f.
+    DATA lv_height TYPE f.
+    DATA lv_bottom TYPE f.
+    DATA ls_draw   TYPE ty_s_element.
+
+    FIELD-SYMBOLS <rows> TYPE ANY TABLE.
+
+    DATA(lt_block) = block_elements( form = form
+                                     name = element-name ).
+
+    " the height of one block: as drawn, or what its elements need
+    lv_height = element-h.
+    IF lv_height <= 0.
+      LOOP AT lt_block ASSIGNING FIELD-SYMBOL(<element>).
+        IF <element>-y + <element>-h > lv_height.
+          lv_height = <element>-y + <element>-h.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+    IF lv_height <= 0.
+      lv_height = 1.
+    ENDIF.
+
+    lv_bottom = layout->page( )->height( ) - form-margin_bottom.
+    end_page = page.
+    lv_y = element-y.
+
+    DATA(lr_rows) = rows_of( element = element
+                             data    = data ).
+    IF with_data = abap_false OR lr_rows IS NOT BOUND.
+      " printed without its rows: the block once, with its placeholders
+      LOOP AT lt_block ASSIGNING <element>.
+        ls_draw = <element>.
+        ls_draw-y = lv_y + <element>-y.
+        fixed_element( pdf       = pdf
+                       layout    = layout
+                       page      = pdf->page( end_page )
+                       element   = ls_draw
+                       data      = data
+                       with_data = abap_false ).
+      ENDLOOP.
+      end_y = lv_y + lv_height.
+      RETURN.
+    ENDIF.
+
+    ASSIGN lr_rows->* TO <rows>.
+    LOOP AT <rows> ASSIGNING FIELD-SYMBOL(<row>).
+      " a block that does not fit above the bottom margin starts the next
+      " page - unless it is the first one there
+      IF lv_y + lv_height > lv_bottom AND lv_y > form-margin_top.
+        IF end_page >= pdf->page_count( ).
+          layout->page_break( ).
+        ENDIF.
+        end_page = end_page + 1.
+        lv_y = form-margin_top.
+      ENDIF.
+      LOOP AT lt_block ASSIGNING <element>.
+        IF is_shown( element   = <element>
+                     data      = <row>
+                     outer     = data
+                     with_data = abap_true ) = abap_false.
+          CONTINUE.
+        ENDIF.
+        ls_draw = block_element( element = <element>
+                                 row     = <row>
+                                 data    = data ).
+        ls_draw-y = lv_y + <element>-y.
+        fixed_element( pdf       = pdf
+                       layout    = layout
+                       page      = pdf->page( end_page )
+                       element   = ls_draw
+                       data      = <row>
+                       with_data = abap_true ).
+      ENDLOOP.
+      lv_y = lv_y + lv_height.
+    ENDLOOP.
+    end_y = lv_y.
 
   ENDMETHOD.
 
@@ -750,6 +1173,13 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
                                 format = lv_format
                                 option = lv_option
                       IMPORTING found  = lv_found ).
+      IF lv_found = abap_false.
+        component_text( EXPORTING path   = lv_path
+                                  data   = outer
+                                  format = lv_format
+                                  option = lv_option
+                        IMPORTING found  = lv_found ).
+      ENDIF.
       IF lv_found = abap_true.
         CONTINUE.
       ENDIF.
@@ -758,8 +1188,9 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
       lv_format = to_lower( condense( lv_format ) ).
       IF ( lv_format = `date` OR lv_format = `time` OR lv_format = `number`
           OR lv_format = `amount` OR lv_format = `quantity` )
-          AND has_component( data = data
-                             name = lv_path ) = abap_true.
+          AND ( has_component( data = data
+                               name = lv_path ) = abap_true OR has_component( data = outer
+                                                                              name = lv_path ) = abap_true ).
         CONTINUE.
       ENDIF.
       INSERT VALUE #( name    = lv_name
@@ -772,29 +1203,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
   METHOD has_component.
 
-    FIELD-SYMBOLS <node> TYPE any.
-
-    DATA(lv_path) = to_upper( condense( name ) ).
-    lv_path = replace( val  = lv_path
-                       sub  = `.`
-                       with = `-`
-                       occ  = 0 ).
-    IF lv_path IS INITIAL.
-      RETURN.
-    ENDIF.
-    SPLIT lv_path AT `-` INTO TABLE DATA(lt_part).
-
-    ASSIGN data TO <node>.
-    LOOP AT lt_part INTO DATA(lv_part).
-      DATA(lr_node) = component_of( node = <node>
-                                    name = lv_part ).
-      IF lr_node IS NOT BOUND.
-        RETURN.
-      ENDIF.
-      ASSIGN lr_node->* TO <node>.
-    ENDLOOP.
-
-    result = abap_true.
+    result = xsdbool( component_ref( data = data
+                                     path = name ) IS BOUND ).
 
   ENDMETHOD.
 
@@ -1258,11 +1668,15 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     " from the top of the canvas down: a table is printed before what
     " stands below it
     LOOP AT form-t_element INTO ls_element.
-      IF ls_element-every_page = abap_true.
+      IF ls_element-every_page = abap_true OR ls_element-block IS NOT INITIAL
+          OR is_shown( element   = ls_element
+                       data      = data
+                       outer     = data
+                       with_data = with_data ) = abap_false.
         CONTINUE.
       ENDIF.
       CASE ls_element-type.
-        WHEN cs_type-text OR cs_type-table OR cs_type-line OR cs_type-rect OR cs_type-image.
+        WHEN cs_type-text OR cs_type-table OR cs_type-line OR cs_type-rect OR cs_type-image OR cs_type-repeat.
           INSERT ls_element INTO TABLE lt_element.
       ENDCASE.
     ENDLOOP.
@@ -1281,6 +1695,22 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
         ENDIF.
       ENDLOOP.
       ls_element-y = lv_top + lv_shift.
+
+      IF ls_element-type = cs_type-repeat.
+        CLEAR ls_anchor.
+        absolute_repeat( EXPORTING pdf       = pdf
+                                   layout    = layout
+                                   form      = form
+                                   element   = ls_element
+                                   page      = lv_page
+                                   data      = data
+                                   with_data = with_data
+                         IMPORTING end_page  = ls_anchor-page
+                                   end_y     = ls_anchor-y ).
+        ls_anchor-bottom = lv_top + ls_element-h.
+        INSERT ls_anchor INTO TABLE lt_anchor.
+        CONTINUE.
+      ENDIF.
 
       IF ls_element-type = cs_type-table.
         " the flow of the layout, between the edges of the table and from
