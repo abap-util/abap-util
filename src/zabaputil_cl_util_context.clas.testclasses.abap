@@ -2984,10 +2984,42 @@ CLASS ltcl_zip_ops DEFINITION FINAL
     METHODS pack_empty                     FOR TESTING.
     METHODS roundtrip                      FOR TESTING.
     METHODS unpack_no_archive              FOR TESTING.
+    METHODS one_file_at_a_time             FOR TESTING.
 
 ENDCLASS.
 
 CLASS ltcl_zip_ops IMPLEMENTATION.
+
+  METHOD one_file_at_a_time.
+    DATA lo_probe TYPE REF TO object.
+    TRY.
+        CREATE OBJECT lo_probe TYPE ('CL_ABAP_ZIP').
+      CATCH cx_root.
+        RETURN.
+    ENDTRY.
+
+    DATA(lv_zip) = zabaputil_cl_util_context=>zip_pack( VALUE #( ( name    = `a.txt`
+                                                                   content = CONV xstring( `41` ) )
+                                                                 ( name    = `dir/b.txt`
+                                                                   content = CONV xstring( `4242` ) ) ) ).
+    DATA(lo_zip) = zabaputil_cl_util_context=>zip_load( lv_zip ).
+    cl_abap_unit_assert=>assert_equals( exp = VALUE string_table( ( `a.txt` ) ( `dir/b.txt` ) )
+                                        act = zabaputil_cl_util_context=>zip_names( lo_zip ) ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV xstring( `4242` )
+                                        act = zabaputil_cl_util_context=>zip_get( zip  = lo_zip
+                                                                                  name = `dir/b.txt` ) ).
+    TRY.
+        zabaputil_cl_util_context=>zip_get( zip  = lo_zip
+                                            name = `c.txt` ).
+        cl_abap_unit_assert=>fail( `a file the archive does not have has to raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+    TRY.
+        zabaputil_cl_util_context=>zip_load( CONV xstring( `48656C6C6F` ) ).
+        cl_abap_unit_assert=>fail( `data that is no archive has to raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+  ENDMETHOD.
 
   METHOD unpack_no_archive.
     DATA lo_probe TYPE REF TO object.
@@ -4105,10 +4137,22 @@ CLASS ltcl_cur_amounts DEFINITION FINAL
     METHODS to_external_two_decimals      FOR TESTING.
     METHODS to_internal_zero_decimals     FOR TESTING.
     METHODS roundtrip                     FOR TESTING.
+    METHODS decimals_not_listed           FOR TESTING.
 
 ENDCLASS.
 
 CLASS ltcl_cur_amounts IMPLEMENTATION.
+
+  METHOD decimals_not_listed.
+    " what the system does not list - or no table to read, as in the
+    " transpiled runtime: a currency has two, a unit is unknown
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = zabaputil_cl_util_context=>currency_get_decimals( `XYZ` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = zabaputil_cl_util_context=>currency_get_decimals( `` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = -1
+                                        act = zabaputil_cl_util_context=>unit_get_decimals( `XYZ` ) ).
+  ENDMETHOD.
 
   METHOD to_external_zero_decimals.
     " JPY-style currency: stored 123.45 means 12345

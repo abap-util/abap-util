@@ -59,9 +59,12 @@
 "! A sheet stays open until the next add_sheet( ) or get_xlsx( ) and is
 "! kept until then as its rows, rendered to text - not as the tables.
 "!
-"! Not in it: conditional formatting, comments, images, charts, a
-"! protected sheet, an .xls file of Excel 97-2003, a workbook with a
-"! password, changing a workbook that was read.
+"! A sheet also takes rules of conditional formatting, comments, pictures
+"! and protection; factory( abap_true ) writes the texts as shared strings.
+"!
+"! Not in it: charts, pivot tables, an .xls file of Excel 97-2003, a
+"! workbook encrypted with a password, changing a workbook that was read
+"! (a template).
 CLASS zabaputil_cl_util_xlsx DEFINITION
   PUBLIC FINAL
   CREATE PROTECTED.
@@ -227,6 +230,13 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
         conv_exit TYPE string,
         "! the text of a fixed value of the domain instead of the value
         fixed_value_text TYPE abap_bool,
+        "! the component that holds the currency key of an amount: the
+        "! cell shows the decimals of the currency (JPY 0, EUR 2, KWD 3),
+        "! and the amount is written as WRITE ... CURRENCY shows it
+        currency TYPE string,
+        "! the component that holds the unit of a quantity: the cell shows
+        "! the decimals of the unit
+        unit     TYPE string,
       END OF ty_s_column.
     TYPES ty_t_column TYPE STANDARD TABLE OF ty_s_column WITH EMPTY KEY.
 
@@ -380,6 +390,25 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
         totals_rows TYPE i,
       END OF ty_s_excel_table.
     TYPES ty_t_excel_table TYPE STANDARD TABLE OF ty_s_excel_table WITH EMPTY KEY.
+
+    TYPES:
+      "! how a cell of a workbook that was read is shown - a cell with a
+      "! format of its own. A colour is RGB in six hex digits; one of the
+      "! theme of the workbook is left empty
+      BEGIN OF ty_s_cell_format,
+        row       TYPE i,
+        col       TYPE i,
+        "! the number format (`#,##0.00`, `dd.mm.yyyy`, `General`)
+        format    TYPE string,
+        bold      TYPE abap_bool,
+        italic    TYPE abap_bool,
+        underline TYPE abap_bool,
+        color     TYPE string,
+        fill      TYPE string,
+        halign    TYPE string,
+        wrap      TYPE abap_bool,
+      END OF ty_s_cell_format.
+    TYPES ty_t_cell_format TYPE STANDARD TABLE OF ty_s_cell_format WITH EMPTY KEY.
 
     CONSTANTS:
       BEGIN OF cs_kind,
@@ -691,6 +720,15 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
       RETURNING
         VALUE(result) TYPE ty_t_hyperlink.
 
+    "! The formats of the cells of a sheet that have one of their own - read
+    "! on their own, so that a read of the values does not pay for them
+    METHODS get_cell_formats
+      IMPORTING
+        sheet         TYPE clike OPTIONAL
+        index         TYPE i     DEFAULT 1
+      RETURNING
+        VALUE(result) TYPE ty_t_cell_format.
+
     "! the defined names of the workbook
     METHODS get_defined_names
       RETURNING
@@ -774,6 +812,7 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
         name     TYPE string,
         cat      TYPE string,
         rollname TYPE string,
+        decimals TYPE i,
       END OF ty_s_field.
     TYPES ty_t_field TYPE STANDARD TABLE OF ty_s_field WITH EMPTY KEY.
 
@@ -819,6 +858,13 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
         rule        TYPE ty_s_rule,
         conv_exit   TYPE string,
         t_fix       TYPE ty_t_fix,
+        " the component with the currency or the unit, the decimals of the
+        " field, the format the decimals go into
+        currency    TYPE string,
+        unit        TYPE string,
+        decimals    TYPE i,
+        format      TYPE string,
+        style_base  TYPE ty_s_style,
       END OF ty_s_out_col.
     TYPES ty_t_out_col TYPE STANDARD TABLE OF ty_s_out_col WITH EMPTY KEY.
 
@@ -1051,10 +1097,14 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
     DATA mv_comments  TYPE i.
     DATA mv_drawings  TYPE i.
     DATA mv_images    TYPE i.
+    " the decimals of the currencies and units read so far: C or U and the key
+    DATA mt_decimals  TYPE HASHED TABLE OF ty_s_sst WITH UNIQUE KEY text.
 
     " reading
     DATA mv_loaded     TYPE abap_bool.
-    DATA mt_part       TYPE zabaputil_cl_util_context=>ty_t_zip_file.
+    " the archive, opened: a part is unpacked when it is read
+    DATA mo_zip        TYPE REF TO object.
+    DATA mt_part       TYPE string_table.
     DATA mt_sheet      TYPE STANDARD TABLE OF ty_s_sheet WITH EMPTY KEY.
     DATA mt_shared     TYPE string_table.
     DATA mt_style_kind TYPE string_table.
@@ -1290,6 +1340,14 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
     METHODS dxf_get
       IMPORTING
         val           TYPE ty_s_style
+      RETURNING
+        VALUE(result) TYPE i.
+
+    "! the decimals of a currency (C and its key) or a unit (U and its key),
+    "! read once per workbook
+    METHODS decimals_get
+      IMPORTING
+        val           TYPE string
       RETURNING
         VALUE(result) TYPE i.
 
@@ -2174,6 +2232,28 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD decimals_get.
+
+    FIELD-SYMBOLS <dec> TYPE ty_s_sst.
+
+    UNASSIGN <dec>.
+    ASSIGN mt_decimals[ text = val ] TO <dec>.
+    IF <dec> IS NOT ASSIGNED.
+      DATA(lv_key) = substring( val = val
+                                off = 1 ).
+      IF val(1) = `C`.
+        result = zabaputil_cl_util_context=>currency_get_decimals( lv_key ).
+      ELSE.
+        result = zabaputil_cl_util_context=>unit_get_decimals( lv_key ).
+      ENDIF.
+      INSERT VALUE #( text  = val
+                      index = result ) INTO TABLE mt_decimals.
+      RETURN.
+    ENDIF.
+    result = <dec>-index.
+
+  ENDMETHOD.
+
   METHOD password_hash.
 
     DATA lv_hash  TYPE i.
@@ -2483,6 +2563,9 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     FIELD-SYMBOLS <cell> TYPE any.
     FIELD-SYMBOLS <link> TYPE any.
     FIELD-SYMBOLS <col>  TYPE ty_s_out_col.
+    FIELD-SYMBOLS <sst>  TYPE ty_s_sst.
+    " the style of an amount by the decimals of its currency, per column
+    DATA lt_dec_style TYPE HASHED TABLE OF ty_s_sst WITH UNIQUE KEY text.
 
     " where the header row starts: A1, or the cell the layout names
     IF layout-start_cell IS NOT INITIAL.
@@ -2630,7 +2713,51 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
           ENDIF.
         ENDIF.
 
-        IF <col>-conv_exit IS INITIAL AND <col>-t_fix IS INITIAL.
+        IF <col>-currency IS NOT INITIAL OR <col>-unit IS NOT INITIAL.
+          " an amount or a quantity: the decimals of its currency or unit
+          UNASSIGN <link>.
+          IF <col>-currency IS NOT INITIAL.
+            ASSIGN COMPONENT <col>-currency OF STRUCTURE <row> TO <link>.
+            lv_value = |C{ <link> }|.
+          ELSE.
+            ASSIGN COMPONENT <col>-unit OF STRUCTURE <row> TO <link>.
+            lv_value = |U{ <link> }|.
+          ENDIF.
+          DATA(lv_dec) = decimals_get( lv_value ).
+          lv_number = <cell>.
+          IF <col>-currency IS NOT INITIAL.
+            " as WRITE ... CURRENCY: the field's decimals are the currency's
+            DO <col>-decimals - lv_dec TIMES.
+              lv_number = lv_number * 10.
+            ENDDO.
+            DO lv_dec - <col>-decimals TIMES.
+              lv_number = lv_number / 10.
+            ENDDO.
+          ELSEIF lv_dec < 0.
+            lv_dec = <col>-decimals.
+          ENDIF.
+          lv_value = |{ <col>-letters }:{ lv_dec }|.
+          UNASSIGN <sst>.
+          ASSIGN lt_dec_style[ text = lv_value ] TO <sst>.
+          IF <sst> IS NOT ASSIGNED.
+            DATA(lv_code) = <col>-format.
+            IF lv_code IS INITIAL AND lv_dec > 0.
+              lv_code = `#,##0.` && repeat( val = `0`
+                                            occ = lv_dec ).
+            ELSEIF lv_code IS INITIAL.
+              lv_code = `#,##0`.
+            ENDIF.
+            INSERT VALUE #( text  = lv_value
+                            index = style_get( code  = lv_code
+                                               style = <col>-style_base ) ) INTO TABLE lt_dec_style ASSIGNING <sst>.
+          ENDIF.
+          lv_text = number_plain( |{ lv_number }| ).
+          IF <sst>-index > 0.
+            lv_xml = |<c r="{ lv_ref }" s="{ <sst>-index }"><v>{ lv_text }</v></c>|.
+          ELSE.
+            lv_xml = |<c r="{ lv_ref }"><v>{ lv_text }</v></c>|.
+          ENDIF.
+        ELSEIF <col>-conv_exit IS INITIAL AND <col>-t_fix IS INITIAL.
           cell_xml( EXPORTING address   = lv_ref
                               cat       = <col>-cat
                               style     = lv_style
@@ -2667,7 +2794,9 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
         lv_cells = lv_cells && lv_xml.
 
         IF <col>-cat = cs_cat-number AND <col>-total_fn IS NOT INITIAL.
-          lv_number = <cell>.
+          IF <col>-currency IS INITIAL AND <col>-unit IS INITIAL.
+            lv_number = <cell>.
+          ENDIF.
           <col>-sum = <col>-sum + lv_number.
           IF <col>-numbers = 0 OR lv_number < <col>-low.
             <col>-low = lv_number.
@@ -2875,8 +3004,15 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
         " YYYYMMDDHHMMSS, with or without a fraction of a second - in the
         " time zone the layout names
         text = |{ val }|.
-        IF time_zone IS NOT INITIAL AND val IS NOT INITIAL.
-          lv_stampl = val.
+        " a utclong as a template writes it: 2024-03-15 10:30:00.1234567
+        IF text CA `-:`.
+          text = digits_only( text ).
+          IF strlen( text ) > 14.
+            text = text(14).
+          ENDIF.
+        ENDIF.
+        IF time_zone IS NOT INITIAL AND val IS NOT INITIAL AND strlen( text ) >= 14.
+          lv_stampl = text.
           zabaputil_cl_util_context=>time_stampl_to_tz( EXPORTING val  = lv_stampl
                                                                   tz   = time_zone
                                                         IMPORTING date = lv_date
@@ -3700,6 +3836,7 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
       IF lr_comp->type->is_ddic_type( ) = abap_true.
         ls_field-rollname = lv_name.
       ENDIF.
+      ls_field-decimals = lr_comp->type->decimals.
       INSERT ls_field INTO TABLE result.
     ENDLOOP.
 
@@ -3733,6 +3870,10 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     ELSEIF type_kind = zabaputil_cl_util_context=>cv_typedescr_typekind_hex
         OR type_kind = zabaputil_cl_util_context=>cv_typedescr_typekind_xstring.
       result = cs_cat-hex.
+    ELSEIF type_kind = `p`.
+      " utclong (cl_abap_typedescr=>typekind_utclong, a constant 7.02 does
+      " not have): a date with its time
+      result = cs_cat-timestamp.
     ELSEIF type_kind <> zabaputil_cl_util_context=>cv_typedescr_typekind_table
         AND type_kind <> zabaputil_cl_util_context=>cv_typedescr_typekind_dref
         AND type_kind <> zabaputil_cl_util_context=>cv_typedescr_typekind_oref
@@ -3883,6 +4024,20 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
                     name = `outline level` ).
       ls_col-validation = lr_column->validation.
       ls_col-rule = lr_column->rule.
+      IF ( lr_column->currency IS NOT INITIAL OR lr_column->unit IS NOT INITIAL ) AND ls_col-cat = cs_cat-number.
+        ls_col-currency = zabaputil_cl_util_context=>c_trim_upper( lr_column->currency ).
+        ls_col-unit = zabaputil_cl_util_context=>c_trim_upper( lr_column->unit ).
+        DATA(lv_key_field) = ls_col-currency && ls_col-unit.
+        IF field_find( t_field = t_field
+                       name    = lv_key_field ) IS INITIAL.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |XLSX_COLUMN_UNKNOWN - the row has no elementary component { lv_key_field } for a currency or unit|.
+        ENDIF.
+        ls_col-decimals = ls_field-decimals.
+        ls_col-format = lr_column->format.
+        ls_col-style_base = lr_column->style.
+      ENDIF.
       ls_col-conv_exit = zabaputil_cl_util_context=>c_trim_upper( lr_column->conv_exit ).
       IF lr_column->fixed_value_text = abap_true AND ls_field-rollname IS NOT INITIAL.
         TRY.
@@ -4850,7 +5005,8 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
           val = `XLSX_NO_WORKBOOK - the file is no .xlsx workbook`.
     ENDIF.
     TRY.
-        mt_part = zabaputil_cl_util_context=>zip_unpack( val ).
+        mo_zip = zabaputil_cl_util_context=>zip_load( val ).
+        mt_part = zabaputil_cl_util_context=>zip_names( mo_zip ).
       CATCH cx_root INTO DATA(x).
         RAISE EXCEPTION TYPE zabaputil_cx_util_error
           EXPORTING
@@ -4945,12 +5101,9 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
       IF zabaputil_cl_util_context=>c_ends_with( val    = lr_rel->type
                                                  suffix = `/sharedStrings` ) = abap_true.
         shared_read( part_get( lv_path ) ).
-        " read once, and a large part - not kept twice
-        DELETE mt_part WHERE name = lv_path.
       ELSEIF zabaputil_cl_util_context=>c_ends_with( val    = lr_rel->type
                                                      suffix = `/styles` ) = abap_true.
         styles_read( part_get( lv_path ) ).
-        DELETE mt_part WHERE name = lv_path.
       ENDIF.
     ENDLOOP.
 
@@ -4958,17 +5111,14 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
 
   METHOD part_get.
 
-    LOOP AT mt_part REFERENCE INTO DATA(lr_part).
-      IF lr_part->name = val.
-        result = lr_part->content.
-        RETURN.
-      ENDIF.
-    ENDLOOP.
-    " a package names its parts without regard to case
+    " a package names its parts without regard to case; a part is unpacked
+    " when it is read, not with the archive
     DATA(lv_name) = to_upper( val ).
-    LOOP AT mt_part REFERENCE INTO lr_part.
-      IF to_upper( lr_part->name ) = lv_name.
-        result = lr_part->content.
+    LOOP AT mt_part INTO DATA(lv_part).
+      DATA(lv_other) = to_upper( lv_part ).
+      IF lv_other = lv_name.
+        result = zabaputil_cl_util_context=>zip_get( zip  = mo_zip
+                                                     name = lv_part ).
         RETURN.
       ENDIF.
     ENDLOOP.
@@ -5633,6 +5783,190 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     sheet_tail( EXPORTING sheet  = sheet_get( sheet = sheet
                                               index = index )
                 IMPORTING t_link = result ).
+
+  ENDMETHOD.
+
+  METHOD get_cell_formats.
+
+    TYPES:
+      BEGIN OF ty_s_code,
+        id   TYPE i,
+        code TYPE string,
+      END OF ty_s_code.
+    DATA lt_code   TYPE STANDARD TABLE OF ty_s_code WITH EMPTY KEY.
+    DATA lt_font   TYPE ty_t_cell_format.
+    DATA lt_fill   TYPE string_table.
+    DATA lt_xf     TYPE ty_t_cell_format.
+    DATA ls_format TYPE ty_s_cell_format.
+    DATA lv_kind   TYPE string.
+    DATA lv_name   TYPE string.
+    DATA lt_attr   TYPE zabaputil_cl_util_context=>ty_t_xml_attribute.
+    DATA lv_part   TYPE string.
+    DATA lv_row    TYPE i.
+    FIELD-SYMBOLS <font> TYPE ty_s_cell_format.
+    FIELD-SYMBOLS <xf>   TYPE ty_s_cell_format.
+
+    DATA(ls_sheet) = sheet_get( sheet = sheet
+                                index = index ).
+
+    " the built-in formats a file names by number only
+    lt_code = VALUE #( ( id = 0 code = `General` ) ( id = 1 code = `0` ) ( id = 2 code = `0.00` )
+                       ( id = 3 code = `#,##0` ) ( id = 4 code = `#,##0.00` ) ( id = 9 code = `0%` )
+                       ( id = 10 code = `0.00%` ) ( id = 11 code = `0.00E+00` ) ( id = 14 code = `mm-dd-yy` )
+                       ( id = 18 code = `h:mm AM/PM` ) ( id = 20 code = `h:mm` ) ( id = 21 code = `h:mm:ss` )
+                       ( id = 22 code = `m/d/yy h:mm` ) ( id = 49 code = `@` ) ).
+
+    " styles.xml: the formats, the fonts, the fills, and the cell formats
+    " made of them
+    DATA(lv_styles) = ``.
+    LOOP AT mt_part INTO DATA(lv_path).
+      IF zabaputil_cl_util_context=>c_ends_with( val    = to_lower( lv_path )
+                                                 suffix = `styles.xml` ) = abap_true.
+        lv_styles = lv_path.
+      ENDIF.
+    ENDLOOP.
+    IF lv_styles IS NOT INITIAL.
+      DATA(lo_reader) = zabaputil_cl_util_context=>xml_reader_create( part_get( lv_styles ) ).
+      DO.
+        zabaputil_cl_util_context=>xml_reader_next( EXPORTING reader      = lo_reader
+                                                    IMPORTING kind        = lv_kind
+                                                              name        = lv_name
+                                                              t_attribute = lt_attr ).
+        IF lv_kind = zabaputil_cl_util_context=>cs_xml_node-end.
+          EXIT.
+        ELSEIF lv_kind = zabaputil_cl_util_context=>cs_xml_node-close.
+          CASE lv_name.
+            WHEN `fonts` OR `fills` OR `cellXfs` OR `cellStyleXfs`.
+              CLEAR lv_part.
+          ENDCASE.
+          CONTINUE.
+        ELSEIF lv_kind <> zabaputil_cl_util_context=>cs_xml_node-open.
+          CONTINUE.
+        ENDIF.
+        DATA(lv_rgb) = attr( t_attribute = lt_attr
+                             name        = `rgb` ).
+        IF strlen( lv_rgb ) = 8.
+          lv_rgb = lv_rgb+2(6).
+        ENDIF.
+        CASE lv_name.
+          WHEN `fonts` OR `fills` OR `cellXfs` OR `cellStyleXfs`.
+            lv_part = lv_name.
+          WHEN `numFmt`.
+            INSERT VALUE #( id   = hex_to_int( attr( t_attribute = lt_attr
+                                                     name        = `numFmtId` ) )
+                            code = attr( t_attribute = lt_attr
+                                         name        = `formatCode` ) ) INTO TABLE lt_code.
+          WHEN `font`.
+            INSERT VALUE #( ) INTO TABLE lt_font ASSIGNING <font>.
+          WHEN `b` OR `i` OR `u` OR `color`.
+            IF lv_part = `fonts` AND <font> IS ASSIGNED.
+              CASE lv_name.
+                WHEN `b`.
+                  <font>-bold = abap_true.
+                WHEN `i`.
+                  <font>-italic = abap_true.
+                WHEN `u`.
+                  <font>-underline = abap_true.
+                WHEN OTHERS.
+                  <font>-color = lv_rgb.
+              ENDCASE.
+            ENDIF.
+          WHEN `fill`.
+            INSERT `` INTO TABLE lt_fill.
+          WHEN `fgColor`.
+            IF lv_part = `fills` AND lt_fill IS NOT INITIAL.
+              lt_fill[ lines( lt_fill ) ] = lv_rgb.
+            ENDIF.
+          WHEN `xf`.
+            IF lv_part <> `cellXfs`.
+              CONTINUE.
+            ENDIF.
+            CLEAR ls_format.
+            DATA(lv_id) = hex_to_int( attr( t_attribute = lt_attr
+                                            name        = `numFmtId` ) ).
+            LOOP AT lt_code REFERENCE INTO DATA(lr_code) WHERE id = lv_id.
+              ls_format-format = lr_code->code.
+            ENDLOOP.
+            DATA(lv_number) = attr( t_attribute = lt_attr
+                                    name        = `fontId` ).
+            DATA(lv_font) = 1.
+            IF lv_number CO cv_digits.
+              lv_font = lv_number + 1.
+            ENDIF.
+            DATA(lv_fonts) = lines( lt_font ).
+            IF lv_font <= lv_fonts.
+              DATA(ls_font) = lt_font[ lv_font ].
+              ls_format-bold = ls_font-bold.
+              ls_format-italic = ls_font-italic.
+              ls_format-underline = ls_font-underline.
+              ls_format-color = ls_font-color.
+            ENDIF.
+            lv_number = attr( t_attribute = lt_attr
+                              name        = `fillId` ).
+            DATA(lv_fill) = 1.
+            IF lv_number CO cv_digits.
+              lv_fill = lv_number + 1.
+            ENDIF.
+            DATA(lv_fills) = lines( lt_fill ).
+            IF lv_fill <= lv_fills.
+              ls_format-fill = lt_fill[ lv_fill ].
+            ENDIF.
+            INSERT ls_format INTO TABLE lt_xf ASSIGNING <xf>.
+          WHEN `alignment`.
+            IF lv_part = `cellXfs` AND <xf> IS ASSIGNED.
+              <xf>-halign = attr( t_attribute = lt_attr
+                                  name        = `horizontal` ).
+              DATA(lv_wrap) = attr( t_attribute = lt_attr
+                                    name        = `wrapText` ).
+              <xf>-wrap = xsdbool( lv_wrap = `1` OR lv_wrap = `true` ).
+            ENDIF.
+        ENDCASE.
+      ENDDO.
+    ENDIF.
+
+    " the cells that name a format other than the first
+    lo_reader = zabaputil_cl_util_context=>xml_reader_create( sheet_xml( ls_sheet ) ).
+    DO.
+      zabaputil_cl_util_context=>xml_reader_next( EXPORTING reader      = lo_reader
+                                                  IMPORTING kind        = lv_kind
+                                                            name        = lv_name
+                                                            t_attribute = lt_attr ).
+      IF lv_kind = zabaputil_cl_util_context=>cs_xml_node-end
+          OR ( lv_kind = zabaputil_cl_util_context=>cs_xml_node-close AND lv_name = `sheetData` ).
+        EXIT.
+      ENDIF.
+      IF lv_kind <> zabaputil_cl_util_context=>cs_xml_node-open.
+        CONTINUE.
+      ENDIF.
+      DATA(lv_ref) = attr( t_attribute = lt_attr
+                           name        = `r` ).
+      CASE lv_name.
+        WHEN `row`.
+          IF lv_ref CO cv_digits AND lv_ref IS NOT INITIAL.
+            lv_row = lv_ref.
+          ELSE.
+            lv_row = lv_row + 1.
+          ENDIF.
+          CONTINUE.
+        WHEN `c`.
+        WHEN OTHERS.
+          CONTINUE.
+      ENDCASE.
+      DATA(lv_style) = attr( t_attribute = lt_attr
+                             name        = `s` ).
+      IF lv_style IS INITIAL OR lv_style CN cv_digits.
+        CONTINUE.
+      ENDIF.
+      DATA(lv_xf) = CONV i( lv_style ) + 1.
+      DATA(lv_xfs) = lines( lt_xf ).
+      IF lv_xf <= 1 OR lv_xf > lv_xfs.
+        CONTINUE.
+      ENDIF.
+      ls_format = lt_xf[ lv_xf ].
+      ls_format-row = lv_row.
+      ls_format-col = column_to_number( lv_ref ).
+      INSERT ls_format INTO TABLE result.
+    ENDDO.
 
   ENDMETHOD.
 
@@ -6612,6 +6946,12 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
           RAISE EXCEPTION TYPE zabaputil_cx_util_error
             EXPORTING
               val = |XLSX_CELL_TYPE - cell { lv_address }: { lv_value } is no number|.
+        ENDIF.
+        " a utclong takes the timestamp as ISO text, not as a number
+        IF cat = cs_cat-timestamp AND zabaputil_cl_util_context=>rtti_get_type_kind( field ) = `p`
+            AND strlen( lv_number ) >= 14.
+          lv_number = |{ lv_number(4) }-{ lv_number+4(2) }-{ lv_number+6(2) }T{ lv_number+8(2) }:|
+                   && |{ lv_number+10(2) }:{ lv_number+12(2) }|.
         ENDIF.
         TRY.
             field = lv_number.
