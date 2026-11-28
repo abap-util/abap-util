@@ -3063,6 +3063,58 @@ CLASS zabaputil_cl_util_context DEFINITION
         value       TYPE string
         t_attribute TYPE ty_t_xml_attribute.
 
+    "! DEFLATE (RFC 1951) of bytes, without any header - what CL_ABAP_GZIP
+    "! writes. The class is released on ABAP Cloud and there on every
+    "! release down to 7.02
+    CLASS-METHODS gzip_compress
+      IMPORTING
+        val           TYPE xstring
+      RETURNING
+        VALUE(result) TYPE xstring.
+
+    "! The bytes of a DEFLATE stream (RFC 1951, no header)
+    CLASS-METHODS gzip_decompress
+      IMPORTING
+        val           TYPE xstring
+      RETURNING
+        VALUE(result) TYPE xstring.
+
+    "! A zlib stream (RFC 1950): the two header bytes 78 9C, the DEFLATE
+    "! data and the Adler-32 of the input. This is what a PDF stream with
+    "! the filter FlateDecode and the IDAT chunks of a PNG hold
+    CLASS-METHODS zlib_compress
+      IMPORTING
+        val           TYPE xstring
+      RETURNING
+        VALUE(result) TYPE xstring.
+
+    "! The bytes of a zlib stream (RFC 1950). The checksum at its end is
+    "! not verified
+    CLASS-METHODS zlib_decompress
+      IMPORTING
+        val           TYPE xstring
+      RETURNING
+        VALUE(result) TYPE xstring.
+
+    "! Adler-32 of bytes, as four bytes in network byte order - the
+    "! checksum that ends a zlib stream. Plain ABAP
+    CLASS-METHODS hash_adler32
+      IMPORTING
+        val           TYPE xstring
+      RETURNING
+        VALUE(result) TYPE xstring.
+
+    TYPES ty_t_codepoint TYPE STANDARD TABLE OF i WITH EMPTY KEY.
+
+    "! The Unicode code points of a text, one row per character. A
+    "! character outside the Basic Multilingual Plane, which a string
+    "! holds as two UTF-16 code units, is one row
+    CLASS-METHODS c_get_codepoints
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE ty_t_codepoint.
+
     TYPES:
       BEGIN OF ty_s_http_response,
         code   TYPE i,
@@ -15185,6 +15237,183 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
         EXPORTING
           val = lv_error.
     ENDIF.
+
+  ENDMETHOD.
+
+  METHOD gzip_compress.
+
+    DATA lv_class TYPE c LENGTH 12.
+
+    TRY.
+
+        lv_class = `CL_ABAP_GZIP`.
+        CALL METHOD (lv_class)=>compress_binary
+          EXPORTING
+            raw_in   = val
+          IMPORTING
+            gzip_out = result.
+
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error EXPORTING val = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD gzip_decompress.
+
+    DATA lv_class TYPE c LENGTH 12.
+
+    TRY.
+
+        lv_class = `CL_ABAP_GZIP`.
+        CALL METHOD (lv_class)=>decompress_binary
+          EXPORTING
+            gzip_in = val
+          IMPORTING
+            raw_out = result.
+
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error EXPORTING val = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD zlib_compress.
+
+    " an xstring has no append operator: the three parts in hex, then one
+    " conversion (conv_get_xstring_by_bintab does the same)
+    DATA lv_hex TYPE string.
+
+    lv_hex = `789C` && CONV string( gzip_compress( val ) ) && CONV string( hash_adler32( val ) ).
+    result = lv_hex.
+
+  ENDMETHOD.
+
+  METHOD zlib_decompress.
+
+    DATA lv_cmf TYPE i.
+    DATA lv_flg TYPE i.
+    DATA lv_off TYPE i VALUE 2.
+
+    DATA(lv_len) = xstrlen( val ).
+    IF lv_len < 6.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = `ZLIB_DECOMPRESS: not a zlib stream`.
+    ENDIF.
+
+    " CMF: the low four bits name the method, 8 is DEFLATE. FLG: bit 5
+    " announces a preset dictionary id of four bytes, and the two bytes
+    " together are a multiple of 31
+    lv_cmf = val(1).
+    lv_flg = val+1(1).
+    IF lv_cmf MOD 16 <> 8 OR ( lv_cmf * 256 + lv_flg ) MOD 31 <> 0.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = `ZLIB_DECOMPRESS: not a zlib stream`.
+    ENDIF.
+    IF ( lv_flg DIV 32 ) MOD 2 = 1.
+      lv_off = 6.
+    ENDIF.
+
+    lv_len = lv_len - lv_off - 4.
+    IF lv_len <= 0.
+      RETURN.
+    ENDIF.
+    DATA(lv_deflate) = val+lv_off(lv_len).
+    result = gzip_decompress( lv_deflate ).
+
+  ENDMETHOD.
+
+  METHOD hash_adler32.
+
+    DATA lv_a    TYPE i VALUE 1.
+    DATA lv_b    TYPE i.
+    DATA lv_byte TYPE i.
+    DATA lv_off  TYPE i.
+    DATA lv_xa   TYPE x LENGTH 2.
+    DATA lv_xb   TYPE x LENGTH 2.
+    DATA lv_hex  TYPE string.
+
+    " the modulo only every 2000 bytes: until then both sums stay below
+    " 2^31 (b grows by at most 2000 * 575520), and the loop is half as long
+    DATA(lv_len) = xstrlen( val ).
+    WHILE lv_off < lv_len.
+      lv_byte = val+lv_off(1).
+      lv_a = lv_a + lv_byte.
+      lv_b = lv_b + lv_a.
+      lv_off = lv_off + 1.
+      IF lv_off MOD 2000 = 0.
+        lv_a = lv_a MOD 65521.
+        lv_b = lv_b MOD 65521.
+      ENDIF.
+    ENDWHILE.
+
+    lv_xa = lv_a MOD 65521.
+    lv_xb = lv_b MOD 65521.
+    lv_hex = CONV string( lv_xb ) && CONV string( lv_xa ).
+    result = lv_hex.
+
+  ENDMETHOD.
+
+  METHOD c_get_codepoints.
+
+    DATA lv_x     TYPE xstring.
+    DATA lv_byte  TYPE i.
+    DATA lv_cp    TYPE i.
+    DATA lv_more  TYPE i.
+    DATA lv_off   TYPE i.
+    DATA lv_high  TYPE i.
+    DATA lv_lines TYPE i.
+
+    " the UTF-8 bytes, decoded by hand: the one conversion every release
+    " and the transpiler have, and no character-code API is needed
+    lv_x = conv_get_xstring_by_string( CONV string( val ) ).
+    DATA(lv_len) = xstrlen( lv_x ).
+
+    WHILE lv_off < lv_len.
+
+      lv_byte = lv_x+lv_off(1).
+      lv_off = lv_off + 1.
+      IF lv_byte < 128.
+        lv_cp = lv_byte.
+        lv_more = 0.
+      ELSEIF lv_byte < 224.
+        lv_cp = lv_byte MOD 32.
+        lv_more = 1.
+      ELSEIF lv_byte < 240.
+        lv_cp = lv_byte MOD 16.
+        lv_more = 2.
+      ELSE.
+        lv_cp = lv_byte MOD 8.
+        lv_more = 3.
+      ENDIF.
+
+      DO lv_more TIMES.
+        IF lv_off >= lv_len.
+          EXIT.
+        ENDIF.
+        lv_byte = lv_x+lv_off(1).
+        lv_off = lv_off + 1.
+        lv_cp = lv_cp * 64 + ( lv_byte MOD 64 ).
+      ENDDO.
+
+      " a converter that writes a surrogate pair as two three-byte
+      " sequences (CESU-8): the low half joins the high half before it
+      IF lv_cp >= 56320 AND lv_cp <= 57343 AND lv_high > 0.
+        lv_cp = 65536 + ( lv_high - 55296 ) * 1024 + ( lv_cp - 56320 ).
+        lv_lines = lines( result ).
+        DELETE result INDEX lv_lines.
+      ENDIF.
+      IF lv_cp >= 55296 AND lv_cp <= 56319.
+        lv_high = lv_cp.
+      ELSE.
+        lv_high = 0.
+      ENDIF.
+
+      INSERT lv_cp INTO TABLE result.
+
+    ENDWHILE.
 
   ENDMETHOD.
 

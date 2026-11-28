@@ -94,12 +94,23 @@ src/
 ├── zabaputil_cl_util_xml.clas.abap       # Fluent XML builder
 ├── zabaputil_cl_util_xlsx.clas.abap      # XLSX workbooks: internal tables to sheets and back
 ├── zabaputil_cx_util_error.clas.abap     # THE exception (no-check): text chain, full diagnostic report
-└── 00/
-    ├── 01/                               # ajson mirror — DO NOT MODIFY (synced from upstream)
-    └── 02/                               # S-RTTI mirror — DO NOT MODIFY (synced from upstream)
+├── 00/
+│   ├── 01/                               # ajson — DO NOT MODIFY (copied from abap-util/mirror-ajson)
+│   └── 02/                               # S-RTTI — DO NOT MODIFY (copied from abap-util/mirror-srtti)
+└── pdf/                                  # PDF files in plain ABAP (see "The PDF classes")
 ```
 
 Every class has a `.testclasses.abap` file. The master carries the **full** test suite — every method, all three targets — and is the only place where a vendored method is guaranteed to be covered. Consumers may additionally test their own copy (abap2UI5 does, for the subset it vendors); that does not replace the coverage here, and a method synced back from a consumer needs its tests written in this repository.
+
+## The PDF classes
+
+`src/pdf/` writes PDF files without Adobe Document Services, spool or forms. Bottom-up: `zabaputil_cl_pdf_writer` (objects, streams, cross-reference table), the resources `zabaputil_if_pdf_font` with `zabaputil_cl_pdf_font_std` / `zabaputil_cl_pdf_font_ttf` and `zabaputil_cl_pdf_image`, `zabaputil_cl_pdf_page` (drawing at fixed positions), `zabaputil_cl_pdf_layout` (wrapping, tables, page breaks) and the façade `zabaputil_cl_pdf`.
+
+- **No SAP API in these classes.** Everything system-specific goes through the context class: `conv_get_xstring_by_string` / `conv_get_string_by_xstring`, `zlib_compress` / `zlib_decompress` (CL_ABAP_GZIP) and `c_get_codepoints`. A consumer vendors the PDF classes as they are, next to its context-class copy with these methods.
+- **The file is collected in hex and converted to bytes once** (`zabaputil_cl_pdf_writer=>render`): an xstring has no append operator here, and every offset in the cross-reference table is a byte offset, half the length of the hex text.
+- **Text is written as a hex string** (`<48656C6C6F>`), so a content stream is 7-bit ASCII whatever the text is; which bytes a character becomes is the font's business (`zabaputil_if_pdf_font~encode`).
+- **A parameter that takes a length is typed `numeric`**, a text `clike`: callers pass integers, packed numbers and floats, and a fully typed by-reference parameter would refuse all but one of them on a real system. A text literal is no number - pass `'0.5'` through a typed constant or variable.
+- **The tests compare operators, not pixels.** To look at a result, transpile a throwaway class that returns `render( )` and open the file - `pdftoppm`, `pdffonts` and `pdfimages` (poppler) show what a viewer makes of it.
 
 ## Build & Validation
 
@@ -157,7 +168,7 @@ A consumer that vendors a class of this catalog without a manifest is compared b
 
 ## Rules for AI Assistants
 
-1. **Do not modify `src/00/01/` (ajson) and `src/00/02/` (S-RTTI)** — mirrored from external projects.
+1. **Do not modify `src/00/01/` (ajson) and `src/00/02/` (S-RTTI)** — copied by `vendor-mirror.yaml` from this organization's mirror repositories ([mirror-ajson](https://github.com/abap-util/mirror-ajson), [mirror-srtti](https://github.com/abap-util/mirror-srtti)), which rename the upstream projects to `zabaputil_` and apply their local patches. A change belongs there (upstream, or the mirror's `.github/scripts/patch.mjs`); abap2UI5 vendors from the same two mirrors and renames on its side.
 2. **Never break the master-catalog contract** (see above): this repository must remain the superset of all utility methods across all consumers — for *every* vendored class, not only the context class. Methods added downstream are merged back here by the periodic AI sync, and unit tests live here.
 3. **Always run `npx abaplint`** before considering changes complete.
 4. **Multi-environment compatibility** — code must work on NW 7.02, Standard ABAP, and ABAP Cloud. No direct use of on-premise-only or cloud-only APIs without a dynamic-call branch.

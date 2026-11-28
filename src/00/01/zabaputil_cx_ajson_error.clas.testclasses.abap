@@ -41,7 +41,7 @@ class ltcl_error implementation.
 
     try.
       zabaputil_cx_ajson_error=>raise( iv_msg = 'a'
-                                   iv_location = 'b' ).
+                                       iv_location = 'b' ).
       cl_abap_unit_assert=>fail( ).
     catch zabaputil_cx_ajson_error into lx.
       cl_abap_unit_assert=>assert_equals(
@@ -61,7 +61,7 @@ class ltcl_error implementation.
 
     try.
       zabaputil_cx_ajson_error=>raise( iv_msg = 'a'
-                                   is_node = ls_node ).
+                                       is_node = ls_node ).
       cl_abap_unit_assert=>fail( ).
     catch zabaputil_cx_ajson_error into lx.
       cl_abap_unit_assert=>assert_equals(
@@ -77,7 +77,7 @@ class ltcl_error implementation.
 
     try.
       zabaputil_cx_ajson_error=>raise( iv_msg = 'a'
-                                   iv_location = 'b' ).
+                                       iv_location = 'b' ).
       cl_abap_unit_assert=>fail( ).
     catch zabaputil_cx_ajson_error into lx.
       cl_abap_unit_assert=>assert_equals(
