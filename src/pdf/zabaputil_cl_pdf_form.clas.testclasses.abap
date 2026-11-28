@@ -121,6 +121,7 @@ CLASS ltcl_form DEFINITION FINAL
     METHODS justified_fixed_text    FOR TESTING.
     METHODS paragraph_options       FOR TESTING.
     METHODS watermark_and_corners   FOR TESTING.
+    METHODS barcode_elements        FOR TESTING.
 
     "! the table of the test data with as many rows as asked for
     METHODS items
@@ -633,8 +634,11 @@ CLASS ltcl_form IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD unknown_type_is_skipped.
-    ms_form-t_element = VALUE #( ( type = `BARCODE` fixed = abap_false text = `x` )
-                                 ( type = `BARCODE` fixed = abap_true  text = `x` )
+    " a barcode without its symbology is skipped as well
+    ms_form-t_element = VALUE #( ( type = `CHART`   fixed = abap_false text = `x` )
+                                 ( type = `CHART`   fixed = abap_true  text = `x` )
+                                 ( type = `BARCODE` fixed = abap_true  text = `x` w = 10 )
+                                 ( type = `BARCODE` fixed = abap_false text = `x` w = 10 )
                                  ( type = ``        fixed = abap_false text = `x` ) ).
     DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( ms_form ).
     cl_abap_unit_assert=>assert_equals( exp = 1 act = lo_pdf->page_count( ) ).
@@ -1272,6 +1276,36 @@ CLASS ltcl_form IMPLEMENTATION.
     " the rectangle is not inside the graphics state of the watermark
     cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS |Q\n| ) ).
     cl_abap_unit_assert=>assert_equals( exp = 1 act = count( val = lv_content sub = `/GS200_200 gs` ) ).
+  ENDMETHOD.
+
+  METHOD barcode_elements.
+    " in the flow at the left margin, moving the flow on; at a fixed
+    " position in its box; its text with placeholders
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-barcode symbology = `CODE128` text = `{NAME}-{NUMBER}` w = 60 h = 15 )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `below` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-barcode fixed = abap_true symbology = `QR` text = `{HEAD-CITY}`
+          x = 150 y = 20 w = 30 ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                 data = ms_data ).
+    DATA(lv_content) = lo_pdf->page( 1 )->content( ).
+    " the bars of Ada-4711 start at the left margin, 20 mm from the top
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS |q\n0 0 0 rg\n56.693 742.677 | ) ).
+    " below it: the flow 15 mm further down
+    DATA(ls_flow) = zabaputil_cl_pdf_form=>new_form( ).
+    ls_flow-t_element = VALUE #( ( type = zabaputil_cl_pdf_form=>cs_type-space h = 15 )
+                                 ( type = zabaputil_cl_pdf_form=>cs_type-text text = `below` ) ).
+    DATA(lv_below) = zabaputil_cl_pdf_form=>build( ls_flow )->page( 1 )->content( ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS lv_below ) ).
+    " the QR code of Bonn: 21 modules in 30 mm, square
+    cl_abap_unit_assert=>assert_equals( exp = 21 act = lines( zabaputil_cl_pdf_barcode=>qr( `Bonn` ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS `425.197 ` ) ).
+    " a placeholder the data does not have is reported
+    ms_form-t_element[ 1 ]-text = `{NONE}`.
+    DATA(lt_unknown) = zabaputil_cl_pdf_form=>check( val  = ms_form
+                                                     data = ms_data ).
+    cl_abap_unit_assert=>assert_equals( exp = `NONE`
+                                        act = lt_unknown[ 1 ]-name ).
   ENDMETHOD.
 
   METHOD absolute_pushed_over.

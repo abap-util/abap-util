@@ -197,6 +197,14 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_cl_pdf_layout.
 
+    "! Make room for a block of this height: a new page when it does not
+    "! fit above the bottom margin, unless the cursor is at the top already
+    METHODS ensure_space
+      IMPORTING
+        val           TYPE numeric
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_layout.
+
     "! Continue on a new page
     METHODS page_break
       RETURNING
@@ -721,6 +729,16 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
 
     page( ).
     mv_y = val.
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD ensure_space.
+
+    DATA lv_height TYPE f.
+
+    lv_height = val.
+    ensure( lv_height ).
     result = me.
 
   ENDMETHOD.

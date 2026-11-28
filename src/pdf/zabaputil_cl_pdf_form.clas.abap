@@ -64,6 +64,9 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         space      TYPE string VALUE `SPACE`,
         "! the flow goes on on a new page
         page_break TYPE string VALUE `PAGE_BREAK`,
+        "! a barcode of the text: in the flow at the left margin, w wide and h
+        "! high; at a fixed position in the box x, y, w, h
+        barcode    TYPE string VALUE `BARCODE`,
         "! the elements of the block of its name, once per row of a table of
         "! the data (source): in the flow one after the other, in an absolute
         "! form every h mm from its y on
@@ -137,6 +140,9 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         opacity    TYPE ty_length,
         "! the radius of the corners of a rectangle
         radius     TYPE ty_length,
+        "! of a barcode: CODE128, EAN13, QR or DATAMATRIX
+        "! (zabaputil_cl_pdf_barcode=>cs_type); its text is the content
+        symbology  TYPE string,
         "! of a table: the components that are added up (a total row, a
         "! subtotal row per group, a carry-over at a page break), zebra
         "! stripes and the lines of the cells
@@ -997,7 +1003,7 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
     CASE element-type.
 
-      WHEN cs_type-text.
+      WHEN cs_type-text OR cs_type-barcode.
         check_text( EXPORTING text    = element-text
                               data    = data
                               outer   = outer
@@ -1821,7 +1827,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
         CONTINUE.
       ENDIF.
       CASE ls_element-type.
-        WHEN cs_type-text OR cs_type-table OR cs_type-line OR cs_type-rect OR cs_type-image OR cs_type-repeat.
+        WHEN cs_type-text OR cs_type-table OR cs_type-line OR cs_type-rect OR cs_type-image OR cs_type-repeat
+            OR cs_type-barcode.
           INSERT ls_element INTO TABLE lt_element.
       ENDCASE.
     ENDLOOP.
@@ -1995,6 +2002,30 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
       WHEN cs_type-page_break.
         layout->page_break( ).
 
+      WHEN cs_type-barcode.
+        lv_text = element-text.
+        IF with_data = abap_true.
+          lv_text = resolve( val  = lv_text
+                             data = data ).
+        ENDIF.
+        IF lv_text IS INITIAL OR element-symbology IS INITIAL.
+          RETURN.
+        ENDIF.
+        " a matrix code is as high as it is wide
+        lv_height = element-h.
+        IF lv_height <= 0.
+          lv_height = element-w.
+        ENDIF.
+        layout->ensure_space( lv_height ).
+        zabaputil_cl_pdf_barcode=>draw( page = layout->page( )
+                                        type = element-symbology
+                                        val  = lv_text
+                                        x    = left
+                                        y    = layout->y( )
+                                        w    = element-w
+                                        h    = lv_height ).
+        layout->set_y( layout->y( ) + lv_height ).
+
       WHEN cs_type-image.
         DATA(lo_image) = element_image( pdf       = pdf
                                         element   = element
@@ -2159,6 +2190,22 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
                        y     = element-y
                        w     = element-w
                        h     = element-h ).
+        ENDIF.
+
+      WHEN cs_type-barcode.
+        lv_text = element-text.
+        IF with_data = abap_true.
+          lv_text = resolve( val  = lv_text
+                             data = data ).
+        ENDIF.
+        IF lv_text IS NOT INITIAL AND element-symbology IS NOT INITIAL.
+          zabaputil_cl_pdf_barcode=>draw( page = page
+                                          type = element-symbology
+                                          val  = lv_text
+                                          x    = element-x
+                                          y    = element-y
+                                          w    = element-w
+                                          h    = COND #( WHEN element-h > 0 THEN element-h ELSE element-w ) ).
         ENDIF.
 
     ENDCASE.
