@@ -286,6 +286,41 @@ CLASS zabaputil_cl_pdf_form DEFINITION
       RETURNING
         VALUE(result) TYPE string.
 
+    "! The names a text puts in braces - {NAME}, {ADDRESS-CITY} -, in upper
+    "! case, each once, in the order they come
+    CLASS-METHODS placeholders
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string_table.
+
+    "! What an element names that the data does not offer: the placeholders
+    "! of a text or a barcode, the table of a table element - or, where the
+    "! data has the table, its columns the rows do not have (T_ITEMS-PRICE) -
+    "! and the component of an image. What is not named is not missing: a
+    "! table element without a table comes back empty
+    "! @parameter element | the element
+    "! @parameter fields  | what the data offers, fields( ) of it
+    CLASS-METHODS unknown_of
+      IMPORTING
+        element       TYPE ty_s_element
+        fields        TYPE ty_t_field
+      RETURNING
+        VALUE(result) TYPE string_table.
+
+    "! What a form names that the data does not offer: unknown_of( ) of every
+    "! element, and the placeholders of the header and the footer besides
+    "! {PAGE} and {PAGES} - each once, in the order they come. An editor shows
+    "! it; the form prints what it does not find as it is written
+    "! @parameter val    | the form
+    "! @parameter fields | what the data offers, fields( ) of it
+    CLASS-METHODS unknown
+      IMPORTING
+        val           TYPE ty_s_form
+        fields        TYPE ty_t_field
+      RETURNING
+        VALUE(result) TYPE string_table.
+
   PROTECTED SECTION.
 
   PRIVATE SECTION.
@@ -790,6 +825,110 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     ENDDO.
 
     result = result && lv_rest.
+
+  ENDMETHOD.
+
+  METHOD placeholders.
+
+    DATA lv_rest  TYPE string.
+    DATA lv_name  TYPE string.
+    DATA lv_open  TYPE i.
+    DATA lv_close TYPE i.
+
+    lv_rest = val.
+    DO.
+      lv_open = find( val = lv_rest
+                      sub = `{` ).
+      IF lv_open < 0.
+        EXIT.
+      ENDIF.
+      lv_close = find( val = lv_rest
+                       sub = `}`
+                       off = lv_open ).
+      IF lv_close < 0.
+        EXIT.
+      ENDIF.
+      lv_name = to_upper( condense( substring( val = lv_rest
+                                               off = lv_open + 1
+                                               len = lv_close - lv_open - 1 ) ) ).
+      IF lv_name IS NOT INITIAL AND NOT line_exists( result[ table_line = lv_name ] ).
+        INSERT lv_name INTO TABLE result.
+      ENDIF.
+      lv_rest = substring( val = lv_rest
+                           off = lv_close + 1 ).
+    ENDDO.
+
+  ENDMETHOD.
+
+  METHOD unknown_of.
+
+    DATA lv_source TYPE string.
+    DATA lv_name   TYPE string.
+    DATA ls_column TYPE ty_s_column.
+
+    CASE element-type.
+
+      WHEN cs_type-text OR cs_type-barcode.
+        LOOP AT placeholders( element-text ) INTO lv_name.
+          IF NOT line_exists( fields[ path = lv_name
+                                      kind = cs_field_kind-value ] ).
+            INSERT lv_name INTO TABLE result.
+          ENDIF.
+        ENDLOOP.
+
+      WHEN cs_type-table.
+        lv_source = to_upper( condense( element-source ) ).
+        IF lv_source IS INITIAL.
+          RETURN.
+        ENDIF.
+        IF NOT line_exists( fields[ path = lv_source
+                                    kind = cs_field_kind-table ] ).
+          INSERT lv_source INTO TABLE result.
+          RETURN.
+        ENDIF.
+        LOOP AT element-t_column INTO ls_column.
+          lv_name = to_upper( condense( ls_column-name ) ).
+          IF lv_name IS NOT INITIAL AND NOT line_exists( fields[ path   = lv_name
+                                                                 kind   = cs_field_kind-column
+                                                                 parent = lv_source ] ).
+            INSERT |{ lv_source }-{ lv_name }| INTO TABLE result.
+          ENDIF.
+        ENDLOOP.
+
+      WHEN cs_type-image.
+        lv_source = to_upper( condense( element-source ) ).
+        IF lv_source IS NOT INITIAL AND NOT line_exists( fields[ path = lv_source
+                                                                 kind = cs_field_kind-value ] ).
+          INSERT lv_source INTO TABLE result.
+        ENDIF.
+
+    ENDCASE.
+
+  ENDMETHOD.
+
+  METHOD unknown.
+
+    DATA ls_element TYPE ty_s_element.
+    DATA lv_name    TYPE string.
+
+    LOOP AT val-t_element INTO ls_element.
+      LOOP AT unknown_of( element = ls_element
+                          fields  = fields ) INTO lv_name.
+        IF NOT line_exists( result[ table_line = lv_name ] ).
+          INSERT lv_name INTO TABLE result.
+        ENDIF.
+      ENDLOOP.
+    ENDLOOP.
+
+    " the page numbers are the layout's, not the data's
+    LOOP AT placeholders( |{ val-header } { val-footer }| ) INTO lv_name.
+      IF lv_name <> `PAGE` AND lv_name <> `PAGES`
+          AND NOT line_exists( fields[ path = lv_name
+                                       kind = cs_field_kind-value ] )
+          AND NOT line_exists( result[ table_line = lv_name ] ).
+        INSERT lv_name INTO TABLE result.
+      ENDIF.
+    ENDLOOP.
 
   ENDMETHOD.
 

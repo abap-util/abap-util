@@ -742,6 +742,60 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO data.
 
+    " A type as a table of nodes, for a caller that reads or builds a type
+    " without RTTI: the type itself is the node with parent 0, every other
+    " node names the one it belongs to - a component its structure, the row
+    " its table
+    TYPES:
+      BEGIN OF ty_s_type_node,
+        "! 1, 2, 3 ... - the type itself has the first
+        id       TYPE i,
+        "! the structure or table the node belongs to; 0 for the type itself
+        parent   TYPE i,
+        "! the name of a component; empty for the type itself and a row
+        name     TYPE string,
+        "! S a structure, T a table, E an elementary type - and, for
+        "! rtti_create_data_by_nodes, D a type of the dictionary by its name
+        "! in type
+        kind     TYPE string,
+        "! of an elementary type its type of the language: C N D T P F I
+        "! INT1 INT2 INT8 X STRING XSTRING DECFLOAT16 DECFLOAT34 UTCLONG -
+        "! empty for one of another kind
+        type     TYPE string,
+        "! characters of C and N, bytes of P and X
+        length   TYPE i,
+        decimals TYPE i,
+      END OF ty_s_type_node.
+    TYPES ty_t_type_node TYPE STANDARD TABLE OF ty_s_type_node WITH EMPTY KEY.
+
+    "! A type of the dictionary - a data element, a structure, a table type
+    "! - or of a class (ZCL_X=>TY_S_ROW) as nodes. The components of an
+    "! include are components of the structure; a reference is left out.
+    "! Empty where the system has no such data type, as a runtime without a
+    "! dictionary has none
+    "! @parameter val   | the name of the type
+    "! @parameter depth | the levels of structures and tables read below the
+    "!                    type itself
+    CLASS-METHODS rtti_get_t_type_node_by_name
+      IMPORTING
+        val           TYPE clike
+        depth         TYPE i DEFAULT 4
+      RETURNING
+        VALUE(result) TYPE ty_t_type_node.
+
+    "! Data of a type given as nodes, as rtti_get_t_type_node_by_name reads
+    "! them or a caller builds them: a structure of its components, a table
+    "! of its row, an elementary type of its type, length and decimals - a
+    "! type without a length gets the default of the language, P 8 with its
+    "! decimals. A structure without a component, a D the system does not
+    "! know and an elementary type it cannot create are a STRING. Unbound
+    "! without a node of parent 0
+    CLASS-METHODS rtti_create_data_by_nodes
+      IMPORTING
+        val           TYPE ty_t_type_node
+      RETURNING
+        VALUE(result) TYPE REF TO data.
+
     "! A standard table whose line has one string component per name - the
     "! table for a file whose columns are only known when it is read (CSV,
     "! XLSX). The names have to be valid and unique component names.
@@ -3969,6 +4023,34 @@ CLASS zabaputil_cl_util_context DEFINITION
         VALUE(result) TYPE ty_t_dfies ##NEEDED.
 
   PRIVATE SECTION.
+
+    " a type and what it is made of as nodes, behind the nodes there are
+    CLASS-METHODS rtti_type_node_add
+      IMPORTING
+        type   TYPE REF TO cl_abap_datadescr
+        parent TYPE i
+        name   TYPE string
+        depth  TYPE i
+      CHANGING
+        result TYPE ty_t_type_node.
+
+    " the components of a structure as nodes of the parent - those of an
+    " include too
+    CLASS-METHODS rtti_type_node_comps
+      IMPORTING
+        type   TYPE REF TO cl_abap_structdescr
+        parent TYPE i
+        depth  TYPE i
+      CHANGING
+        result TYPE ty_t_type_node.
+
+    " the run time type of a node and of the nodes below it
+    CLASS-METHODS rtti_type_node_descr
+      IMPORTING
+        val           TYPE ty_t_type_node
+        id            TYPE i
+      RETURNING
+        VALUE(result) TYPE REF TO cl_abap_datadescr.
 
     " SAP language key : ISO 639-1 code of the common languages, read by
     " lang_sap_to_iso and lang_iso_to_sap before T002 is asked. The SAP key
@@ -7220,6 +7302,281 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     lo_table = cl_abap_tabledescr=>create( p_line_type  = lo_struct
                                            p_table_kind = cl_abap_tabledescr=>tablekind_std ).
     CREATE DATA result TYPE HANDLE lo_table.
+
+  ENDMETHOD.
+
+  METHOD rtti_get_t_type_node_by_name.
+
+    DATA lv_name TYPE string.
+    DATA lo_type TYPE REF TO cl_abap_typedescr.
+    DATA lo_data TYPE REF TO cl_abap_datadescr.
+
+    lv_name = to_upper( condense( val ) ).
+    IF lv_name IS INITIAL.
+      RETURN.
+    ENDIF.
+    " the non-functional form: an unknown name comes back as sy-subrc
+    cl_abap_typedescr=>describe_by_name( EXPORTING  p_name         = lv_name
+                                         RECEIVING  p_descr_ref    = lo_type
+                                         EXCEPTIONS type_not_found = 1
+                                                    OTHERS         = 2 ).
+    IF sy-subrc <> 0 OR lo_type IS NOT BOUND.
+      RETURN.
+    ENDIF.
+    IF    lo_type->kind <> cl_abap_typedescr=>kind_elem
+      AND lo_type->kind <> cl_abap_typedescr=>kind_struct
+      AND lo_type->kind <> cl_abap_typedescr=>kind_table.
+      RETURN.
+    ENDIF.
+    lo_data ?= lo_type.
+    rtti_type_node_add( EXPORTING type   = lo_data
+                                  parent = 0
+                                  name   = ``
+                                  depth  = depth
+                        CHANGING  result = result ).
+
+  ENDMETHOD.
+
+  METHOD rtti_type_node_add.
+
+    DATA ls_node      TYPE ty_s_type_node.
+    DATA lo_structure TYPE REF TO cl_abap_structdescr.
+    DATA lo_table     TYPE REF TO cl_abap_tabledescr.
+    DATA lo_element   TYPE REF TO cl_abap_elemdescr.
+
+    CASE type->kind.
+
+      WHEN cl_abap_typedescr=>kind_struct.
+        ls_node-id     = lines( result ) + 1.
+        ls_node-parent = parent.
+        ls_node-name   = name.
+        ls_node-kind   = `S`.
+        INSERT ls_node INTO TABLE result.
+        IF depth < 0.
+          RETURN.
+        ENDIF.
+        lo_structure ?= type.
+        rtti_type_node_comps( EXPORTING type   = lo_structure
+                                        parent = ls_node-id
+                                        depth  = depth - 1
+                              CHANGING  result = result ).
+
+      WHEN cl_abap_typedescr=>kind_table.
+        ls_node-id     = lines( result ) + 1.
+        ls_node-parent = parent.
+        ls_node-name   = name.
+        ls_node-kind   = `T`.
+        INSERT ls_node INTO TABLE result.
+        IF depth < 0.
+          RETURN.
+        ENDIF.
+        lo_table ?= type.
+        rtti_type_node_add( EXPORTING type   = lo_table->get_table_line_type( )
+                                      parent = ls_node-id
+                                      name   = ``
+                                      depth  = depth - 1
+                            CHANGING  result = result ).
+
+      WHEN cl_abap_typedescr=>kind_elem.
+        lo_element ?= type.
+        ls_node-id       = lines( result ) + 1.
+        ls_node-parent   = parent.
+        ls_node-name     = name.
+        ls_node-kind     = `E`.
+        ls_node-decimals = lo_element->decimals.
+        CASE lo_element->type_kind.
+          WHEN cl_abap_typedescr=>typekind_char.
+            ls_node-type   = `C`.
+            ls_node-length = lo_element->output_length.
+          WHEN cl_abap_typedescr=>typekind_num.
+            ls_node-type   = `N`.
+            ls_node-length = lo_element->output_length.
+          WHEN cl_abap_typedescr=>typekind_packed.
+            ls_node-type   = `P`.
+            ls_node-length = lo_element->length.
+          WHEN cl_abap_typedescr=>typekind_hex.
+            ls_node-type   = `X`.
+            ls_node-length = lo_element->length.
+          WHEN cl_abap_typedescr=>typekind_date.
+            ls_node-type = `D`.
+          WHEN cl_abap_typedescr=>typekind_time.
+            ls_node-type = `T`.
+          WHEN cl_abap_typedescr=>typekind_float.
+            ls_node-type = `F`.
+          WHEN cl_abap_typedescr=>typekind_int.
+            ls_node-type = `I`.
+          WHEN cl_abap_typedescr=>typekind_int1.
+            ls_node-type = `INT1`.
+          WHEN cl_abap_typedescr=>typekind_int2.
+            ls_node-type = `INT2`.
+          WHEN cl_abap_typedescr=>typekind_string.
+            ls_node-type = `STRING`.
+          WHEN cl_abap_typedescr=>typekind_xstring.
+            ls_node-type = `XSTRING`.
+          WHEN cl_abap_typedescr=>typekind_decfloat16.
+            ls_node-type = `DECFLOAT16`.
+          WHEN cl_abap_typedescr=>typekind_decfloat34.
+            ls_node-type = `DECFLOAT34`.
+          " the kinds of INT8 and UTCLONG by their value: their constants
+          " are younger than release 7.02
+          WHEN '8'.
+            ls_node-type = `INT8`.
+          WHEN 'p'.
+            ls_node-type = `UTCLONG`.
+          WHEN OTHERS.
+            CLEAR ls_node-type.
+        ENDCASE.
+        INSERT ls_node INTO TABLE result.
+
+    ENDCASE.
+
+  ENDMETHOD.
+
+  METHOD rtti_type_node_comps.
+
+    DATA lt_component TYPE cl_abap_structdescr=>component_table.
+    DATA ls_component TYPE LINE OF cl_abap_structdescr=>component_table.
+    DATA lo_include   TYPE REF TO cl_abap_structdescr.
+
+    lt_component = type->get_components( ).
+    LOOP AT lt_component INTO ls_component.
+      IF ls_component-as_include = abap_true.
+        " the components of an include are those of the structure
+        lo_include ?= ls_component-type.
+        rtti_type_node_comps( EXPORTING type   = lo_include
+                                        parent = parent
+                                        depth  = depth
+                              CHANGING  result = result ).
+      ELSE.
+        rtti_type_node_add( EXPORTING type   = ls_component-type
+                                      parent = parent
+                                      name   = ls_component-name
+                                      depth  = depth
+                            CHANGING  result = result ).
+      ENDIF.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD rtti_create_data_by_nodes.
+
+    DATA ls_node TYPE ty_s_type_node.
+    DATA lo_type TYPE REF TO cl_abap_datadescr.
+
+    LOOP AT val INTO ls_node WHERE parent = 0.
+      EXIT.
+    ENDLOOP.
+    IF ls_node-id IS INITIAL.
+      RETURN.
+    ENDIF.
+    lo_type = rtti_type_node_descr( val = val
+                                    id  = ls_node-id ).
+    CREATE DATA result TYPE HANDLE lo_type.
+
+  ENDMETHOD.
+
+  METHOD rtti_type_node_descr.
+
+    DATA ls_node      TYPE ty_s_type_node.
+    DATA ls_child     TYPE ty_s_type_node.
+    DATA lt_component TYPE cl_abap_structdescr=>component_table.
+    DATA ls_component TYPE LINE OF cl_abap_structdescr=>component_table.
+    DATA lo_type      TYPE REF TO cl_abap_typedescr.
+    DATA lv_length    TYPE i.
+    DATA lv_type      TYPE string.
+
+    IF NOT line_exists( val[ id = id ] ).
+      result = cl_abap_elemdescr=>get_string( ).
+      RETURN.
+    ENDIF.
+    ls_node = val[ id = id ].
+
+    CASE ls_node-kind.
+
+      WHEN `S`.
+        LOOP AT val INTO ls_child WHERE parent = ls_node-id.
+          IF ls_child-name IS INITIAL OR line_exists( lt_component[ name = to_upper( ls_child-name ) ] ).
+            CONTINUE.
+          ENDIF.
+          CLEAR ls_component.
+          ls_component-name = to_upper( ls_child-name ).
+          ls_component-type = rtti_type_node_descr( val = val
+                                                    id  = ls_child-id ).
+          INSERT ls_component INTO TABLE lt_component.
+        ENDLOOP.
+        IF lt_component IS INITIAL.
+          result = cl_abap_elemdescr=>get_string( ).
+        ELSE.
+          result = cl_abap_structdescr=>create( lt_component ).
+        ENDIF.
+
+      WHEN `T`.
+        CLEAR ls_child.
+        LOOP AT val INTO ls_child WHERE parent = ls_node-id.
+          EXIT.
+        ENDLOOP.
+        IF ls_child-id IS NOT INITIAL.
+          result = cl_abap_tabledescr=>create( rtti_type_node_descr( val = val
+                                                                     id  = ls_child-id ) ).
+        ELSE.
+          result = cl_abap_tabledescr=>create( cl_abap_elemdescr=>get_string( ) ).
+        ENDIF.
+
+      WHEN `D`.
+        lv_type = to_upper( ls_node-type ).
+        cl_abap_typedescr=>describe_by_name( EXPORTING  p_name         = lv_type
+                                             RECEIVING  p_descr_ref    = lo_type
+                                             EXCEPTIONS type_not_found = 1
+                                                        OTHERS         = 2 ).
+        IF sy-subrc = 0 AND lo_type IS BOUND
+            AND ( lo_type->kind = cl_abap_typedescr=>kind_elem
+               OR lo_type->kind = cl_abap_typedescr=>kind_struct
+               OR lo_type->kind = cl_abap_typedescr=>kind_table ).
+          result ?= lo_type.
+        ELSE.
+          result = cl_abap_elemdescr=>get_string( ).
+        ENDIF.
+
+      WHEN OTHERS.
+        lv_length = ls_node-length.
+        lv_type = to_upper( ls_node-type ).
+        CASE lv_type.
+          WHEN `C`.
+            IF lv_length <= 0.
+              lv_length = 1.
+            ENDIF.
+            result = cl_abap_elemdescr=>get_c( lv_length ).
+          WHEN `N`.
+            IF lv_length <= 0.
+              lv_length = 1.
+            ENDIF.
+            result = cl_abap_elemdescr=>get_n( lv_length ).
+          WHEN `X`.
+            IF lv_length <= 0.
+              lv_length = 1.
+            ENDIF.
+            result = cl_abap_elemdescr=>get_x( lv_length ).
+          WHEN `P`.
+            IF lv_length <= 0.
+              lv_length = 8.
+            ENDIF.
+            result = cl_abap_elemdescr=>get_p( p_length   = lv_length
+                                               p_decimals = ls_node-decimals ).
+          WHEN `D`.
+            result = cl_abap_elemdescr=>get_d( ).
+          WHEN `T`.
+            result = cl_abap_elemdescr=>get_t( ).
+          WHEN `F`.
+            result = cl_abap_elemdescr=>get_f( ).
+          WHEN `I` OR `INT1` OR `INT2` OR `INT8`.
+            result = cl_abap_elemdescr=>get_i( ).
+          WHEN `XSTRING`.
+            result = cl_abap_elemdescr=>get_xstring( ).
+          WHEN OTHERS.
+            result = cl_abap_elemdescr=>get_string( ).
+        ENDCASE.
+
+    ENDCASE.
 
   ENDMETHOD.
 

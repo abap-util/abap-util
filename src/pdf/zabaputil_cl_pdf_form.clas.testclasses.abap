@@ -116,6 +116,9 @@ CLASS ltcl_form DEFINITION FINAL
     METHODS barcode_fixed           FOR TESTING.
     METHODS barcode_in_the_flow     FOR TESTING.
     METHODS barcode_absolute        FOR TESTING.
+    METHODS placeholders_of_a_text  FOR TESTING.
+    METHODS unknown_of_an_element   FOR TESTING.
+    METHODS unknown_of_a_form       FOR TESTING.
 
     "! the table of the test data with as many rows as asked for
     METHODS items
@@ -1001,6 +1004,85 @@ CLASS ltcl_form IMPLEMENTATION.
     DATA(lv_content) = zabaputil_cl_pdf_form=>build( ms_form )->page( 1 )->content( ).
     cl_abap_unit_assert=>assert_true( xsdbool( count( val = lv_content
                                                       sub = ` re f` ) > 20 ) ).
+  ENDMETHOD.
+
+  METHOD placeholders_of_a_text.
+    DATA(lt_name) = zabaputil_cl_pdf_form=>placeholders( `{name}, { Head-City }: {NAME} {} {open` ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_name ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `NAME` act = lt_name[ 1 ] ).
+    cl_abap_unit_assert=>assert_equals( exp = `HEAD-CITY` act = lt_name[ 2 ] ).
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_pdf_form=>placeholders( `no name` ) ).
+  ENDMETHOD.
+
+  METHOD unknown_of_an_element.
+    DATA ls_element TYPE zabaputil_cl_pdf_form=>ty_s_element.
+
+    DATA(lt_field) = zabaputil_cl_pdf_form=>fields( ms_data ).
+
+    ls_element-type = zabaputil_cl_pdf_form=>cs_type-text.
+    ls_element-text = `{NAME} in {HEAD-CITY}, {HEAD-STREET}`.
+    DATA(lt_name) = zabaputil_cl_pdf_form=>unknown_of( element = ls_element
+                                                        fields  = lt_field ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_name ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `HEAD-STREET` act = lt_name[ 1 ] ).
+
+    " a table the data has: the columns its rows do not have
+    CLEAR ls_element.
+    ls_element-type = zabaputil_cl_pdf_form=>cs_type-table.
+    ls_element-source = `t_items`.
+    ls_element-t_column = VALUE #( ( name = `pos` ) ( name = `price` ) ).
+    lt_name = zabaputil_cl_pdf_form=>unknown_of( element = ls_element
+                                                  fields  = lt_field ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_name ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `T_ITEMS-PRICE` act = lt_name[ 1 ] ).
+
+    " a table it does not have: the table alone
+    ls_element-source = `T_LINES`.
+    lt_name = zabaputil_cl_pdf_form=>unknown_of( element = ls_element
+                                                  fields  = lt_field ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_name ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `T_LINES` act = lt_name[ 1 ] ).
+
+    " no table is no name
+    CLEAR ls_element-source.
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_pdf_form=>unknown_of( element = ls_element
+                                                                            fields  = lt_field ) ).
+
+    " an image of the data, and one of the form itself
+    CLEAR ls_element.
+    ls_element-type = zabaputil_cl_pdf_form=>cs_type-image.
+    ls_element-source = `LOGO`.
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_pdf_form=>unknown_of( element = ls_element
+                                                                            fields  = lt_field ) ).
+    ls_element-source = `PHOTO`.
+    lt_name = zabaputil_cl_pdf_form=>unknown_of( element = ls_element
+                                                  fields  = lt_field ).
+    cl_abap_unit_assert=>assert_equals( exp = `PHOTO` act = lt_name[ 1 ] ).
+    CLEAR ls_element-source.
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_pdf_form=>unknown_of( element = ls_element
+                                                                            fields  = lt_field ) ).
+  ENDMETHOD.
+
+  METHOD unknown_of_a_form.
+    DATA ls_element TYPE zabaputil_cl_pdf_form=>ty_s_element.
+
+    DATA(ls_form) = zabaputil_cl_pdf_form=>new_form( ).
+    ls_form-header = `{NAME} - page {page} of {PAGES}`.
+    ls_form-footer = `{BANK} {ZIP}`.
+    ls_element-type = zabaputil_cl_pdf_form=>cs_type-text.
+    ls_element-text = `{ZIP} {CITY}`.
+    INSERT ls_element INTO TABLE ls_form-t_element.
+    ls_element-type = zabaputil_cl_pdf_form=>cs_type-barcode.
+    ls_element-text = `{NUMBER}{CITY}`.
+    INSERT ls_element INTO TABLE ls_form-t_element.
+
+    " each name once, the elements first; the page numbers are no field
+    DATA(lt_name) = zabaputil_cl_pdf_form=>unknown( val    = ls_form
+                                                     fields = zabaputil_cl_pdf_form=>fields( ms_data ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 3 act = lines( lt_name ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `ZIP` act = lt_name[ 1 ] ).
+    cl_abap_unit_assert=>assert_equals( exp = `CITY` act = lt_name[ 2 ] ).
+    cl_abap_unit_assert=>assert_equals( exp = `BANK` act = lt_name[ 3 ] ).
   ENDMETHOD.
 
   METHOD sample_by_type.
