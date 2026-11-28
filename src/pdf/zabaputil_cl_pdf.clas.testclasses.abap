@@ -24,6 +24,7 @@ CLASS ltcl_pdf DEFINITION FINAL
     METHODS render_deflated         FOR TESTING.
     METHODS bookmarks_outline       FOR TESTING.
     METHODS link_to_page            FOR TESTING.
+    METHODS attachments             FOR TESTING.
 
     " a font and an image made for the tests of their classes
     METHODS font_format_4
@@ -482,6 +483,39 @@ CLASS ltcl_pdf IMPLEMENTATION.
                                     page = 5 ).
     lv_hex = lo_pdf->render( ).
     cl_abap_unit_assert=>assert_false( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( `/Dest` ) ) ).
+  ENDMETHOD.
+
+  METHOD attachments.
+    DATA lv_hex TYPE string.
+    DATA(lo_pdf) = zabaputil_cl_pdf=>create( compress = abap_false ).
+    lo_pdf->add_page( ).
+    lo_pdf->attach( name         = `b.xml`
+                    content      = zabaputil_cl_util_context=>conv_get_xstring_by_string( `<x/>` )
+                    mime         = `text/xml`
+                    relationship = `Alternative` ).
+    lo_pdf->attach( name    = `a.txt`
+                    content = zabaputil_cl_util_context=>conv_get_xstring_by_string( `hello` ) ).
+    lv_hex = lo_pdf->render( ).
+    " the file as it is, its media type a PDF name
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex(
+        |<< /Type /EmbeddedFile /Subtype /text#2Fxml /Params << /Size 4 /ModDate (D:| ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( |stream\n<x/>\nendstream| ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex(
+        |/UF <{ zabaputil_cl_pdf_writer=>hex_utf16( `b.xml` ) }> /AFRelationship /Alternative /EF << /F | ) ) ).
+    " in the catalog: the names in their order, a.txt first
+    DATA(lv_a) = zabaputil_cl_pdf_writer=>hex_utf16( `a.txt` ).
+    DATA(lv_b) = zabaputil_cl_pdf_writer=>hex_utf16( `b.xml` ).
+    DATA(lv_names) = zabaputil_cl_pdf_writer=>hex(
+        |/Names << /EmbeddedFiles << /Names [ <{ lv_a }> 6 0 R <{ lv_b }> 8 0 R ] >> >> /AF [ 6 0 R 8 0 R ] >>| ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_names ) ).
+    " one name once: attached again, it is replaced
+    lo_pdf->attach( name    = `a.txt`
+                    content = zabaputil_cl_util_context=>conv_get_xstring_by_string( `again` ) ).
+    lv_hex = lo_pdf->render( ).
+    DATA(lv_octets) = zabaputil_cl_pdf_writer=>hex( `/Type /EmbeddedFile /Subtype /application#2Foctet-stream` ).
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = count( val = lv_hex
+                                                     sub = lv_octets ) ).
   ENDMETHOD.
 
 ENDCLASS.

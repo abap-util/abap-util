@@ -627,6 +627,8 @@ DATA(lt_rows) = zabaputil_cl_pdf_barcode=>qr( val = lv_url ecc = `H` ). " the mo
 " Bookmarks (the outline beside the pages) and links to a page of the document
 lo_pdf->add_bookmark( title = `Delivery note` )->add_bookmark( title = `Items` level = 2 y = 80 ).
 lo_page->link_page( x = 20 y = 30 w = 80 h = 6 page = 2 ).
+" A file embedded into the document, listed by the viewer as an attachment
+lo_pdf->attach( name = `delivery.csv` content = lv_csv mime = `text/csv` description = `Items` ).
 DATA(lv_file) = lo_pdf->render( ). " => xstring
 
 " Flow text and tables over pages

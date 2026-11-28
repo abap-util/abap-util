@@ -130,6 +130,24 @@ CLASS zabaputil_cl_pdf DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_cl_pdf.
 
+    "! A file embedded into the document - a viewer lists it as an
+    "! attachment; an e-invoice carries its XML so
+    "! @parameter name         | the file name, `factur-x.xml`
+    "! @parameter content      | the bytes of the file
+    "! @parameter mime         | its media type, `text/xml`
+    "! @parameter description  | what it is, for the viewer
+    "! @parameter relationship | how it belongs to the document (PDF/A-3):
+    "!                           Source, Data, Alternative, Supplement or Unspecified
+    METHODS attach
+      IMPORTING
+        name          TYPE clike
+        content       TYPE xstring
+        mime          TYPE clike DEFAULT `application/octet-stream`
+        description   TYPE clike OPTIONAL
+        relationship  TYPE clike DEFAULT `Unspecified`
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf.
+
     METHODS set_info
       IMPORTING
         title         TYPE clike OPTIONAL
@@ -182,6 +200,15 @@ CLASS zabaputil_cl_pdf DEFINITION
         level TYPE i,
       END OF ty_s_bookmark.
     DATA mt_bookmark TYPE STANDARD TABLE OF ty_s_bookmark WITH EMPTY KEY.
+    TYPES:
+      BEGIN OF ty_s_attachment,
+        name         TYPE string,
+        content      TYPE xstring,
+        mime         TYPE string,
+        description  TYPE string,
+        relationship TYPE string,
+      END OF ty_s_attachment.
+    DATA mt_attachment TYPE STANDARD TABLE OF ty_s_attachment WITH EMPTY KEY.
 
     "! The size of a page format in points
     CLASS-METHODS format_size
@@ -198,6 +225,22 @@ CLASS zabaputil_cl_pdf DEFINITION
         page          TYPE i
         y             TYPE f
         t_page_id     TYPE string_table
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! The embedded files: the entries of the catalog for them, empty
+    "! without any
+    METHODS write_attachments
+      IMPORTING
+        writer        TYPE REF TO zabaputil_cl_pdf_writer
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! A text as a PDF name: what is no letter, digit, dot, plus or
+    "! hyphen as #XX
+    CLASS-METHODS pdf_name
+      IMPORTING
+        val           TYPE clike
       RETURNING
         VALUE(result) TYPE string.
 
@@ -452,6 +495,87 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
     ENDIF.
     INSERT ls_bookmark INTO TABLE mt_bookmark.
     result = me.
+
+  ENDMETHOD.
+
+  METHOD attach.
+
+    DATA ls_attachment TYPE ty_s_attachment.
+
+    ls_attachment-name = name.
+    ls_attachment-content = content.
+    ls_attachment-mime = mime.
+    ls_attachment-description = description.
+    ls_attachment-relationship = relationship.
+    IF ls_attachment-relationship IS INITIAL.
+      ls_attachment-relationship = `Unspecified`.
+    ENDIF.
+    IF ls_attachment-name IS INITIAL.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = `PDF: an attachment needs a file name`.
+    ENDIF.
+    DELETE mt_attachment WHERE name = ls_attachment-name.
+    INSERT ls_attachment INTO TABLE mt_attachment.
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD pdf_name.
+
+    DATA lv_x TYPE x LENGTH 1.
+
+    DATA(lv_bytes) = zabaputil_cl_util_context=>conv_get_xstring_by_string( CONV string( val ) ).
+    DATA(lv_off) = 0.
+    WHILE lv_off < xstrlen( lv_bytes ).
+      lv_x = lv_bytes+lv_off(1).
+      DATA(lv_code) = CONV i( lv_x ).
+      IF ( lv_code >= 48 AND lv_code <= 57 ) OR ( lv_code >= 65 AND lv_code <= 90 )
+          OR ( lv_code >= 97 AND lv_code <= 122 ) OR lv_code = 43 OR lv_code = 45 OR lv_code = 46.
+        result = result && zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( lv_x ) ).
+      ELSE.
+        result = |{ result }#{ lv_x }|.
+      ENDIF.
+      lv_off = lv_off + 1.
+    ENDWHILE.
+
+  ENDMETHOD.
+
+  METHOD write_attachments.
+
+    DATA lv_names TYPE string.
+    DATA lv_files TYPE string.
+    DATA lv_date  TYPE string.
+
+    IF mt_attachment IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    " the time of the document, in the form of a PDF date
+    DATA(lv_stamp) = |{ zabaputil_cl_util_context=>time_get_timestamp( ) }|.
+    lv_date = |D:{ substring( val = lv_stamp
+                              len = 14 ) }Z|.
+
+    " the name tree wants its keys in the order of their bytes
+    DATA(lt_sorted) = mt_attachment.
+    SORT lt_sorted BY name.
+    LOOP AT lt_sorted ASSIGNING FIELD-SYMBOL(<attachment>).
+      DATA(lv_file) = writer->add_stream(
+          dict    = |/Type /EmbeddedFile /Subtype /{ pdf_name( <attachment>-mime ) } | &&
+                    |/Params << /Size { xstrlen( <attachment>-content ) } /ModDate ({ lv_date }) >>|
+          content = <attachment>-content ).
+      DATA(lv_spec) = |<< /Type /Filespec /F <{ zabaputil_cl_pdf_writer=>hex( <attachment>-name ) }> | &&
+                      |/UF <{ zabaputil_cl_pdf_writer=>hex_utf16( <attachment>-name ) }> | &&
+                      |/AFRelationship /{ pdf_name( <attachment>-relationship ) }|.
+      IF <attachment>-description IS NOT INITIAL.
+        lv_spec = |{ lv_spec } /Desc <{ zabaputil_cl_pdf_writer=>hex_utf16( <attachment>-description ) }>|.
+      ENDIF.
+      DATA(lv_id) = writer->add_object( |{ lv_spec } /EF << /F { lv_file } 0 R /UF { lv_file } 0 R >> >>| ).
+      lv_names = |{ lv_names } <{ zabaputil_cl_pdf_writer=>hex_utf16( <attachment>-name ) }> { lv_id } 0 R|.
+      lv_files = |{ lv_files } { lv_id } 0 R|.
+    ENDLOOP.
+
+    result = | /Names << /EmbeddedFiles << /Names [{ lv_names } ] >> >> /AF [{ lv_files } ]|.
 
   ENDMETHOD.
 
@@ -717,6 +841,7 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
     IF lv_outline > 0.
       lv_catalog_extra = | /Outlines { lv_outline } 0 R /PageMode /UseOutlines|.
     ENDIF.
+    lv_catalog_extra = lv_catalog_extra && write_attachments( lo_writer ).
     DATA(lv_catalog) = lo_writer->add_object( |<< /Type /Catalog /Pages { lv_pages } 0 R{ lv_catalog_extra } >>| ).
 
     " text strings in UTF-16: a title is not limited to one code page
