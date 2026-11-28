@@ -7989,3 +7989,86 @@ CLASS ltcl_file_encoding IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+CLASS ltcl_text_by_user DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+
+    " what the expectations are built of: the formatting of the user is
+    " whatever the system says, the decimals are what is tested
+    TYPES ty_p0 TYPE p LENGTH 16 DECIMALS 0.
+    TYPES ty_p1 TYPE p LENGTH 16 DECIMALS 1.
+    TYPES ty_p2 TYPE p LENGTH 16 DECIMALS 2.
+    TYPES ty_p3 TYPE p LENGTH 16 DECIMALS 3.
+
+    METHODS date_and_time      FOR TESTING.
+    METHODS initial_date_empty FOR TESTING.
+    METHODS number_decimals    FOR TESTING.
+    METHODS amount_currency    FOR TESTING.
+    METHODS quantity_unknown   FOR TESTING.
+    METHODS text_stays         FOR TESTING.
+
+ENDCLASS.
+
+CLASS ltcl_text_by_user IMPLEMENTATION.
+
+  METHOD date_and_time.
+    DATA lv_date TYPE d VALUE '20261128'.
+    DATA lv_time TYPE t VALUE '134501'.
+    cl_abap_unit_assert=>assert_equals( exp = |{ lv_date DATE = USER }|
+                                        act = zabaputil_cl_util_context=>conv_get_text_by_user( lv_date ) ).
+    cl_abap_unit_assert=>assert_equals( exp = |{ lv_time TIME = USER }|
+                                        act = zabaputil_cl_util_context=>conv_get_text_by_user( lv_time ) ).
+  ENDMETHOD.
+
+  METHOD initial_date_empty.
+    DATA lv_date TYPE d.
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>conv_get_text_by_user( lv_date ) ).
+  ENDMETHOD.
+
+  METHOD number_decimals.
+    DATA lv_value TYPE p LENGTH 8 DECIMALS 3 VALUE '1234.500'.
+    " as many decimals as the value has, without the zeros at its end
+    cl_abap_unit_assert=>assert_equals( exp = |{ CONV ty_p1( '1234.5' ) NUMBER = USER }|
+                                        act = zabaputil_cl_util_context=>conv_get_text_by_user( lv_value ) ).
+    cl_abap_unit_assert=>assert_equals( exp = |{ CONV ty_p0( 42 ) NUMBER = USER }|
+                                        act = zabaputil_cl_util_context=>conv_get_text_by_user( 42 ) ).
+    " the decimals asked for, rounded
+    cl_abap_unit_assert=>assert_equals( exp = |{ CONV ty_p2( '1234.50' ) NUMBER = USER }|
+                                        act = zabaputil_cl_util_context=>conv_get_text_by_user( val      = lv_value
+                                                                                                decimals = 2 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = |{ CONV ty_p0( 1235 ) NUMBER = USER }|
+                                        act = zabaputil_cl_util_context=>conv_get_text_by_user( val      = lv_value
+                                                                                                decimals = 0 ) ).
+  ENDMETHOD.
+
+  METHOD amount_currency.
+    " EUR has two decimals everywhere: the amount keeps both, even zeros
+    DATA lv_amount TYPE p LENGTH 8 DECIMALS 2 VALUE '-1234.50'.
+    cl_abap_unit_assert=>assert_equals( exp = |{ CONV ty_p2( '-1234.50' ) NUMBER = USER }|
+                                        act = zabaputil_cl_util_context=>conv_get_text_by_user( val      = lv_amount
+                                                                                                currency = `EUR` ) ).
+  ENDMETHOD.
+
+  METHOD quantity_unknown.
+    " a unit no system knows: the quantity without the zeros at its end
+    DATA lv_quantity TYPE p LENGTH 8 DECIMALS 3 VALUE '12.500'.
+    cl_abap_unit_assert=>assert_equals( exp = -1
+                                        act = zabaputil_cl_util_context=>unit_get_decimals( `Q#9` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = |{ CONV ty_p1( '12.5' ) NUMBER = USER }|
+                                        act = zabaputil_cl_util_context=>conv_get_text_by_user( val  = lv_quantity
+                                                                                                unit = `Q#9` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = |{ CONV ty_p3( '12.5' ) NUMBER = USER }|
+                                        act = zabaputil_cl_util_context=>conv_get_text_by_user( val      = lv_quantity
+                                                                                                unit     = `Q#9`
+                                                                                                decimals = 3 ) ).
+  ENDMETHOD.
+
+  METHOD text_stays.
+    cl_abap_unit_assert=>assert_equals( exp = `ABC`
+                                        act = zabaputil_cl_util_context=>conv_get_text_by_user( `ABC` ) ).
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>conv_get_text_by_user( `` ) ).
+  ENDMETHOD.
+
+ENDCLASS.

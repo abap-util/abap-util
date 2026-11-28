@@ -30,6 +30,18 @@ CLASS zabaputil_cl_pdf_form DEFINITION
     " not have stays as it is written, so a form shows its placeholders
     " when it is printed without data.
     "
+    " After a colon a placeholder says how its value is shown to the user
+    " who prints it - in the user's date and number format:
+    "   {BSTDK:date}  {UZEIT:time}  {RATE:number}  {RATE:number:2}
+    "   {NETWR:amount:WAERS}    the amount with the decimals and the code
+    "                           of the currency in the component WAERS
+    "   {MENGE:quantity:MEINS}  the quantity with the decimals and the
+    "                           unit in the component MEINS
+    " Instead of a component the currency or the unit may be written as it
+    " is: {NETWR:amount:EUR}. A placeholder without a format prints the
+    " value as ABAP writes it into a string; one with a format this class
+    " does not know stays as it is written.
+    "
     " The data is a structure, or an object: its PUBLIC attributes are then
     " what the form prints. A form names the class of such an object as its
     " data class (zabaputil_if_pdf_data), which is how an editor knows the
@@ -218,15 +230,38 @@ CLASS zabaputil_cl_pdf_form DEFINITION
     CONSTANTS c_size  TYPE f VALUE 10.
 
     "! The value of a component of the data as text
-    "! @parameter path  | NAME, or HEADER-NAME for a component of a component
-    "! @parameter found | the data has it, and it is a single value
+    "! @parameter path   | NAME, or HEADER-NAME for a component of a component
+    "! @parameter format | empty, or date, time, number, amount, quantity
+    "! @parameter option | the decimals of a number, the currency of an
+    "!                     amount, the unit of a quantity
+    "! @parameter found  | the data has it, it is a single value, and the
+    "!                     format is one this class knows
     CLASS-METHODS component_text
       IMPORTING
-        path  TYPE string
-        data  TYPE any
+        path   TYPE string
+        data   TYPE any
+        format TYPE string OPTIONAL
+        option TYPE string OPTIONAL
       EXPORTING
-        found TYPE abap_bool
-        text  TYPE string.
+        found  TYPE abap_bool
+        text   TYPE string.
+
+    "! The value is a number of exactly that many digits
+    CLASS-METHODS is_digits
+      IMPORTING
+        val           TYPE any
+        len           TYPE i
+      RETURNING
+        VALUE(result) TYPE abap_bool.
+
+    "! The value a format option names: a component of the data, or the
+    "! option as it is written (a currency code, a unit)
+    CLASS-METHODS option_value
+      IMPORTING
+        option        TYPE string
+        data          TYPE any
+      RETURNING
+        VALUE(result) TYPE string.
 
     "! A component of a structure, or a public attribute of an object
     "! @parameter node   | the structure or the object reference
@@ -482,9 +517,12 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     DATA lv_rest  TYPE string.
     DATA lv_open  TYPE i.
     DATA lv_close TYPE i.
-    DATA lv_name  TYPE string.
-    DATA lv_text  TYPE string.
-    DATA lv_found TYPE abap_bool.
+    DATA lv_name   TYPE string.
+    DATA lv_path   TYPE string.
+    DATA lv_format TYPE string.
+    DATA lv_option TYPE string.
+    DATA lv_text   TYPE string.
+    DATA lv_found  TYPE abap_bool.
 
     lv_rest = val.
     IF data IS NOT SUPPLIED.
@@ -508,10 +546,16 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
       lv_name = substring( val = lv_rest
                            off = lv_open + 1
                            len = lv_close - lv_open - 1 ).
-      component_text( EXPORTING path  = lv_name
-                                data  = data
-                      IMPORTING found = lv_found
-                                text  = lv_text ).
+      CLEAR lv_path.
+      CLEAR lv_format.
+      CLEAR lv_option.
+      SPLIT lv_name AT `:` INTO lv_path lv_format lv_option.
+      component_text( EXPORTING path   = lv_path
+                                data   = data
+                                format = lv_format
+                                option = lv_option
+                      IMPORTING found  = lv_found
+                                text   = lv_text ).
       IF lv_found = abap_false.
         lv_text = |\{{ lv_name }\}|.
       ENDIF.
@@ -560,8 +604,94 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     IF lv_kind = `u` OR lv_kind = `v` OR lv_kind = `h` OR lv_kind = `l` OR lv_kind = `r`.
       RETURN.
     ENDIF.
-    text = |{ <node> }|.
+
+    DATA(lv_format) = to_lower( condense( format ) ).
+    CASE lv_format.
+
+      WHEN ``.
+        text = |{ <node> }|.
+
+      WHEN `date`.
+        " a date in a text or a number field is a date all the same, if
+        " it is one: eight digits
+        DATA lv_date TYPE d.
+        IF lv_kind <> `D` AND <node> IS NOT INITIAL AND is_digits( val = <node>
+                                                                   len = 8 ) = abap_false.
+          RETURN.
+        ENDIF.
+        lv_date = <node>.
+        text = zabaputil_cl_util_context=>conv_get_text_by_user( lv_date ).
+
+      WHEN `time`.
+        DATA lv_time TYPE t.
+        IF lv_kind <> `T` AND is_digits( val = <node>
+                                         len = 6 ) = abap_false.
+          RETURN.
+        ENDIF.
+        lv_time = <node>.
+        text = zabaputil_cl_util_context=>conv_get_text_by_user( lv_time ).
+
+      WHEN `number`.
+        DATA lv_decimals TYPE i.
+        lv_decimals = -1.
+        IF option IS NOT INITIAL.
+          TRY.
+              lv_decimals = option.
+            CATCH cx_root.
+              RETURN.
+          ENDTRY.
+        ENDIF.
+        text = zabaputil_cl_util_context=>conv_get_text_by_user( val      = <node>
+                                                                 decimals = lv_decimals ).
+
+      WHEN `amount`.
+        DATA(lv_currency) = option_value( option = option
+                                          data   = data ).
+        text = zabaputil_cl_util_context=>conv_get_text_by_user( val      = <node>
+                                                                 currency = lv_currency ).
+        IF lv_currency IS NOT INITIAL AND text IS NOT INITIAL.
+          text = |{ text } { lv_currency }|.
+        ENDIF.
+
+      WHEN `quantity`.
+        DATA(lv_unit) = option_value( option = option
+                                      data   = data ).
+        text = zabaputil_cl_util_context=>conv_get_text_by_user( val  = <node>
+                                                                 unit = lv_unit ).
+        IF lv_unit IS NOT INITIAL AND text IS NOT INITIAL.
+          text = |{ text } { lv_unit }|.
+        ENDIF.
+
+      WHEN OTHERS.
+        RETURN.
+
+    ENDCASE.
     found = abap_true.
+
+  ENDMETHOD.
+
+  METHOD is_digits.
+
+    DATA(lv_text) = condense( |{ val }| ).
+    result = xsdbool( strlen( lv_text ) = len AND lv_text CO `0123456789` ).
+
+  ENDMETHOD.
+
+  METHOD option_value.
+
+    DATA lv_found TYPE abap_bool.
+
+    IF option IS INITIAL.
+      RETURN.
+    ENDIF.
+    component_text( EXPORTING path  = option
+                              data  = data
+                    IMPORTING found = lv_found
+                              text  = result ).
+    IF lv_found = abap_false.
+      result = option.
+    ENDIF.
+    result = condense( result ).
 
   ENDMETHOD.
 

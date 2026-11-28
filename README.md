@@ -169,6 +169,13 @@ DATA(lv_internal) = zabaputil_cl_util_context=>cur_amount_to_internal( val = lv_
 
 " Unit conversion (UNIT_CONVERSION_SIMPLE / I_UnitOfMeasure)
 DATA(lv_meters) = zabaputil_cl_util_context=>unit_convert( val = CONV decfloat34( 2 )  unit_from = `KM`  unit_to = `M` ).
+DATA(lv_unit_decimals) = zabaputil_cl_util_context=>unit_get_decimals( `KG` ). " T006 / I_UnitOfMeasure, -1 if unknown
+
+" A value as the current user reads it: date, time and number in the user's format,
+" an amount with the decimals of its currency, a quantity with those of its unit
+DATA(lv_date_text)   = zabaputil_cl_util_context=>conv_get_text_by_user( sy-datum ).
+DATA(lv_amount_text) = zabaputil_cl_util_context=>conv_get_text_by_user( val = ls_order-netwr currency = ls_order-waers ).
+DATA(lv_qty_text)    = zabaputil_cl_util_context=>conv_get_text_by_user( val = ls_item-menge unit = ls_item-meins ).
 ```
 
 ###### Languages
@@ -627,6 +634,10 @@ ls_form-t_element = VALUE #(
       t_column = VALUE #( ( name = `MATNR` title = `Material` width = 40 align = `L` )
                           ( name = `MENGE` title = `Quantity` width = 25 align = `R` ) ) ) ).
 DATA(lv_pdf) = zabaputil_cl_pdf_form=>render( val = ls_form data = ls_delivery ).
+
+" A placeholder may say how its value is shown - in the format of the user who prints:
+"   {BSTDK:date}  {UZEIT:time}  {RATE:number}  {RATE:number:2}
+"   {NETWR:amount:WAERS}  {MENGE:quantity:MEINS}  {NETWR:amount:EUR}
 
 " The data may be an object instead: its public attributes are what the form prints.
 " A class that implements zabaputil_if_pdf_data is a form's data class - an editor

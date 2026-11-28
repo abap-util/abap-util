@@ -66,6 +66,8 @@ CLASS ltcl_form DEFINITION FINAL
     METHODS resolve_components      FOR TESTING.
     METHODS resolve_unknown_stays   FOR TESTING.
     METHODS resolve_without_data    FOR TESTING.
+    METHODS resolve_formats         FOR TESTING.
+    METHODS resolve_format_unknown  FOR TESTING.
     METHODS empty_form_one_page     FOR TESTING.
     METHODS page_format             FOR TESTING.
     METHODS flow_text               FOR TESTING.
@@ -187,6 +189,70 @@ CLASS ltcl_form IMPLEMENTATION.
         exp = `{NAME}`
         act = zabaputil_cl_pdf_form=>resolve( val  = `{NAME}`
                                               data = `text` ) ).
+  ENDMETHOD.
+
+  METHOD resolve_formats.
+
+    TYPES ty_p1 TYPE p LENGTH 16 DECIMALS 1.
+    TYPES ty_p2 TYPE p LENGTH 16 DECIMALS 2.
+    TYPES:
+      BEGIN OF ty_s_order,
+        bstdk TYPE d,
+        uzeit TYPE t,
+        netwr TYPE p LENGTH 8 DECIMALS 2,
+        waers TYPE c LENGTH 5,
+        menge TYPE p LENGTH 8 DECIMALS 3,
+        meins TYPE c LENGTH 3,
+        rate  TYPE p LENGTH 8 DECIMALS 3,
+        datum TYPE string,
+      END OF ty_s_order.
+    DATA ls_order TYPE ty_s_order.
+
+    ls_order-bstdk = '20261128'.
+    ls_order-uzeit = '134501'.
+    ls_order-netwr = '1234.50'.
+    ls_order-waers = `EUR`.
+    ls_order-menge = '12.500'.
+    ls_order-meins = `Q#9`.
+    ls_order-rate = '0.125'.
+    ls_order-datum = `20261231`.
+
+    cl_abap_unit_assert=>assert_equals(
+        exp = |{ ls_order-bstdk DATE = USER } { ls_order-uzeit TIME = USER }|
+        act = zabaputil_cl_pdf_form=>resolve( val  = `{BSTDK:date} {uzeit:TIME}`
+                                              data = ls_order ) ).
+    " a date in a text field is a date all the same
+    cl_abap_unit_assert=>assert_equals(
+        exp = |{ CONV d( '20261231' ) DATE = USER }|
+        act = zabaputil_cl_pdf_form=>resolve( val  = `{DATUM:date}`
+                                              data = ls_order ) ).
+    " the currency from a component or as it is written
+    cl_abap_unit_assert=>assert_equals(
+        exp = |{ CONV ty_p2( '1234.50' ) NUMBER = USER } EUR|
+        act = zabaputil_cl_pdf_form=>resolve( val  = `{NETWR:amount:WAERS}`
+                                              data = ls_order ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = |{ CONV ty_p2( '1234.50' ) NUMBER = USER } EUR|
+        act = zabaputil_cl_pdf_form=>resolve( val  = `{NETWR:amount:EUR}`
+                                              data = ls_order ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = |{ CONV ty_p1( '12.5' ) NUMBER = USER } Q#9|
+        act = zabaputil_cl_pdf_form=>resolve( val  = `{MENGE:quantity:MEINS}`
+                                              data = ls_order ) ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = |{ CONV ty_p1( '0.1' ) NUMBER = USER }|
+        act = zabaputil_cl_pdf_form=>resolve( val  = `{RATE:number:1}`
+                                              data = ls_order ) ).
+
+  ENDMETHOD.
+
+  METHOD resolve_format_unknown.
+    " a format this class does not know, decimals that are no number, a
+    " date that is none: the placeholder stays as it is written
+    cl_abap_unit_assert=>assert_equals(
+        exp = `{NAME:upper} {NUMBER:number:x} {NAME:date} {NONE:date}`
+        act = zabaputil_cl_pdf_form=>resolve( val  = `{NAME:upper} {NUMBER:number:x} {NAME:date} {NONE:date}`
+                                              data = ms_data ) ).
   ENDMETHOD.
 
   METHOD resolve_without_data.

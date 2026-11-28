@@ -3429,6 +3429,31 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE decfloat34.
 
+    "! The decimals a quantity in a unit is shown with (T006-DECAN, on
+    "! ABAP Cloud I_UnitOfMeasure); -1 when the unit is not known.
+    CLASS-METHODS unit_get_decimals
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE i.
+
+    "! A value as the current user reads it: a date or a time in the
+    "! user's format (DATE = USER, TIME = USER), a number with the user's
+    "! separators (NUMBER = USER). With a currency the value is an amount
+    "! as the database keeps it (two decimals, cur_amount_to_external) and
+    "! is shown with the currency's decimals; with a unit a quantity is
+    "! shown with the unit's decimals, or without the zeros at its end
+    "! when the unit is not known. decimals overrides both. A text, or a
+    "! number of a type that is no number, comes back as it is.
+    CLASS-METHODS conv_get_text_by_user
+      IMPORTING
+        val           TYPE any
+        currency      TYPE clike OPTIONAL
+        unit          TYPE clike OPTIONAL
+        decimals      TYPE i DEFAULT -1
+      RETURNING
+        VALUE(result) TYPE string.
+
     CLASS-METHODS hash_calculate
       IMPORTING
         val           TYPE clike
@@ -16953,6 +16978,111 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
     ELSE.
       result = val * lv_factor.
     ENDIF.
+
+  ENDMETHOD.
+
+  METHOD unit_get_decimals.
+
+    DATA lv_tab TYPE string.
+
+    DATA(lv_unit) = to_upper( c_trim( val ) ).
+    result = -1.
+    IF lv_unit IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        lv_tab = `T006`.
+        SELECT SINGLE decan FROM (lv_tab) WHERE msehi = @lv_unit INTO @result.
+        IF sy-subrc <> 0.
+          result = -1.
+        ENDIF.
+      CATCH cx_root.
+        TRY.
+            lv_tab = `I_UNITOFMEASURE`.
+            SELECT SINGLE unitofmeasurenumberofdecimals FROM (lv_tab)
+              WHERE unitofmeasure = @lv_unit INTO @result.
+            IF sy-subrc <> 0.
+              result = -1.
+            ENDIF.
+          CATCH cx_root.
+            result = -1.
+        ENDTRY.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD conv_get_text_by_user.
+
+    DATA lv_value    TYPE decfloat34.
+    DATA lv_decimals TYPE i.
+    DATA lv_text     TYPE string.
+    DATA lr_number   TYPE REF TO data.
+
+    FIELD-SYMBOLS <number> TYPE any.
+
+    DATA(lv_kind) = rtti_get_type_kind( val ).
+
+    IF lv_kind = cv_typedescr_typekind_date.
+      DATA lv_date TYPE d.
+      lv_date = val.
+      IF lv_date IS NOT INITIAL.
+        result = |{ lv_date DATE = USER }|.
+      ENDIF.
+      RETURN.
+    ENDIF.
+
+    IF lv_kind = cv_typedescr_typekind_time.
+      DATA lv_time TYPE t.
+      lv_time = val.
+      result = |{ lv_time TIME = USER }|.
+      RETURN.
+    ENDIF.
+
+    " a number, or a text that is one: what is no number stays as it is
+    IF val IS INITIAL AND ( lv_kind = cv_typedescr_typekind_char OR lv_kind = cv_typedescr_typekind_string ).
+      RETURN.
+    ENDIF.
+    TRY.
+        lv_value = val.
+      CATCH cx_root.
+        result = |{ val }|.
+        RETURN.
+    ENDTRY.
+
+    lv_decimals = decimals.
+    IF currency IS NOT INITIAL.
+      lv_value = cur_amount_to_external( val      = lv_value
+                                         currency = currency ).
+      IF lv_decimals < 0.
+        lv_decimals = cur_get_decimals( currency ).
+      ENDIF.
+    ELSEIF unit IS NOT INITIAL AND lv_decimals < 0.
+      lv_decimals = unit_get_decimals( unit ).
+    ENDIF.
+
+    IF lv_decimals < 0.
+      " as many decimals as the value has, without the zeros at its end
+      lv_text = |{ lv_value }|.
+      DATA(lv_dot) = find( val = lv_text
+                           sub = `.` ).
+      lv_decimals = 0.
+      IF lv_dot >= 0 AND find( val = lv_text
+                               sub = `E` ) < 0.
+        lv_decimals = strlen( lv_text ) - lv_dot - 1.
+      ENDIF.
+    ENDIF.
+    IF lv_decimals > 14.
+      lv_decimals = 14.
+    ENDIF.
+
+    " a packed number of that many decimals: NUMBER = USER shows all of
+    " them, with the separators of the user
+    CREATE DATA lr_number TYPE p LENGTH 16 DECIMALS lv_decimals.
+    ASSIGN lr_number->* TO <number>.
+    <number> = num_round( val      = lv_value
+                          decimals = lv_decimals ).
+    result = |{ <number> NUMBER = USER }|.
 
   ENDMETHOD.
 
