@@ -1217,9 +1217,12 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     DATA lv_pos  TYPE i.
     DATA lv_name TYPE string.
 
-    " a class that has no form yet returns nothing: an empty page to start on
-    DATA(lv_text) = condense( val ).
-    IF lv_text IS INITIAL.
+    " a class that has no form yet returns nothing: an empty page to start on.
+    " The text itself is read as it is - blanks in a row are a text's own;
+    " what stands in front of the first tag is skipped by xml_open( )
+    DATA(lv_text) = CONV string( val ).
+    DATA(lv_content) = condense( lv_text ).
+    IF lv_content IS INITIAL.
       result = new_form( ).
       RETURN.
     ENDIF.
