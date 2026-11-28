@@ -734,13 +734,17 @@ CLASS zabaputil_cl_pdf_image IMPLEMENTATION.
     " every row starts with its filter byte, and both halves keep it: the
     " PNG filters work on the bytes of one channel, so a row filtered as
     " RGBA is still a valid row as RGB and as A
+    " a row at a time in a table, joined once: the halves are not copied
+    " again for every pixel
+    DATA lt_color TYPE string_table.
+    DATA lt_alpha TYPE string_table.
     WHILE lv_row < mv_height.
       lv_off = lv_row * lv_row_len.
       lv_filter = substring( val = lv_raw
                              off = lv_off
                              len = 2 ).
-      lv_color = lv_color && lv_filter.
-      lv_alpha = lv_alpha && lv_filter.
+      lv_color = lv_filter.
+      lv_alpha = lv_filter.
       lv_off = lv_off + 2.
       DO mv_width TIMES.
         lv_color = lv_color && substring( val = lv_raw
@@ -751,11 +755,13 @@ CLASS zabaputil_cl_pdf_image IMPLEMENTATION.
                                           len = lv_sample ).
         lv_off = lv_off + lv_pixel.
       ENDDO.
+      INSERT lv_color INTO TABLE lt_color.
+      INSERT lv_alpha INTO TABLE lt_alpha.
       lv_row = lv_row + 1.
     ENDWHILE.
 
-    color = lv_color.
-    alpha = lv_alpha.
+    color = concat_lines_of( lt_color ).
+    alpha = concat_lines_of( lt_alpha ).
 
   ENDMETHOD.
 

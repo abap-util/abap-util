@@ -367,7 +367,9 @@ CLASS zabaputil_cl_pdf_page DEFINITION
     DATA mv_width      TYPE f.
     DATA mv_height     TYPE f.
     DATA mv_scale      TYPE f.
-    DATA mv_content    TYPE string.
+    " the operators, one per line: joined when the content is asked for, a
+    " string that grows by every operator is copied again and again
+    DATA mt_content    TYPE string_table.
     DATA mt_annotation TYPE string_table.
     DATA mt_alpha      TYPE string_table.
     DATA mt_goto       TYPE ty_t_goto.
@@ -462,11 +464,7 @@ CLASS zabaputil_cl_pdf_page IMPLEMENTATION.
 
   METHOD emit.
 
-    IF mv_content IS INITIAL.
-      mv_content = val.
-    ELSE.
-      mv_content = mv_content && |\n| && val.
-    ENDIF.
+    INSERT CONV string( val ) INTO TABLE mt_content.
 
   ENDMETHOD.
 
@@ -1065,7 +1063,8 @@ CLASS zabaputil_cl_pdf_page IMPLEMENTATION.
 
   METHOD content.
 
-    result = mv_content.
+    result = concat_lines_of( table = mt_content
+                              sep   = |\n| ).
 
   ENDMETHOD.
 

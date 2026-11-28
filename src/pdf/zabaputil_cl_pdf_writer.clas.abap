@@ -221,27 +221,32 @@ CLASS zabaputil_cl_pdf_writer IMPLEMENTATION.
 
   METHOD render.
 
-    DATA lv_hex    TYPE string.
-    DATA lv_xref   TYPE string.
+    DATA lt_hex    TYPE string_table.
+    DATA lt_xref   TYPE string_table.
     DATA lv_id     TYPE i.
     DATA lv_offset TYPE i.
     DATA lv_info   TYPE string.
+    DATA lv_head   TYPE string.
 
+    " the parts of the file in a table, joined once at the end: a string
+    " that grows by every object is copied again and again
     " the second line is a comment of four bytes above 127: it tells a
     " transfer program that the file is binary
-    lv_hex = hex( |%PDF-{ version }\n%| ) && `E2E3CFD3` && `0A`.
+    lv_head = hex( |%PDF-{ version }\n%| ) && `E2E3CFD3` && `0A`.
+    INSERT lv_head INTO TABLE lt_hex.
+    lv_offset = strlen( lv_head ) DIV 2.
 
-    lv_xref = |xref\n0 { lines( mt_object ) + 1 }\n0000000000 65535 f \n|.
+    INSERT |xref\n0 { lines( mt_object ) + 1 }\n0000000000 65535 f \n| INTO TABLE lt_xref.
     LOOP AT mt_object ASSIGNING FIELD-SYMBOL(<object>).
       lv_id = sy-tabix.
       IF <object>-hex IS INITIAL.
         " reserved and never written: an object has to be there
         <object>-hex = hex( |{ lv_id } 0 obj\nnull\nendobj\n| ).
       ENDIF.
-      lv_offset = strlen( lv_hex ) DIV 2.
-      lv_xref = lv_xref && zabaputil_cl_util_context=>c_pad_left( val = |{ lv_offset }|
-                                                                 len = 10 ) && | 00000 n \n|.
-      lv_hex = lv_hex && <object>-hex.
+      INSERT zabaputil_cl_util_context=>c_pad_left( val = |{ lv_offset }|
+                                                    len = 10 ) && | 00000 n \n| INTO TABLE lt_xref.
+      INSERT <object>-hex INTO TABLE lt_hex.
+      lv_offset = lv_offset + strlen( <object>-hex ) DIV 2.
     ENDLOOP.
 
     IF info > 0.
@@ -251,12 +256,11 @@ CLASS zabaputil_cl_pdf_writer IMPLEMENTATION.
     IF id IS NOT INITIAL.
       lv_info = |{ lv_info } /ID [<{ id }> <{ id }>]|.
     ENDIF.
-    lv_offset = strlen( lv_hex ) DIV 2.
-    lv_hex = lv_hex && hex( lv_xref ) &&
-             hex( |trailer\n<< /Size { lines( mt_object ) + 1 } /Root { root } 0 R{ lv_info } >>\n| ) &&
-             hex( |startxref\n{ lv_offset }\n%%EOF\n| ).
+    INSERT hex( concat_lines_of( lt_xref ) ) INTO TABLE lt_hex.
+    INSERT hex( |trailer\n<< /Size { lines( mt_object ) + 1 } /Root { root } 0 R{ lv_info } >>\n| ) INTO TABLE lt_hex.
+    INSERT hex( |startxref\n{ lv_offset }\n%%EOF\n| ) INTO TABLE lt_hex.
 
-    result = lv_hex.
+    result = concat_lines_of( lt_hex ).
 
   ENDMETHOD.
 
