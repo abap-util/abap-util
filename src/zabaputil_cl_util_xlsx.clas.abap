@@ -29,6 +29,14 @@
 "!     DATA(lr_any) = lo_xlsx->get_table_ref( index = 2 ).
 "!     DATA(lt_cell) = lo_xlsx->get_cells( ).
 "!
+"! A read can be restricted to a range, to the first rows, to what is not
+"! hidden, or go by an Excel table or a defined name (table_name); a sheet
+"! too large for a table is read row by row (rows_open( ), rows_next( )).
+"! get_table( ) with t_error lists the cells that do not fit instead of
+"! raising at the first. A cell gives its formula besides its value; the
+"! merged ranges, the links, the names and the Excel tables of a workbook
+"! are read on their own (get_merged( ), get_hyperlinks( ), ...).
+"!
 "! The layout of a sheet also places it (start_cell), names and styles its
 "! Excel table, gives it formula columns, a totals row, styles, links and
 "! validations by column, and sets the sheet up for the screen and for
@@ -272,8 +280,59 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
         col   TYPE i,
         kind  TYPE string,
         value TYPE string,
+        "! the formula of the cell, as the file holds it (without =) - a
+        "! shared formula worked out for the cell
+        formula TYPE string,
       END OF ty_s_cell.
     TYPES ty_t_cell TYPE STANDARD TABLE OF ty_s_cell WITH EMPTY KEY.
+
+    TYPES:
+      "! a cell get_table( ) could not convert
+      BEGIN OF ty_s_error,
+        sheet     TYPE string,
+        "! the address of the cell (`C12`)
+        cell      TYPE string,
+        row       TYPE i,
+        col       TYPE i,
+        value     TYPE string,
+        "! the component the value was for
+        component TYPE string,
+        message   TYPE string,
+      END OF ty_s_error.
+    TYPES ty_t_error TYPE STANDARD TABLE OF ty_s_error WITH EMPTY KEY.
+
+    TYPES:
+      "! a link from a cell - to a URL, or to a place in the workbook
+      "! (`#Sheet2!A1`)
+      BEGIN OF ty_s_hyperlink,
+        cell    TYPE string,
+        target  TYPE string,
+        display TYPE string,
+      END OF ty_s_hyperlink.
+    TYPES ty_t_hyperlink TYPE STANDARD TABLE OF ty_s_hyperlink WITH EMPTY KEY.
+
+    TYPES:
+      "! a defined name of a workbook that was read
+      BEGIN OF ty_s_defined_name,
+        name  TYPE string,
+        "! the sheet the name holds on - empty: the whole workbook
+        sheet TYPE string,
+        "! what it stands for, as Excel writes it (`'Data'!$A$1:$C$9`)
+        ref   TYPE string,
+      END OF ty_s_defined_name.
+    TYPES ty_t_defined_name TYPE STANDARD TABLE OF ty_s_defined_name WITH EMPTY KEY.
+
+    TYPES:
+      "! an Excel table of a workbook that was read
+      BEGIN OF ty_s_excel_table,
+        name        TYPE string,
+        sheet       TYPE string,
+        "! the cells of the table, header and totals row included (`A1:D20`)
+        ref         TYPE string,
+        header_rows TYPE i,
+        totals_rows TYPE i,
+      END OF ty_s_excel_table.
+    TYPES ty_t_excel_table TYPE STANDARD TABLE OF ty_s_excel_table WITH EMPTY KEY.
 
     CONSTANTS:
       BEGIN OF cs_kind,
@@ -438,16 +497,27 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
         VALUE(result) TYPE xstring.
 
     "! the names of the sheets, in the order of the workbook
+    "! @parameter no_hidden | without the sheets that are hidden
     METHODS get_sheet_names
+      IMPORTING
+        no_hidden     TYPE abap_bool OPTIONAL
       RETURNING
         VALUE(result) TYPE string_table.
 
     "! Every cell of a sheet that holds a value, row by row.
     "! @parameter sheet | the name of the sheet - empty: the sheet at index
+    "! @parameter range | only the cells of this range (`B3:F200`)
+    "! @parameter max_rows | only the first rows that hold a value - 0: all
+    "! @parameter skip_hidden | without the hidden rows and columns
+    "! @parameter fill_merged | every cell of a merged range with the value of its first
     METHODS get_cells
       IMPORTING
-        sheet         TYPE clike OPTIONAL
-        index         TYPE i     DEFAULT 1
+        sheet         TYPE clike     OPTIONAL
+        index         TYPE i         DEFAULT 1
+        range         TYPE clike     OPTIONAL
+        max_rows      TYPE i         OPTIONAL
+        skip_hidden   TYPE abap_bool OPTIONAL
+        fill_merged   TYPE abap_bool OPTIONAL
       RETURNING
         VALUE(result) TYPE ty_t_cell.
 
@@ -458,14 +528,26 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
     "! the type of its component; a cell that does not fit (a text in a
     "! number, a number in a date) raises with its address.
     "! @parameter header_row | 0: no header, the n-th column goes to the n-th component
+    "! @parameter range | only the cells of this range (`B3:F200`) - the header in its first row
+    "! @parameter max_rows | only the first rows - 0: all
+    "! @parameter skip_hidden | without the hidden rows and columns
+    "! @parameter table_name | an Excel table or a defined name instead of sheet and range
+    "! @parameter date_order | of a date as text with day and month in front: DMY or MDY
+    "! @parameter t_error | given: the cells that do not fit are listed here, not raised
     METHODS get_table
       IMPORTING
-        sheet      TYPE clike       OPTIONAL
-        index      TYPE i           DEFAULT 1
-        header_row TYPE i           DEFAULT 1
-        t_column   TYPE ty_t_column OPTIONAL
+        sheet       TYPE clike       OPTIONAL
+        index       TYPE i           DEFAULT 1
+        header_row  TYPE i           DEFAULT 1
+        t_column    TYPE ty_t_column OPTIONAL
+        range       TYPE clike       OPTIONAL
+        max_rows    TYPE i           OPTIONAL
+        skip_hidden TYPE abap_bool   OPTIONAL
+        table_name  TYPE clike       OPTIONAL
+        date_order  TYPE clike       DEFAULT `DMY`
       EXPORTING
-        result     TYPE ANY TABLE.
+        result      TYPE ANY TABLE
+        t_error     TYPE ty_t_error.
 
     "! A sheet as a table of strings whose components are named after the
     "! header row (`Order Id` becomes ORDER_ID; a column without a header,
@@ -473,11 +555,58 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
     "! Values as get_cells( ) gives them. Unbound for a sheet without a cell
     METHODS get_table_ref
       IMPORTING
-        sheet         TYPE clike OPTIONAL
-        index         TYPE i     DEFAULT 1
-        header_row    TYPE i     DEFAULT 1
+        sheet         TYPE clike     OPTIONAL
+        index         TYPE i         DEFAULT 1
+        header_row    TYPE i         DEFAULT 1
+        range         TYPE clike     OPTIONAL
+        max_rows      TYPE i         OPTIONAL
+        skip_hidden   TYPE abap_bool OPTIONAL
+        table_name    TYPE clike     OPTIONAL
       RETURNING
         VALUE(result) TYPE REF TO data.
+
+    "! The rows of a sheet one at a time, for a sheet that is too large
+    "! for a table: rows_open( ), then rows_next( ) until eof
+    METHODS rows_open
+      IMPORTING
+        sheet         TYPE clike     OPTIONAL
+        index         TYPE i         DEFAULT 1
+        range         TYPE clike     OPTIONAL
+        skip_hidden   TYPE abap_bool OPTIONAL
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_util_xlsx.
+
+    "! the cells of the next row that holds a value - eof when there is none
+    METHODS rows_next
+      EXPORTING
+        t_cell TYPE ty_t_cell
+        eof    TYPE abap_bool.
+
+    "! the merged ranges of a sheet (`A1:D1`)
+    METHODS get_merged
+      IMPORTING
+        sheet         TYPE clike OPTIONAL
+        index         TYPE i     DEFAULT 1
+      RETURNING
+        VALUE(result) TYPE string_table.
+
+    "! the links of the cells of a sheet
+    METHODS get_hyperlinks
+      IMPORTING
+        sheet         TYPE clike OPTIONAL
+        index         TYPE i     DEFAULT 1
+      RETURNING
+        VALUE(result) TYPE ty_t_hyperlink.
+
+    "! the defined names of the workbook
+    METHODS get_defined_names
+      RETURNING
+        VALUE(result) TYPE ty_t_defined_name.
+
+    "! the Excel tables of the workbook, sheet by sheet
+    METHODS get_excel_tables
+      RETURNING
+        VALUE(result) TYPE ty_t_excel_table.
 
     "! 1 gives A, 27 gives AA, 16384 gives XFD
     CLASS-METHODS column_to_letters
@@ -672,11 +801,11 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
 
     " a defined name of the workbook - sheet 0: of the workbook
     TYPES:
-      BEGIN OF ty_s_name,
+      BEGIN OF ty_s_def,
         name  TYPE string,
         sheet TYPE i,
         ref   TYPE string,
-      END OF ty_s_name.
+      END OF ty_s_def.
 
     " a cell format of styles.xml - the row index less one is what a cell
     " names in its s attribute. font, fill and border are indexes of the
@@ -716,9 +845,33 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
 
     TYPES:
       BEGIN OF ty_s_sheet,
-        name TYPE string,
-        path TYPE string,
+        name   TYPE string,
+        path   TYPE string,
+        hidden TYPE abap_bool,
       END OF ty_s_sheet.
+
+    " the master of a shared formula: where it stands, what it says
+    TYPES:
+      BEGIN OF ty_s_formula,
+        si      TYPE string,
+        formula TYPE string,
+        row     TYPE i,
+        col     TYPE i,
+      END OF ty_s_formula.
+    TYPES ty_t_formula TYPE STANDARD TABLE OF ty_s_formula WITH EMPTY KEY.
+
+    " a sheet while it is read row by row
+    TYPES:
+      BEGIN OF ty_s_read,
+        reader    TYPE REF TO object,
+        sheet     TYPE string,
+        row       TYPE i,
+        area      TYPE ty_s_area,
+        skip      TYPE abap_bool,
+        t_hidden  TYPE ty_t_area,
+        t_formula TYPE ty_t_formula,
+        eof       TYPE abap_bool,
+      END OF ty_s_read.
 
     TYPES:
       BEGIN OF ty_s_rel,
@@ -740,7 +893,7 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
     DATA mv_formulas  TYPE abap_bool.
     DATA mv_open      TYPE abap_bool.
     DATA ms_cur       TYPE ty_s_cur.
-    DATA mt_name      TYPE STANDARD TABLE OF ty_s_name WITH EMPTY KEY.
+    DATA mt_name      TYPE STANDARD TABLE OF ty_s_def WITH EMPTY KEY.
     DATA mv_props     TYPE abap_bool.
     DATA ms_props     TYPE ty_s_properties.
 
@@ -751,6 +904,8 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
     DATA mt_shared     TYPE string_table.
     DATA mt_style_kind TYPE string_table.
     DATA mv_date1904   TYPE abap_bool.
+    DATA mt_defname    TYPE ty_t_defined_name.
+    DATA ms_rows       TYPE ty_s_read.
 
     " ----- writing
 
@@ -1060,24 +1215,111 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
       IMPORTING
         val TYPE xstring.
 
-    "! the part of a sheet, by name or by position
-    METHODS sheet_part
+    "! the sheet by name or by position
+    METHODS sheet_get
       IMPORTING
         sheet         TYPE clike
         index         TYPE i
       RETURNING
+        VALUE(result) TYPE ty_s_sheet.
+
+    "! the part of a sheet - raises when the file has none
+    METHODS sheet_xml
+      IMPORTING
+        val           TYPE ty_s_sheet
+      RETURNING
         VALUE(result) TYPE xstring.
 
-    "! The cells of the next row that has any. row goes in as the row
-    "! before and comes back as the row that was read
-    METHODS sheet_read_row
+    "! a sheet to be read with read_next( ), restricted to a range
+    METHODS read_start
       IMPORTING
-        reader TYPE REF TO object
+        sheet         TYPE ty_s_sheet
+        range         TYPE clike     OPTIONAL
+        skip_hidden   TYPE abap_bool OPTIONAL
+      RETURNING
+        VALUE(result) TYPE ty_s_read.
+
+    "! the next row of the range that holds a value
+    METHODS read_next
       EXPORTING
         t_cell TYPE ty_t_cell
         eof    TYPE abap_bool
       CHANGING
-        row    TYPE i.
+        state  TYPE ty_s_read.
+
+    "! The cells of the next row that has any, and whether it is hidden.
+    "! state-row comes back as the row that was read
+    METHODS sheet_read_row
+      EXPORTING
+        t_cell TYPE ty_t_cell
+        eof    TYPE abap_bool
+        hidden TYPE abap_bool
+      CHANGING
+        state  TYPE ty_s_read.
+
+    "! a table name or a defined name as the sheet and the range it stands for
+    METHODS source_get
+      IMPORTING
+        name   TYPE clike
+      EXPORTING
+        sheet  TYPE ty_s_sheet
+        area   TYPE ty_s_area
+        header TYPE abap_bool.
+
+    "! a reference with a sheet (`'Q1 2024'!$A$1:$C$9`) as the sheet and the area
+    METHODS ref_split
+      IMPORTING
+        val   TYPE string
+      EXPORTING
+        sheet TYPE ty_s_sheet
+        area  TYPE ty_s_area.
+
+    "! what follows the cells of a sheet: its merged ranges and its links
+    METHODS sheet_tail
+      IMPORTING
+        sheet   TYPE ty_s_sheet
+      EXPORTING
+        t_merge TYPE string_table
+        t_link  TYPE ty_t_hyperlink.
+
+    "! a formula of a cell moved by rows and columns, as a shared formula
+    "! is for the cells after its first: the references without a $ move
+    CLASS-METHODS formula_shift
+      IMPORTING
+        val           TYPE string
+        rows          TYPE i
+        cols          TYPE i
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! the length of a cell reference at pos (`$B$12`) - 0 for none
+    CLASS-METHODS ref_at
+      IMPORTING
+        val     TYPE string
+        pos     TYPE i
+      EXPORTING
+        len     TYPE i
+        col     TYPE i
+        row     TYPE i
+        abs_col TYPE abap_bool
+        abs_row TYPE abap_bool.
+
+    "! a date as text with separators (15.03.2024, 3/15/24, 2024-03-15)
+    "! as YYYYMMDD - empty for none
+    CLASS-METHODS date_by_text
+      IMPORTING
+        val           TYPE string
+        date_order    TYPE string
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! a number as text with what a person writes around it - a currency,
+    "! a percent sign, a sign behind (1.234,56-) - as a plain number
+    CLASS-METHODS number_by_text
+      IMPORTING
+        val           TYPE string
+      RETURNING
+        VALUE(result) TYPE string.
 
     "! what a c element holds: its text by the type the element names
     METHODS cell_read
@@ -1100,10 +1342,11 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
 
     METHODS cell_to_field
       IMPORTING
-        cell  TYPE ty_s_cell
-        cat   TYPE string
+        cell       TYPE ty_s_cell
+        cat        TYPE string
+        date_order TYPE string DEFAULT `DMY`
       CHANGING
-        field TYPE any.
+        field      TYPE any.
 
     "! a path of the package: target as seen from the folder of base
     CLASS-METHODS path_resolve
@@ -1440,7 +1683,7 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
 
   METHOD add_name.
 
-    DATA ls_name TYPE ty_s_name.
+    DATA ls_name TYPE ty_s_def.
 
     IF local = abap_true.
       sheet_check( ).
@@ -3713,6 +3956,9 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
 
     DATA lv_kind TYPE string.
     DATA lv_name TYPE string.
+    DATA lv_value TYPE string.
+    DATA lv_in_name TYPE abap_bool.
+    DATA ls_defname TYPE ty_s_defined_name.
     DATA lt_attr TYPE zabaputil_cl_util_context=>ty_t_xml_attribute.
 
     " a workbook is a ZIP archive, and one starts with PK. Looked at here:
@@ -3766,14 +4012,39 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
       zabaputil_cl_util_context=>xml_reader_next( EXPORTING reader      = lo_reader
                                                   IMPORTING kind        = lv_kind
                                                             name        = lv_name
+                                                            value       = lv_value
                                                             t_attribute = lt_attr ).
       IF lv_kind = zabaputil_cl_util_context=>cs_xml_node-end.
         EXIT.
+      ENDIF.
+      " the text of a defined name
+      IF lv_kind = zabaputil_cl_util_context=>cs_xml_node-value AND lv_in_name = abap_true.
+        ls_defname-ref = ls_defname-ref && lv_value.
+        CONTINUE.
+      ENDIF.
+      IF lv_kind = zabaputil_cl_util_context=>cs_xml_node-close AND lv_name = `definedName`.
+        lv_in_name = abap_false.
+        INSERT ls_defname INTO TABLE mt_defname.
+        CONTINUE.
       ENDIF.
       IF lv_kind <> zabaputil_cl_util_context=>cs_xml_node-open.
         CONTINUE.
       ENDIF.
       CASE lv_name.
+        WHEN `definedName`.
+          CLEAR ls_defname.
+          lv_in_name = abap_true.
+          ls_defname-name = attr( t_attribute = lt_attr
+                                  name        = `name` ).
+          DATA(lv_local) = attr( t_attribute = lt_attr
+                                 name        = `localSheetId` ).
+          IF lv_local IS NOT INITIAL AND lv_local CO cv_digits.
+            DATA(lv_local_index) = CONV i( lv_local ) + 1.
+            DATA(lv_sheet_count) = lines( mt_sheet ).
+            IF lv_local_index <= lv_sheet_count.
+              ls_defname-sheet = mt_sheet[ lv_local_index ]-name.
+            ENDIF.
+          ENDIF.
         WHEN `workbookPr`.
           " the date system of Excel for Mac up to 2008: day 0 is 1904-01-01
           DATA(lv_1904) = attr( t_attribute = lt_attr
@@ -3782,12 +4053,15 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
         WHEN `sheet`.
           DATA(lv_id) = attr( t_attribute = lt_attr
                               name        = `id` ).
+          DATA(lv_state) = attr( t_attribute = lt_attr
+                                 name        = `state` ).
           LOOP AT lt_rel REFERENCE INTO lr_rel.
             IF lr_rel->id = lv_id.
-              INSERT VALUE #( name = attr( t_attribute = lt_attr
-                                           name        = `name` )
-                              path = path_resolve( base   = lv_book
-                                                   target = lr_rel->target ) ) INTO TABLE mt_sheet.
+              INSERT VALUE #( name   = attr( t_attribute = lt_attr
+                                             name        = `name` )
+                              path   = path_resolve( base   = lv_book
+                                                     target = lr_rel->target )
+                              hidden = xsdbool( lv_state = `hidden` OR lv_state = `veryHidden` ) ) INTO TABLE mt_sheet.
               EXIT.
             ENDIF.
           ENDLOOP.
@@ -4060,23 +4334,27 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
 
     IF mv_loaded = abap_true.
       LOOP AT mt_sheet REFERENCE INTO DATA(lr_sheet).
+        IF no_hidden = abap_true AND lr_sheet->hidden = abap_true.
+          CONTINUE.
+        ENDIF.
         INSERT lr_sheet->name INTO TABLE result.
       ENDLOOP.
     ELSE.
       LOOP AT mt_out_sheet REFERENCE INTO DATA(lr_out).
+        IF no_hidden = abap_true AND lr_out->hidden = abap_true.
+          CONTINUE.
+        ENDIF.
         INSERT lr_out->name INTO TABLE result.
       ENDLOOP.
       " the sheet that is written now
-      IF mv_open = abap_true.
+      IF mv_open = abap_true AND ( no_hidden = abap_false OR ms_cur-layout-hidden = abap_false ).
         INSERT ms_cur-name INTO TABLE result.
       ENDIF.
     ENDIF.
 
   ENDMETHOD.
 
-  METHOD sheet_part.
-
-    DATA lv_path TYPE string.
+  METHOD sheet_get.
 
     IF mv_loaded = abap_false.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
@@ -4087,32 +4365,84 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     IF sheet IS NOT INITIAL.
       DATA(lv_name) = to_upper( sheet ).
       LOOP AT mt_sheet REFERENCE INTO DATA(lr_sheet).
-        IF to_upper( lr_sheet->name ) = lv_name.
-          lv_path = lr_sheet->path.
-          EXIT.
+        DATA(lv_other) = to_upper( lr_sheet->name ).
+        IF lv_other = lv_name.
+          result = lr_sheet->*.
+          RETURN.
         ENDIF.
       ENDLOOP.
-      IF lv_path IS INITIAL.
-        RAISE EXCEPTION TYPE zabaputil_cx_util_error
-          EXPORTING
-            val = |XLSX_SHEET_UNKNOWN - the workbook has no sheet { sheet }|.
-      ENDIF.
-    ELSE.
-      DATA(lv_sheets) = lines( mt_sheet ).
-      IF index < 1 OR index > lv_sheets.
-        RAISE EXCEPTION TYPE zabaputil_cx_util_error
-          EXPORTING
-            val = |XLSX_SHEET_UNKNOWN - the workbook has { lv_sheets } sheets, none at { index }|.
-      ENDIF.
-      lv_path = mt_sheet[ index ]-path.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |XLSX_SHEET_UNKNOWN - the workbook has no sheet { sheet }|.
     ENDIF.
 
-    result = part_get( lv_path ).
+    DATA(lv_sheets) = lines( mt_sheet ).
+    IF index < 1 OR index > lv_sheets.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |XLSX_SHEET_UNKNOWN - the workbook has { lv_sheets } sheets, none at { index }|.
+    ENDIF.
+    result = mt_sheet[ index ].
+
+  ENDMETHOD.
+
+  METHOD sheet_xml.
+
+    result = part_get( val-path ).
     IF result IS INITIAL.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
         EXPORTING
-          val = |XLSX_SHEET_UNKNOWN - the file has no part { lv_path }|.
+          val = |XLSX_SHEET_UNKNOWN - the file has no part { val-path }|.
     ENDIF.
+
+  ENDMETHOD.
+
+  METHOD read_start.
+
+    result-reader = zabaputil_cl_util_context=>xml_reader_create( sheet_xml( sheet ) ).
+    result-sheet = sheet-name.
+    result-skip = skip_hidden.
+    IF range IS NOT INITIAL.
+      result-area = area_parse( range ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD read_next.
+
+    DATA lv_hidden TYPE abap_bool.
+
+    CLEAR t_cell.
+    eof = state-eof.
+    WHILE eof = abap_false.
+      sheet_read_row( IMPORTING t_cell = t_cell
+                                eof    = eof
+                                hidden = lv_hidden
+                      CHANGING  state  = state ).
+      IF eof = abap_false AND state-area-row2 > 0 AND state-row > state-area-row2.
+        " behind the range: nothing more to read
+        eof = abap_true.
+      ENDIF.
+      IF eof = abap_true.
+        CLEAR t_cell.
+        EXIT.
+      ENDIF.
+      IF state-row < state-area-row1 OR ( state-skip = abap_true AND lv_hidden = abap_true ).
+        CONTINUE.
+      ENDIF.
+      IF state-area-col1 > 0.
+        DELETE t_cell WHERE col < state-area-col1 OR col > state-area-col2.
+      ENDIF.
+      IF state-skip = abap_true.
+        LOOP AT state-t_hidden REFERENCE INTO DATA(lr_hidden).
+          DELETE t_cell WHERE col >= lr_hidden->col1 AND col <= lr_hidden->col2.
+        ENDLOOP.
+      ENDIF.
+      IF t_cell IS NOT INITIAL.
+        RETURN.
+      ENDIF.
+    ENDWHILE.
+    state-eof = eof.
 
   ENDMETHOD.
 
@@ -4129,13 +4459,18 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     DATA lv_type   TYPE string.
     DATA lv_style  TYPE string.
     DATA lv_ref    TYPE string.
+    DATA lv_formula TYPE string.
+    DATA lv_in_f   TYPE abap_bool.
+    DATA lv_f_type TYPE string.
+    DATA lv_f_si   TYPE string.
     DATA ls_cell   TYPE ty_s_cell.
 
     CLEAR t_cell.
     CLEAR eof.
+    CLEAR hidden.
 
     DO.
-      zabaputil_cl_util_context=>xml_reader_next( EXPORTING reader      = reader
+      zabaputil_cl_util_context=>xml_reader_next( EXPORTING reader      = state-reader
                                                   IMPORTING kind        = lv_kind
                                                             name        = lv_name
                                                             value       = lv_value
@@ -4149,11 +4484,14 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
               lv_ref = attr( t_attribute = lt_attr
                              name        = `r` ).
               IF lv_ref IS NOT INITIAL AND lv_ref CO cv_digits.
-                row = lv_ref.
+                state-row = lv_ref.
               ELSE.
-                row = row + 1.
+                state-row = state-row + 1.
               ENDIF.
               lv_col = 0.
+              lv_ref = attr( t_attribute = lt_attr
+                             name        = `hidden` ).
+              hidden = xsdbool( lv_ref = `1` OR lv_ref = `true` ).
             WHEN `c`.
               lv_ref = attr( t_attribute = lt_attr
                              name        = `r` ).
@@ -4167,35 +4505,72 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
               lv_style = attr( t_attribute = lt_attr
                                name        = `s` ).
               CLEAR lv_text.
+              CLEAR lv_formula.
+              CLEAR lv_f_type.
+              CLEAR lv_f_si.
             WHEN `v`.
               lv_take = abap_true.
+            WHEN `f`.
+              lv_in_f = abap_true.
+              lv_f_type = attr( t_attribute = lt_attr
+                                name        = `t` ).
+              lv_f_si = attr( t_attribute = lt_attr
+                              name        = `si` ).
             WHEN `t`.
               " the text of an inline string, in one piece or in runs
               lv_take = xsdbool( lv_ruby = abap_false ).
             WHEN `rPh`.
               lv_ruby = abap_true.
+            WHEN `col`.
+              " the hidden columns, ahead of the rows
+              lv_ref = attr( t_attribute = lt_attr
+                             name        = `hidden` ).
+              IF lv_ref = `1` OR lv_ref = `true`.
+                INSERT VALUE #( col1 = attr( t_attribute = lt_attr
+                                             name        = `min` )
+                                col2 = attr( t_attribute = lt_attr
+                                             name        = `max` ) ) INTO TABLE state-t_hidden.
+              ENDIF.
           ENDCASE.
 
         WHEN zabaputil_cl_util_context=>cs_xml_node-value.
           IF lv_take = abap_true.
             lv_text = lv_text && lv_value.
+          ELSEIF lv_in_f = abap_true.
+            lv_formula = lv_formula && lv_value.
           ENDIF.
 
         WHEN zabaputil_cl_util_context=>cs_xml_node-close.
           CASE lv_name.
             WHEN `v` OR `t`.
               lv_take = abap_false.
+            WHEN `f`.
+              lv_in_f = abap_false.
             WHEN `rPh`.
               lv_ruby = abap_false.
             WHEN `c`.
               CLEAR ls_cell.
-              ls_cell-row = row.
+              ls_cell-row = state-row.
               ls_cell-col = lv_col.
               cell_read( EXPORTING cell_type = lv_type
                                    style     = lv_style
                                    text      = lv_text
                          IMPORTING kind      = ls_cell-kind
                                    value     = ls_cell-value ).
+              " a shared formula: the first cell holds it, the others move it
+              IF lv_f_type = `shared` AND lv_formula IS NOT INITIAL.
+                INSERT VALUE #( si      = lv_f_si
+                                formula = lv_formula
+                                row     = state-row
+                                col     = lv_col ) INTO TABLE state-t_formula.
+              ELSEIF lv_f_type = `shared`.
+                LOOP AT state-t_formula REFERENCE INTO DATA(lr_formula) WHERE si = lv_f_si.
+                  lv_formula = formula_shift( val  = lr_formula->formula
+                                              rows = state-row - lr_formula->row
+                                              cols = lv_col - lr_formula->col ).
+                ENDLOOP.
+              ENDIF.
+              ls_cell-formula = lv_formula.
               " a FALSE is a value: its cell is there, and empty
               IF ls_cell-value IS NOT INITIAL OR ls_cell-kind = cs_kind-boolean.
                 INSERT ls_cell INTO TABLE t_cell.
@@ -4215,6 +4590,507 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
 
       ENDCASE.
     ENDDO.
+
+  ENDMETHOD.
+
+  METHOD rows_open.
+
+    ms_rows = read_start( sheet       = sheet_get( sheet = sheet
+                                                   index = index )
+                          range       = range
+                          skip_hidden = skip_hidden ).
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD rows_next.
+
+    IF ms_rows-reader IS NOT BOUND.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = `XLSX_NOT_OPEN - rows_open( ) first: no sheet is read row by row`.
+    ENDIF.
+    read_next( IMPORTING t_cell = t_cell
+                         eof    = eof
+               CHANGING  state  = ms_rows ).
+
+  ENDMETHOD.
+
+  METHOD source_get.
+
+    DATA lv_header TYPE i.
+    DATA lv_totals TYPE i.
+
+    CLEAR sheet.
+    CLEAR area.
+    CLEAR header.
+    DATA(lv_name) = to_upper( zabaputil_cl_util_context=>c_trim( name ) ).
+
+    " an Excel table: its range without the totals row, with its header
+    LOOP AT get_excel_tables( ) REFERENCE INTO DATA(lr_table).
+      DATA(lv_table) = to_upper( lr_table->name ).
+      IF lv_table <> lv_name.
+        CONTINUE.
+      ENDIF.
+      sheet = sheet_get( sheet = lr_table->sheet
+                         index = 0 ).
+      area = area_parse( lr_table->ref ).
+      lv_header = lr_table->header_rows.
+      lv_totals = lr_table->totals_rows.
+      area-row2 = area-row2 - lv_totals.
+      header = xsdbool( lv_header > 0 ).
+      RETURN.
+    ENDLOOP.
+
+    " a defined name: its range, the header in its first row
+    LOOP AT mt_defname REFERENCE INTO DATA(lr_name).
+      DATA(lv_other) = to_upper( lr_name->name ).
+      IF lv_other <> lv_name.
+        CONTINUE.
+      ENDIF.
+      ref_split( EXPORTING val   = lr_name->ref
+                 IMPORTING sheet = sheet
+                           area  = area ).
+      header = abap_true.
+      RETURN.
+    ENDLOOP.
+
+    RAISE EXCEPTION TYPE zabaputil_cx_util_error
+      EXPORTING
+        val = |XLSX_NAME_UNKNOWN - the workbook has no table and no name { name }|.
+
+  ENDMETHOD.
+
+  METHOD ref_split.
+
+    CLEAR sheet.
+    CLEAR area.
+    DATA(lv_pos) = find( val  = val
+                         sub  = `!`
+                         occ  = -1 ).
+    IF lv_pos <= 0.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |XLSX_RANGE - { val } names no sheet and range|.
+    ENDIF.
+    DATA(lv_sheet) = substring( val = val
+                                len = lv_pos ).
+    DATA(lv_range) = substring( val = val
+                                off = lv_pos + 1 ).
+    IF strlen( lv_sheet ) >= 2 AND lv_sheet(1) = `'`.
+      lv_sheet = substring( val = lv_sheet
+                            off = 1
+                            len = strlen( lv_sheet ) - 2 ).
+      lv_sheet = replace( val  = lv_sheet
+                          sub  = `''`
+                          with = `'`
+                          occ  = 0 ).
+    ENDIF.
+    sheet = sheet_get( sheet = lv_sheet
+                       index = 0 ).
+    area = area_parse( lv_range ).
+
+  ENDMETHOD.
+
+  METHOD sheet_tail.
+
+    DATA lv_kind TYPE string.
+    DATA lv_name TYPE string.
+    DATA lt_attr TYPE zabaputil_cl_util_context=>ty_t_xml_attribute.
+    DATA ls_link TYPE ty_s_hyperlink.
+    DATA lt_rel  TYPE ty_t_rel.
+
+    CLEAR t_merge.
+    CLEAR t_link.
+
+    DATA(lv_folder) = path_folder( sheet-path ).
+    DATA(lv_file) = substring( val = sheet-path
+                               off = strlen( lv_folder ) ).
+    DATA(lo_reader) = zabaputil_cl_util_context=>xml_reader_create( sheet_xml( sheet ) ).
+    DO.
+      zabaputil_cl_util_context=>xml_reader_next( EXPORTING reader      = lo_reader
+                                                  IMPORTING kind        = lv_kind
+                                                            name        = lv_name
+                                                            t_attribute = lt_attr ).
+      IF lv_kind = zabaputil_cl_util_context=>cs_xml_node-end.
+        EXIT.
+      ENDIF.
+      IF lv_kind <> zabaputil_cl_util_context=>cs_xml_node-open.
+        CONTINUE.
+      ENDIF.
+      CASE lv_name.
+        WHEN `mergeCell`.
+          INSERT attr( t_attribute = lt_attr
+                       name        = `ref` ) INTO TABLE t_merge.
+        WHEN `hyperlink`.
+          CLEAR ls_link.
+          ls_link-cell = attr( t_attribute = lt_attr
+                               name        = `ref` ).
+          ls_link-display = attr( t_attribute = lt_attr
+                                  name        = `display` ).
+          DATA(lv_location) = attr( t_attribute = lt_attr
+                                    name        = `location` ).
+          DATA(lv_id) = attr( t_attribute = lt_attr
+                              name        = `id` ).
+          IF lv_id IS NOT INITIAL.
+            IF lt_rel IS INITIAL.
+              lt_rel = rels_read( |{ lv_folder }_rels/{ lv_file }.rels| ).
+            ENDIF.
+            LOOP AT lt_rel REFERENCE INTO DATA(lr_rel) WHERE id = lv_id.
+              ls_link-target = lr_rel->target.
+            ENDLOOP.
+          ENDIF.
+          IF lv_location IS NOT INITIAL.
+            ls_link-target = |{ ls_link-target }#{ lv_location }|.
+          ENDIF.
+          INSERT ls_link INTO TABLE t_link.
+      ENDCASE.
+    ENDDO.
+
+  ENDMETHOD.
+
+  METHOD get_merged.
+
+    sheet_tail( EXPORTING sheet   = sheet_get( sheet = sheet
+                                               index = index )
+                IMPORTING t_merge = result ).
+
+  ENDMETHOD.
+
+  METHOD get_hyperlinks.
+
+    sheet_tail( EXPORTING sheet  = sheet_get( sheet = sheet
+                                              index = index )
+                IMPORTING t_link = result ).
+
+  ENDMETHOD.
+
+  METHOD get_defined_names.
+
+    IF mv_loaded = abap_false.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = `XLSX_NOT_READ - a workbook built with factory( ) is written, not read`.
+    ENDIF.
+    result = mt_defname.
+
+  ENDMETHOD.
+
+  METHOD get_excel_tables.
+
+    DATA lv_kind TYPE string.
+    DATA lv_name TYPE string.
+    DATA lt_attr TYPE zabaputil_cl_util_context=>ty_t_xml_attribute.
+    DATA ls_table TYPE ty_s_excel_table.
+
+    IF mv_loaded = abap_false.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = `XLSX_NOT_READ - a workbook built with factory( ) is written, not read`.
+    ENDIF.
+
+    LOOP AT mt_sheet REFERENCE INTO DATA(lr_sheet).
+      DATA(lv_folder) = path_folder( lr_sheet->path ).
+      DATA(lv_file) = substring( val = lr_sheet->path
+                                 off = strlen( lv_folder ) ).
+      LOOP AT rels_read( |{ lv_folder }_rels/{ lv_file }.rels| ) REFERENCE INTO DATA(lr_rel).
+        IF zabaputil_cl_util_context=>c_ends_with( val    = lr_rel->type
+                                                   suffix = `/table` ) = abap_false.
+          CONTINUE.
+        ENDIF.
+        DATA(lv_part) = part_get( path_resolve( base   = lr_sheet->path
+                                                target = lr_rel->target ) ).
+        IF lv_part IS INITIAL.
+          CONTINUE.
+        ENDIF.
+        " the table element is the first one of the part
+        DATA(lo_reader) = zabaputil_cl_util_context=>xml_reader_create( lv_part ).
+        DO.
+          zabaputil_cl_util_context=>xml_reader_next( EXPORTING reader      = lo_reader
+                                                      IMPORTING kind        = lv_kind
+                                                                name        = lv_name
+                                                                t_attribute = lt_attr ).
+          IF lv_kind = zabaputil_cl_util_context=>cs_xml_node-end
+              OR ( lv_kind = zabaputil_cl_util_context=>cs_xml_node-open AND lv_name = `table` ).
+            EXIT.
+          ENDIF.
+        ENDDO.
+        IF lv_name <> `table`.
+          CONTINUE.
+        ENDIF.
+        CLEAR ls_table.
+        ls_table-sheet = lr_sheet->name.
+        ls_table-name = attr( t_attribute = lt_attr
+                              name        = `displayName` ).
+        IF ls_table-name IS INITIAL.
+          ls_table-name = attr( t_attribute = lt_attr
+                                name        = `name` ).
+        ENDIF.
+        ls_table-ref = attr( t_attribute = lt_attr
+                             name        = `ref` ).
+        " a header row unless the table says it has none
+        DATA(lv_count) = attr( t_attribute = lt_attr
+                               name        = `headerRowCount` ).
+        ls_table-header_rows = 1.
+        IF lv_count IS NOT INITIAL AND lv_count CO cv_digits.
+          ls_table-header_rows = lv_count.
+        ENDIF.
+        lv_count = attr( t_attribute = lt_attr
+                         name        = `totalsRowCount` ).
+        IF lv_count IS NOT INITIAL AND lv_count CO cv_digits.
+          ls_table-totals_rows = lv_count.
+        ENDIF.
+        INSERT ls_table INTO TABLE result.
+      ENDLOOP.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD formula_shift.
+
+    DATA lv_len     TYPE i.
+    DATA lv_col     TYPE i.
+    DATA lv_row     TYPE i.
+    DATA lv_abs_col TYPE abap_bool.
+    DATA lv_abs_row TYPE abap_bool.
+    DATA lv_pos     TYPE i.
+    DATA lv_quote   TYPE abap_bool.
+    DATA lv_bracket TYPE i.
+
+    " the parts of a formula that are no reference: a text in quotes, a
+    " sheet name in apostrophes, a structured reference in brackets, a name
+    DATA(lv_end) = strlen( val ).
+    WHILE lv_pos < lv_end.
+      DATA(lv_char) = val+lv_pos(1).
+      IF lv_char = `"` OR lv_char = `'`.
+        lv_quote = xsdbool( lv_quote = abap_false ).
+      ELSEIF lv_quote = abap_false AND lv_char = `[`.
+        lv_bracket = lv_bracket + 1.
+      ELSEIF lv_quote = abap_false AND lv_char = `]`.
+        lv_bracket = lv_bracket - 1.
+      ELSEIF lv_quote = abap_false AND lv_bracket = 0.
+        ref_at( EXPORTING val     = val
+                          pos     = lv_pos
+                IMPORTING len     = lv_len
+                          col     = lv_col
+                          row     = lv_row
+                          abs_col = lv_abs_col
+                          abs_row = lv_abs_row ).
+        IF lv_len > 0.
+          IF lv_abs_col = abap_false.
+            lv_col = lv_col + cols.
+          ENDIF.
+          IF lv_abs_row = abap_false.
+            lv_row = lv_row + rows.
+          ENDIF.
+          DATA(lv_mark_col) = ``.
+          IF lv_abs_col = abap_true.
+            lv_mark_col = `$`.
+          ENDIF.
+          DATA(lv_mark_row) = ``.
+          IF lv_abs_row = abap_true.
+            lv_mark_row = `$`.
+          ENDIF.
+          result = |{ result }{ lv_mark_col }{ column_to_letters( lv_col ) }{ lv_mark_row }{ lv_row }|.
+          lv_pos = lv_pos + lv_len.
+          CONTINUE.
+        ENDIF.
+      ENDIF.
+      result = result && lv_char.
+      lv_pos = lv_pos + 1.
+    ENDWHILE.
+
+  ENDMETHOD.
+
+  METHOD ref_at.
+
+    CONSTANTS lc_word TYPE string VALUE `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.`.
+    DATA lv_letters TYPE string.
+    DATA lv_digits  TYPE string.
+
+    CLEAR len.
+    CLEAR col.
+    CLEAR row.
+    CLEAR abs_col.
+    CLEAR abs_row.
+
+    " a reference starts where no name goes on
+    IF pos > 0.
+      DATA(lv_before) = substring( val = val
+                                   off = pos - 1
+                                   len = 1 ).
+      IF lv_before CA lc_word.
+        RETURN.
+      ENDIF.
+    ENDIF.
+
+    DATA(lv_end) = strlen( val ).
+    DATA(lv_pos) = pos.
+    IF lv_pos < lv_end AND val+lv_pos(1) = `$`.
+      abs_col = abap_true.
+      lv_pos = lv_pos + 1.
+    ENDIF.
+    WHILE lv_pos < lv_end AND strlen( lv_letters ) < 4 AND val+lv_pos(1) CA cv_letters.
+      lv_letters = lv_letters && val+lv_pos(1).
+      lv_pos = lv_pos + 1.
+    ENDWHILE.
+    IF lv_pos < lv_end AND val+lv_pos(1) = `$`.
+      abs_row = abap_true.
+      lv_pos = lv_pos + 1.
+    ENDIF.
+    WHILE lv_pos < lv_end AND strlen( lv_digits ) < 8 AND val+lv_pos(1) CA cv_digits.
+      lv_digits = lv_digits && val+lv_pos(1).
+      lv_pos = lv_pos + 1.
+    ENDWHILE.
+    " A1 to XFD1048576, and not the start of a name or a function (LOG10()
+    IF lv_letters IS INITIAL OR strlen( lv_letters ) > 3 OR lv_digits IS INITIAL OR strlen( lv_digits ) > 7.
+      RETURN.
+    ENDIF.
+    IF lv_pos < lv_end.
+      DATA(lv_after) = substring( val = val
+                                  off = lv_pos
+                                  len = 1 ).
+      IF lv_after CA lc_word OR lv_after = `(` OR lv_after = `!`.
+        RETURN.
+      ENDIF.
+    ENDIF.
+    col = column_to_number( lv_letters ).
+    row = lv_digits.
+    IF col > cv_max_col OR row < 1 OR row > cv_max_row.
+      CLEAR col.
+      CLEAR row.
+      RETURN.
+    ENDIF.
+    len = lv_pos - pos.
+
+  ENDMETHOD.
+
+  METHOD date_by_text.
+
+    DATA lt_part TYPE string_table.
+    DATA lv_day   TYPE string.
+    DATA lv_month TYPE string.
+    DATA lv_year  TYPE string.
+
+    " the date in front of a time
+    DATA(lv_text) = condense( val ).
+    IF lv_text CS ` `.
+      lv_text = substring_before( val = lv_text
+                                  sub = ` ` ).
+    ENDIF.
+    lv_text = translate( val  = lv_text
+                         from = `/-`
+                         to   = `..` ).
+    SPLIT lv_text AT `.` INTO TABLE lt_part.
+    IF lines( lt_part ) <> 3.
+      RETURN.
+    ENDIF.
+    LOOP AT lt_part INTO DATA(lv_part).
+      IF lv_part IS INITIAL OR lv_part CN cv_digits OR strlen( lv_part ) > 4.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+
+    IF strlen( lt_part[ 1 ] ) = 4.
+      lv_year = lt_part[ 1 ].
+      lv_month = lt_part[ 2 ].
+      lv_day = lt_part[ 3 ].
+    ELSEIF date_order = `MDY`.
+      lv_month = lt_part[ 1 ].
+      lv_day = lt_part[ 2 ].
+      lv_year = lt_part[ 3 ].
+    ELSE.
+      lv_day = lt_part[ 1 ].
+      lv_month = lt_part[ 2 ].
+      lv_year = lt_part[ 3 ].
+    ENDIF.
+    " a year of two digits as Excel reads it: up to 29 this century
+    IF strlen( lv_year ) = 2.
+      IF lv_year < `30`.
+        lv_year = `20` && lv_year.
+      ELSE.
+        lv_year = `19` && lv_year.
+      ENDIF.
+    ENDIF.
+    IF strlen( lv_year ) <> 4 OR strlen( lv_month ) > 2 OR strlen( lv_day ) > 2.
+      RETURN.
+    ENDIF.
+    result = |{ lv_year }{ two_digits( CONV i( lv_month ) ) }{ two_digits( CONV i( lv_day ) ) }|.
+
+  ENDMETHOD.
+
+  METHOD number_by_text.
+
+    DATA lv_minus TYPE abap_bool.
+    DATA lv_percent TYPE abap_bool.
+
+    DATA(lv_text) = condense( val ).
+    " a sign behind the number, as SAP writes it
+    DATA(lv_len) = strlen( lv_text ).
+    IF lv_len > 1 AND substring( val = lv_text
+                                 off = lv_len - 1 ) = `-`.
+      lv_minus = abap_true.
+      lv_text = substring( val = lv_text
+                           len = lv_len - 1 ).
+    ENDIF.
+    IF lv_text CS `%`.
+      lv_percent = abap_true.
+      lv_text = replace( val  = lv_text
+                         sub  = `%`
+                         with = ``
+                         occ  = 0 ).
+    ENDIF.
+    " a currency in front or behind (EUR 12.50, 12,50 EUR, $12.50): what is
+    " no digit at either end goes, a sign in front stays
+    lv_text = condense( lv_text ).
+    WHILE strlen( lv_text ) > 0 AND lv_text(1) NA `0123456789+-.,`.
+      lv_text = condense( substring( val = lv_text
+                                     off = 1 ) ).
+    ENDWHILE.
+    lv_len = strlen( lv_text ).
+    WHILE lv_len > 0 AND substring( val = lv_text
+                                    off = lv_len - 1 ) NA cv_digits.
+      lv_text = condense( substring( val = lv_text
+                                     len = lv_len - 1 ) ).
+      lv_len = strlen( lv_text ).
+    ENDWHILE.
+    IF lv_text IS INITIAL OR lv_text CN `0123456789.,-+ ` OR lv_text NA cv_digits.
+      RETURN.
+    ENDIF.
+    DATA(lv_sign) = lv_text(1).
+    CASE lv_sign.
+      WHEN `-`.
+        lv_minus = xsdbool( lv_minus = abap_false ).
+        lv_text = substring( val = lv_text
+                             off = 1 ).
+      WHEN `+`.
+        lv_text = substring( val = lv_text
+                             off = 1 ).
+    ENDCASE.
+    IF lv_text CA `+-`.
+      RETURN.
+    ENDIF.
+
+    DATA(lv_number) = number_plain( lv_text ).
+    IF lv_number IS INITIAL.
+      TRY.
+          DATA(lv_parsed) = zabaputil_cl_util_context=>conv_string_to_number( lv_text ).
+          lv_number = number_plain( |{ lv_parsed }| ).
+        CATCH cx_root.
+          RETURN.
+      ENDTRY.
+    ENDIF.
+    IF lv_number IS INITIAL.
+      RETURN.
+    ENDIF.
+    DATA(lv_value) = CONV decfloat34( lv_number ).
+    IF lv_percent = abap_true.
+      lv_value = lv_value / 100.
+    ENDIF.
+    IF lv_minus = abap_true.
+      lv_value = - lv_value.
+    ENDIF.
+    result = number_plain( |{ lv_value }| ).
 
   ENDMETHOD.
 
@@ -4485,22 +5361,57 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
 
   METHOD get_cells.
 
-    DATA lt_row TYPE ty_t_cell.
-    DATA lv_eof TYPE abap_bool.
-    DATA lv_row TYPE i.
+    DATA lt_row   TYPE ty_t_cell.
+    DATA lv_eof   TYPE abap_bool.
+    DATA lv_rows  TYPE i.
+    DATA lt_merge TYPE string_table.
+    DATA ls_cell  TYPE ty_s_cell.
 
-    DATA(lo_reader) = zabaputil_cl_util_context=>xml_reader_create( sheet_part( sheet = sheet
-                                                                                index = index ) ).
+    DATA(ls_sheet) = sheet_get( sheet = sheet
+                                index = index ).
+    DATA(ls_read) = read_start( sheet       = ls_sheet
+                                range       = range
+                                skip_hidden = skip_hidden ).
     DO.
-      sheet_read_row( EXPORTING reader = lo_reader
-                      IMPORTING t_cell = lt_row
-                                eof    = lv_eof
-                      CHANGING  row    = lv_row ).
+      IF max_rows > 0 AND lv_rows >= max_rows.
+        EXIT.
+      ENDIF.
+      read_next( IMPORTING t_cell = lt_row
+                           eof    = lv_eof
+                 CHANGING  state  = ls_read ).
       IF lv_eof = abap_true.
         EXIT.
       ENDIF.
       INSERT LINES OF lt_row INTO TABLE result.
+      lv_rows = lv_rows + 1.
     ENDDO.
+
+    IF fill_merged = abap_false.
+      RETURN.
+    ENDIF.
+    " every cell of a merged range as its first one - within what was read
+    sheet_tail( EXPORTING sheet   = ls_sheet
+                IMPORTING t_merge = lt_merge ).
+    LOOP AT lt_merge INTO DATA(lv_merge).
+      DATA(ls_area) = area_parse( lv_merge ).
+      CLEAR ls_cell.
+      LOOP AT result INTO ls_cell WHERE row = ls_area-row1 AND col = ls_area-col1.
+        EXIT.
+      ENDLOOP.
+      IF ls_cell-row <> ls_area-row1 OR ls_cell-col <> ls_area-col1.
+        CONTINUE.
+      ENDIF.
+      DELETE result WHERE row >= ls_area-row1 AND row <= ls_area-row2
+                      AND col >= ls_area-col1 AND col <= ls_area-col2.
+      DO ls_area-row2 - ls_area-row1 + 1 TIMES.
+        ls_cell-row = ls_area-row1 + sy-index - 1.
+        DO ls_area-col2 - ls_area-col1 + 1 TIMES.
+          ls_cell-col = ls_area-col1 + sy-index - 1.
+          INSERT ls_cell INTO TABLE result.
+        ENDDO.
+      ENDDO.
+    ENDLOOP.
+    SORT result BY row col.
 
   ENDMETHOD.
 
@@ -4516,24 +5427,62 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     DATA lt_field   TYPE ty_t_field.
     DATA lt_row     TYPE ty_t_cell.
     DATA lv_eof     TYPE abap_bool.
-    DATA lv_row     TYPE i.
     DATA lv_mapped  TYPE abap_bool.
     DATA lv_any     TYPE abap_bool.
     DATA lv_elementary TYPE abap_bool.
+    DATA ls_sheet   TYPE ty_s_sheet.
+    DATA ls_read    TYPE ty_s_read.
+    DATA ls_area    TYPE ty_s_area.
+    DATA lv_has_header TYPE abap_bool.
+    DATA lv_rows    TYPE i.
     FIELD-SYMBOLS <line>  TYPE any.
     FIELD-SYMBOLS <field> TYPE any.
     FIELD-SYMBOLS <cell>  TYPE ty_s_cell.
     FIELD-SYMBOLS <map>   TYPE ty_s_map.
 
     CLEAR result.
+    CLEAR t_error.
+    DATA(lv_collect) = xsdbool( t_error IS SUPPLIED ).
+    DATA(lv_order) = to_upper( date_order ).
+
+    " where the rows are: a sheet, a range of it, or a table or name - the
+    " header in the first row of a range unless the caller says otherwise
+    DATA(lv_header_row) = header_row.
+    IF table_name IS NOT INITIAL.
+      source_get( EXPORTING name   = table_name
+                  IMPORTING sheet  = ls_sheet
+                            area   = ls_area
+                            header = lv_has_header ).
+      ls_read = read_start( sheet       = ls_sheet
+                            range       = area_text( ls_area )
+                            skip_hidden = skip_hidden ).
+      IF header_row IS NOT SUPPLIED OR header_row > 0.
+        lv_header_row = ls_area-row1.
+      ENDIF.
+      IF lv_has_header = abap_false.
+        lv_header_row = 0.
+      ENDIF.
+    ELSE.
+      ls_sheet = sheet_get( sheet = sheet
+                            index = index ).
+      ls_read = read_start( sheet       = ls_sheet
+                            range       = range
+                            skip_hidden = skip_hidden ).
+      IF range IS NOT INITIAL AND ( header_row IS NOT SUPPLIED OR header_row > 0 ).
+        lv_header_row = ls_read-area-row1.
+      ENDIF.
+    ENDIF.
     CREATE DATA lr_line LIKE LINE OF result.
     ASSIGN lr_line->* TO <line>.
     fields_get( EXPORTING row        = <line>
                 IMPORTING elementary = lv_elementary
                           result     = lt_field ).
 
-    IF header_row <= 0.
-      " no header: the n-th column is the n-th component
+    IF lv_header_row <= 0.
+      " no header: the n-th column (of the range) is the n-th component
+      DO ls_read-area-col1 - 1 TIMES.
+        INSERT VALUE #( ) INTO TABLE lt_map.
+      ENDDO.
       LOOP AT lt_field REFERENCE INTO DATA(lr_field).
         INSERT VALUE #( name = lr_field->name
                         cat  = lr_field->cat ) INTO TABLE lt_map.
@@ -4541,23 +5490,23 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
       lv_mapped = abap_true.
     ENDIF.
 
-    DATA(lo_reader) = zabaputil_cl_util_context=>xml_reader_create( sheet_part( sheet = sheet
-                                                                                index = index ) ).
     DO.
-      sheet_read_row( EXPORTING reader = lo_reader
-                      IMPORTING t_cell = lt_row
-                                eof    = lv_eof
-                      CHANGING  row    = lv_row ).
+      IF max_rows > 0 AND lv_rows >= max_rows.
+        EXIT.
+      ENDIF.
+      read_next( IMPORTING t_cell = lt_row
+                           eof    = lv_eof
+                 CHANGING  state  = ls_read ).
       IF lv_eof = abap_true.
         EXIT.
       ENDIF.
-      IF lv_row < header_row.
+      IF ls_read-row < lv_header_row.
         CONTINUE.
       ENDIF.
 
       IF lv_mapped = abap_false.
         lv_mapped = abap_true.
-        IF lv_row > header_row.
+        IF ls_read-row > lv_header_row.
           " the header row is empty - no column has a component
           EXIT.
         ENDIF.
@@ -4611,13 +5560,29 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
             CONTINUE.
           ENDIF.
         ENDIF.
-        cell_to_field( EXPORTING cell  = <cell>
-                                 cat   = <map>-cat
-                       CHANGING  field = <field> ).
+        TRY.
+            cell_to_field( EXPORTING cell       = <cell>
+                                     cat        = <map>-cat
+                                     date_order = lv_order
+                           CHANGING  field      = <field> ).
+          CATCH zabaputil_cx_util_error INTO DATA(x).
+            IF lv_collect = abap_false.
+              RAISE EXCEPTION x.
+            ENDIF.
+            " the cell is listed, the row read on
+            INSERT VALUE #( sheet     = ls_sheet-name
+                            cell      = |{ column_to_letters( <cell>-col ) }{ <cell>-row }|
+                            row       = <cell>-row
+                            col       = <cell>-col
+                            value     = <cell>-value
+                            component = <map>-name
+                            message   = x->get_text( ) ) INTO TABLE t_error.
+        ENDTRY.
         lv_any = abap_true.
       ENDLOOP.
       IF lv_any = abap_true.
         INSERT <line> INTO TABLE result.
+        lv_rows = lv_rows + 1.
       ENDIF.
     ENDDO.
 
@@ -4685,11 +5650,12 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
               lv_number = lv_date.
             ENDIF.
           WHEN OTHERS.
-            " a text: 2024-03-15, 20240315, 15.03.2024
-            lv_number = condense( lv_value ).
-            IF strlen( lv_number ) = 10 AND lv_number+2(1) = `.` AND lv_number+5(1) = `.`.
-              lv_number = lv_number+6(4) && lv_number+3(2) && lv_number(2).
-            ELSE.
+            " a text: 2024-03-15, 15.03.2024, 3/15/2024 by the order of
+            " day and month, 20240315
+            lv_number = date_by_text( val        = lv_value
+                                      date_order = date_order ).
+            IF lv_number IS INITIAL.
+              lv_number = condense( lv_value ).
               IF strlen( lv_number ) > 10.
                 lv_number = lv_number(10).
               ENDIF.
@@ -4748,16 +5714,10 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
             lv_number = digits_only( lv_value ).
           WHEN OTHERS.
             lv_number = number_plain( lv_value ).
-            IF lv_number IS INITIAL AND lv_value CA cv_digits AND lv_value CO `0123456789.,-+ `.
+            IF lv_number IS INITIAL.
               " a text that reads as a number in another notation
-              " (1.234,56) is one; anything else is not, and the parser
-              " would hand back a 0 for it
-              TRY.
-                  DATA(lv_parsed) = zabaputil_cl_util_context=>conv_string_to_number( lv_value ).
-                  lv_number = number_plain( |{ lv_parsed }| ).
-                CATCH cx_root.
-                  CLEAR lv_number.
-              ENDTRY.
+              " (1.234,56, 12 %, EUR 5, 7-) is one; anything else is not
+              lv_number = number_by_text( lv_value ).
             ENDIF.
         ENDCASE.
         IF lv_number IS INITIAL.
@@ -4790,9 +5750,66 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     FIELD-SYMBOLS <cell>  TYPE ty_s_cell.
     FIELD-SYMBOLS <name>  TYPE string.
 
-    DATA(lt_cell) = get_cells( sheet = sheet
-                               index = index ).
-    DELETE lt_cell WHERE row < header_row.
+    DATA lt_cell TYPE ty_t_cell.
+    DATA ls_sheet TYPE ty_s_sheet.
+    DATA ls_area TYPE ty_s_area.
+    DATA lv_header TYPE abap_bool.
+
+    " a sheet, a range of it, or a table or a name - the header in the
+    " first row of a range unless the caller says otherwise
+    DATA(lv_header_row) = header_row.
+    DATA(lv_range) = CONV string( range ).
+    IF table_name IS NOT INITIAL.
+      source_get( EXPORTING name   = table_name
+                  IMPORTING sheet  = ls_sheet
+                            area   = ls_area
+                            header = lv_header ).
+      lv_range = area_text( ls_area ).
+      lt_cell = get_cells( sheet       = ls_sheet-name
+                           range       = lv_range
+                           skip_hidden = skip_hidden ).
+      lv_header_row = ls_area-row1.
+      IF lv_header = abap_false OR ( header_row IS SUPPLIED AND header_row <= 0 ).
+        lv_header_row = 0.
+      ENDIF.
+    ELSE.
+      lt_cell = get_cells( sheet       = sheet
+                           index       = index
+                           range       = range
+                           skip_hidden = skip_hidden ).
+      IF range IS NOT INITIAL.
+        ls_area = area_parse( range ).
+        IF header_row IS NOT SUPPLIED OR header_row > 0.
+          lv_header_row = ls_area-row1.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+    DELETE lt_cell WHERE row < lv_header_row.
+    " the rows after the header, as many as asked for
+    IF max_rows > 0.
+      DATA(lv_cut) = 0.
+      LOOP AT lt_cell ASSIGNING <cell> WHERE row > lv_header_row.
+        IF <cell>-row <> lv_row.
+          lv_row = <cell>-row.
+          lv_cols = lv_cols + 1.
+        ENDIF.
+        IF lv_cols > max_rows.
+          lv_cut = lv_row.
+          EXIT.
+        ENDIF.
+      ENDLOOP.
+      IF lv_cut > 0.
+        DELETE lt_cell WHERE row >= lv_cut.
+      ENDIF.
+      CLEAR lv_row.
+      CLEAR lv_cols.
+    ENDIF.
+    " the columns from the first of the range on
+    IF ls_area-col1 > 1.
+      LOOP AT lt_cell ASSIGNING <cell>.
+        <cell>-col = <cell>-col - ls_area-col1 + 1.
+      ENDLOOP.
+    ENDIF.
     LOOP AT lt_cell ASSIGNING <cell>.
       IF <cell>-col > lv_cols.
         lv_cols = <cell>-col.
@@ -4807,8 +5824,8 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     DO lv_cols TIMES.
       INSERT `` INTO TABLE lt_name.
     ENDDO.
-    IF header_row > 0.
-      LOOP AT lt_cell ASSIGNING <cell> WHERE row = header_row. "#EC CI_SORTSEQ
+    IF lv_header_row > 0.
+      LOOP AT lt_cell ASSIGNING <cell> WHERE row = lv_header_row. "#EC CI_SORTSEQ
         ASSIGN lt_name[ <cell>-col ] TO <name>.
         <name> = name_by_header( <cell>-value ).
       ENDLOOP.
@@ -4845,7 +5862,7 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     CREATE DATA lr_line LIKE LINE OF <tab>.
     ASSIGN lr_line->* TO <line>.
 
-    LOOP AT lt_cell ASSIGNING <cell> WHERE row > header_row. "#EC CI_SORTSEQ
+    LOOP AT lt_cell ASSIGNING <cell> WHERE row > lv_header_row. "#EC CI_SORTSEQ
       IF <cell>-row <> lv_row.
         IF lv_row > 0.
           INSERT <line> INTO TABLE <tab>.

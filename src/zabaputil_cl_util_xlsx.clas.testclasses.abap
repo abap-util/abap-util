@@ -1178,6 +1178,334 @@ ENDCLASS.
 
 
 "! ================================================================
+"! READING: formulas, ranges, row by row, errors, merged cells, links,
+"! names and Excel tables, hidden rows and columns, text notations
+"! ================================================================
+CLASS ltcl_read_more DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+
+    TYPES:
+      BEGIN OF ty_s_row,
+        text TYPE string,
+        num  TYPE i,
+        date TYPE d,
+      END OF ty_s_row.
+    TYPES ty_t_row TYPE STANDARD TABLE OF ty_s_row WITH EMPTY KEY.
+
+    TYPES:
+      BEGIN OF ty_s_amount,
+        amount TYPE p LENGTH 10 DECIMALS 3,
+        date   TYPE d,
+      END OF ty_s_amount.
+    TYPES ty_t_amount TYPE STANDARD TABLE OF ty_s_amount WITH EMPTY KEY.
+
+    METHODS rows
+      RETURNING
+        VALUE(result) TYPE ty_t_row.
+
+    "! a workbook of three sheets: a title and a table, a hidden one, an
+    "! Excel table - with names, links, merged and hidden cells
+    METHODS book
+      RETURNING
+        VALUE(result) TYPE xstring.
+
+    METHODS formulas             FOR TESTING RAISING cx_static_check.
+    METHODS range_and_max_rows   FOR TESTING RAISING cx_static_check.
+    METHODS row_by_row           FOR TESTING RAISING cx_static_check.
+    METHODS errors_collected     FOR TESTING RAISING cx_static_check.
+    METHODS merged_and_links     FOR TESTING RAISING cx_static_check.
+    METHODS hidden_parts         FOR TESTING RAISING cx_static_check.
+    METHODS names_and_tables     FOR TESTING RAISING cx_static_check.
+    METHODS table_by_name        FOR TESTING RAISING cx_static_check.
+    METHODS text_notations       FOR TESTING RAISING cx_static_check.
+
+ENDCLASS.
+
+CLASS ltcl_read_more IMPLEMENTATION.
+
+  METHOD rows.
+    result = VALUE #( ( text = `a` num = 1 date = `20240315` )
+                      ( text = `b` num = 2 date = `20240316` )
+                      ( text = `c` num = 3 date = `20240317` ) ).
+  ENDMETHOD.
+
+  METHOD book.
+    result = zabaputil_cl_util_xlsx=>factory(
+        )->add_sheet( name = `Report`
+        )->set_cell( row  = 1
+                     col  = 1
+                     val  = `Title`
+                     link = `https://example.com`
+        )->merge( `A1:C1`
+        )->add_table( val    = rows( )
+                      layout = VALUE #( start_cell = `A3` )
+        )->set_row( row    = 5
+                    hidden = abap_true
+        )->set_column( col    = 2
+                       hidden = abap_true
+        )->add_name( name = `Block`
+                     ref  = `Report!$A$3:$C$6`
+        )->add_sheet( val    = rows( )
+                      name   = `Secret`
+                      layout = VALUE #( hidden = abap_true )
+        )->add_sheet( val    = rows( )
+                      name   = `Tab`
+                      layout = VALUE #( table_style = `TableStyleLight9`
+                                        table_name  = `Orders`
+                                        start_cell  = `B2`
+                                        t_column    = VALUE #( ( name = `TEXT` total = `Total` )
+                                                               ( name = `NUM` total = `sum` )
+                                                               ( name = `DATE` ) ) )
+        )->get_xlsx( ).
+  ENDMETHOD.
+
+  METHOD formulas.
+    " a formula with its value, and a shared one: the cells after the
+    " first move its references without a $
+    DATA(lt_cell) = zabaputil_cl_util_xlsx=>factory_by_xlsx( ltcl_file=>pack(
+        `<row r="1"><c r="A1"><v>2</v></c><c r="B1"><f t="shared" ref="B1:B3" si="0">A1*$C$1+SUM(A$1:A1)</f><v>4</v></c>`
+     && `<c r="C1"><v>1</v></c><c r="D1" t="str"><f>"A1"&amp;Sheet2!A1</f><v>x</v></c></row>`
+     && `<row r="2"><c r="A2"><v>3</v></c><c r="B2"><f t="shared" si="0"/><v>8</v></c></row>`
+     && `<row r="3"><c r="A3"><v>4</v></c><c r="B3"><f t="shared" si="0"/><v>13</v></c></row>` ) )->get_cells( ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `A1*$C$1+SUM(A$1:A1)`
+                                        act = lt_cell[ row = 1 col = 2 ]-formula ).
+    cl_abap_unit_assert=>assert_equals( exp = `A2*$C$1+SUM(A$1:A2)`
+                                        act = lt_cell[ row = 2 col = 2 ]-formula ).
+    cl_abap_unit_assert=>assert_equals( exp = `A3*$C$1+SUM(A$1:A3)`
+                                        act = lt_cell[ row = 3 col = 2 ]-formula ).
+    cl_abap_unit_assert=>assert_equals( exp = `13`
+                                        act = lt_cell[ row = 3 col = 2 ]-value ).
+    cl_abap_unit_assert=>assert_equals( exp = `"A1"&Sheet2!A1`
+                                        act = lt_cell[ row = 1 col = 4 ]-formula ).
+    cl_abap_unit_assert=>assert_initial( lt_cell[ row = 1 col = 1 ]-formula ).
+  ENDMETHOD.
+
+  METHOD range_and_max_rows.
+    DATA lt_back TYPE ty_t_row.
+
+    DATA(lo_xlsx) = zabaputil_cl_util_xlsx=>factory_by_xlsx( book( ) ).
+    DATA(lt_cell) = lo_xlsx->get_cells( range = `A4:A6` ).
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lines( lt_cell ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `a`
+                                        act = lt_cell[ 1 ]-value ).
+    lt_cell = lo_xlsx->get_cells( max_rows = 2 ).
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lt_cell[ lines( lt_cell ) ]-row ).
+
+    " a range: the header in its first row
+    lo_xlsx->get_table( EXPORTING range    = `A3:C6`
+                                  max_rows = 2
+                        IMPORTING result   = lt_back ).
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = lines( lt_back ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `20240316`
+                                        act = lt_back[ 2 ]-date ).
+
+    DATA(lr_any) = lo_xlsx->get_table_ref( range    = `B3:C6`
+                                           max_rows = 1 ).
+    FIELD-SYMBOLS <tab> TYPE STANDARD TABLE.
+    ASSIGN lr_any->* TO <tab>.
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = lines( <tab> ) ).
+    " a component of a table expression is assigned in two steps: the
+    " 7.02 downport reads the whole row into the field symbol otherwise
+    FIELD-SYMBOLS <line> TYPE any.
+    FIELD-SYMBOLS <num>  TYPE any.
+    LOOP AT <tab> ASSIGNING <line>.
+      EXIT.
+    ENDLOOP.
+    ASSIGN COMPONENT `NUM` OF STRUCTURE <line> TO <num>.
+    cl_abap_unit_assert=>assert_equals( exp = `1`
+                                        act = <num> ).
+  ENDMETHOD.
+
+  METHOD row_by_row.
+    DATA lt_cell TYPE zabaputil_cl_util_xlsx=>ty_t_cell.
+    DATA lv_eof  TYPE abap_bool.
+    DATA lv_rows TYPE i.
+
+    DATA(lo_xlsx) = zabaputil_cl_util_xlsx=>factory_by_xlsx( book( ) ).
+    lo_xlsx->rows_open( sheet = `Tab` ).
+    DO.
+      lo_xlsx->rows_next( IMPORTING t_cell = lt_cell
+                                    eof    = lv_eof ).
+      IF lv_eof = abap_true.
+        EXIT.
+      ENDIF.
+      lv_rows = lv_rows + 1.
+    ENDDO.
+    " the header, three rows, the totals row
+    cl_abap_unit_assert=>assert_equals( exp = 5
+                                        act = lv_rows ).
+    TRY.
+        zabaputil_cl_util_xlsx=>factory_by_xlsx( book( ) )->rows_next( IMPORTING t_cell = lt_cell
+                                                                                 eof    = lv_eof ).
+        cl_abap_unit_assert=>fail( `rows_next( ) without rows_open( ) has to raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD errors_collected.
+    DATA lt_back  TYPE ty_t_row.
+    DATA lt_error TYPE zabaputil_cl_util_xlsx=>ty_t_error.
+
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>factory( )->add_sheet(
+        VALUE string_table( ( `num` ) ( `1` ) ( `x` ) ( `3` ) ( `y` ) ) )->get_xlsx( ).
+    zabaputil_cl_util_xlsx=>factory_by_xlsx( lv_file )->get_table( EXPORTING header_row = 2
+                                                                   IMPORTING result     = lt_back
+                                                                             t_error    = lt_error ).
+    " every row read, every cell that does not fit listed
+    cl_abap_unit_assert=>assert_equals( exp = 4
+                                        act = lines( lt_back ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = lines( lt_error ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `A4`
+                                        act = lt_error[ 1 ]-cell ).
+    cl_abap_unit_assert=>assert_equals( exp = `x`
+                                        act = lt_error[ 1 ]-value ).
+    cl_abap_unit_assert=>assert_equals( exp = `NUM`
+                                        act = lt_error[ 1 ]-component ).
+    cl_abap_unit_assert=>assert_equals( exp = `Sheet1`
+                                        act = lt_error[ 1 ]-sheet ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lt_error[ 2 ]-message CS `XLSX_CELL_TYPE` ) ).
+
+    " without t_error the first one raises
+    TRY.
+        zabaputil_cl_util_xlsx=>factory_by_xlsx( lv_file )->get_table( EXPORTING header_row = 2
+                                                                       IMPORTING result     = lt_back ).
+        cl_abap_unit_assert=>fail( `a cell that does not fit has to raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD merged_and_links.
+    DATA(lo_xlsx) = zabaputil_cl_util_xlsx=>factory_by_xlsx( book( ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = VALUE string_table( ( `A1:C1` ) )
+                                        act = lo_xlsx->get_merged( ) ).
+    DATA(lt_link) = lo_xlsx->get_hyperlinks( ).
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = lines( lt_link ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `A1`
+                                        act = lt_link[ 1 ]-cell ).
+    cl_abap_unit_assert=>assert_equals( exp = `https://example.com`
+                                        act = lt_link[ 1 ]-target ).
+
+    " the first cell of a merged range in every cell of it
+    DATA(lt_cell) = lo_xlsx->get_cells( range       = `A1:C1`
+                                        fill_merged = abap_true ).
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lines( lt_cell ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `Title`
+                                        act = lt_cell[ 3 ]-value ).
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lt_cell[ 3 ]-col ).
+  ENDMETHOD.
+
+  METHOD hidden_parts.
+    DATA(lo_xlsx) = zabaputil_cl_util_xlsx=>factory_by_xlsx( book( ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = VALUE string_table( ( `Report` ) ( `Tab` ) )
+                                        act = lo_xlsx->get_sheet_names( no_hidden = abap_true ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lines( lo_xlsx->get_sheet_names( ) ) ).
+
+    " row 5 and column B are hidden
+    DATA(lt_cell) = lo_xlsx->get_cells( range       = `A3:C6`
+                                        skip_hidden = abap_true ).
+    cl_abap_unit_assert=>assert_false( xsdbool( line_exists( lt_cell[ row = 5 ] ) ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( line_exists( lt_cell[ col = 2 ] ) ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 6
+                                        act = lines( lt_cell ) ).
+  ENDMETHOD.
+
+  METHOD names_and_tables.
+    DATA(lo_xlsx) = zabaputil_cl_util_xlsx=>factory_by_xlsx( book( ) ).
+
+    DATA(lt_name) = lo_xlsx->get_defined_names( ).
+    cl_abap_unit_assert=>assert_equals( exp = `Report!$A$3:$C$6`
+                                        act = lt_name[ name = `Block` ]-ref ).
+    DATA(lt_table) = lo_xlsx->get_excel_tables( ).
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = lines( lt_table ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `Orders`
+                                        act = lt_table[ 1 ]-name ).
+    cl_abap_unit_assert=>assert_equals( exp = `Tab`
+                                        act = lt_table[ 1 ]-sheet ).
+    cl_abap_unit_assert=>assert_equals( exp = `B2:D6`
+                                        act = lt_table[ 1 ]-ref ).
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = lt_table[ 1 ]-totals_rows ).
+  ENDMETHOD.
+
+  METHOD table_by_name.
+    DATA lt_back TYPE ty_t_row.
+
+    DATA(lo_xlsx) = zabaputil_cl_util_xlsx=>factory_by_xlsx( book( ) ).
+    " an Excel table: its rows, without the totals row
+    lo_xlsx->get_table( EXPORTING table_name = `orders`
+                        IMPORTING result     = lt_back ).
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lines( lt_back ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lt_back[ 3 ]-num ).
+    " a defined name: its range, the header in its first row
+    lo_xlsx->get_table( EXPORTING table_name = `Block`
+                        IMPORTING result     = lt_back ).
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lines( lt_back ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `c`
+                                        act = lt_back[ 3 ]-text ).
+    DATA(lr_any) = lo_xlsx->get_table_ref( table_name = `Orders` ).
+    FIELD-SYMBOLS <tab> TYPE STANDARD TABLE.
+    ASSIGN lr_any->* TO <tab>.
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lines( <tab> ) ).
+    TRY.
+        lo_xlsx->get_table( EXPORTING table_name = `nope`
+                            IMPORTING result     = lt_back ).
+        cl_abap_unit_assert=>fail( `a name the workbook does not have has to raise` ).
+      CATCH zabaputil_cx_util_error INTO DATA(x).
+        cl_abap_unit_assert=>assert_true( xsdbool( x->get_text( ) CS `XLSX_NAME_UNKNOWN` ) ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD text_notations.
+    DATA lt_back TYPE ty_t_amount.
+
+    DATA(lv_file) = ltcl_file=>pack(
+        `<row r="1"><c r="A1" t="inlineStr"><is><t>amount</t></is></c><c r="B1" t="inlineStr"><is><t>date</t></is></c></row>`
+     && `<row r="2"><c r="A2" t="inlineStr"><is><t>1.234,56-</t></is></c><c r="B2" t="inlineStr"><is><t>03/15/2024</t></is></c></row>`
+     && `<row r="3"><c r="A3" t="inlineStr"><is><t>EUR 12.50</t></is></c><c r="B3" t="inlineStr"><is><t>3/1/24</t></is></c></row>`
+     && `<row r="4"><c r="A4" t="inlineStr"><is><t>12,5 %</t></is></c><c r="B4" t="inlineStr"><is><t>2024-12-01</t></is></c></row>` ).
+    zabaputil_cl_util_xlsx=>factory_by_xlsx( lv_file )->get_table( EXPORTING date_order = `MDY`
+                                                                   IMPORTING result     = lt_back ).
+    cl_abap_unit_assert=>assert_equals( exp = `-1234.56`
+                                        act = lt_back[ 1 ]-amount ).
+    cl_abap_unit_assert=>assert_equals( exp = `12.5`
+                                        act = lt_back[ 2 ]-amount ).
+    cl_abap_unit_assert=>assert_equals( exp = `0.125`
+                                        act = lt_back[ 3 ]-amount ).
+    cl_abap_unit_assert=>assert_equals( exp = `20240315`
+                                        act = lt_back[ 1 ]-date ).
+    cl_abap_unit_assert=>assert_equals( exp = `20240301`
+                                        act = lt_back[ 2 ]-date ).
+    cl_abap_unit_assert=>assert_equals( exp = `20241201`
+                                        act = lt_back[ 3 ]-date ).
+    " day first by default
+    zabaputil_cl_util_xlsx=>factory_by_xlsx( lv_file )->get_table( IMPORTING result = lt_back ).
+    cl_abap_unit_assert=>assert_equals( exp = `20240103`
+                                        act = lt_back[ 2 ]-date ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+"! ================================================================
 "! WRITING AND READING BACK
 "! ================================================================
 CLASS ltcl_roundtrip DEFINITION FINAL
