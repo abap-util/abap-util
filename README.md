@@ -629,6 +629,9 @@ lo_pdf->add_bookmark( title = `Delivery note` )->add_bookmark( title = `Items` l
 lo_page->link_page( x = 20 y = 30 w = 80 h = 6 page = 2 ).
 " A file embedded into the document, listed by the viewer as an attachment
 lo_pdf->attach( name = `delivery.csv` content = lv_csv mime = `text/csv` description = `Items` ).
+" PDF/A-3b for archiving: XMP metadata, sRGB output intent, file identifier - with
+" embedded fonts only (font_ttf); render( ) raises for a standard font or a missing glyph
+lo_pdf->set_pdfa( ).
 DATA(lv_file) = lo_pdf->render( ). " => xstring
 
 " Flow text and tables over pages

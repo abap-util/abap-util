@@ -148,6 +148,23 @@ CLASS zabaputil_cl_pdf DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_cl_pdf.
 
+    "! Write the document as PDF/A-3b, for archiving: XMP metadata, an
+    "! output intent with an sRGB profile, an identifier. Every font has
+    "! to be embedded - render( ) raises for a standard font
+    METHODS set_pdfa
+      IMPORTING
+        val           TYPE abap_bool DEFAULT abap_true
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf.
+
+    "! A description of the XMP metadata of a PDF/A file of its own - an
+    "! rdf:Description element, as ZUGFeRD / Factur-X asks for
+    METHODS add_xmp
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf.
+
     METHODS set_info
       IMPORTING
         title         TYPE clike OPTIONAL
@@ -209,6 +226,8 @@ CLASS zabaputil_cl_pdf DEFINITION
         relationship TYPE string,
       END OF ty_s_attachment.
     DATA mt_attachment TYPE STANDARD TABLE OF ty_s_attachment WITH EMPTY KEY.
+    DATA mv_pdfa       TYPE abap_bool.
+    DATA mt_xmp        TYPE string_table.
 
     "! The size of a page format in points
     CLASS-METHODS format_size
@@ -235,6 +254,19 @@ CLASS zabaputil_cl_pdf DEFINITION
         writer        TYPE REF TO zabaputil_cl_pdf_writer
       RETURNING
         VALUE(result) TYPE string.
+
+    "! The XMP metadata of a PDF/A file
+    "! @parameter date | the time of the document, YYYY-MM-DDThh:mm:ss
+    METHODS xmp
+      IMPORTING
+        date          TYPE string
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! An ICC profile of sRGB, made for this class - no copyright
+    CLASS-METHODS srgb_profile
+      RETURNING
+        VALUE(result) TYPE xstring.
 
     "! A text as a PDF name: what is no letter, digit, dot, plus or
     "! hyphen as #XX
@@ -498,6 +530,92 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD set_pdfa.
+
+    mv_pdfa = val.
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD add_xmp.
+
+    INSERT CONV string( val ) INTO TABLE mt_xmp.
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD xmp.
+
+    DATA lv_dc  TYPE string.
+    DATA lv_xmp TYPE string.
+    DATA lv_pdf TYPE string.
+
+    " the properties of the document, as the info dictionary has them
+    LOOP AT mt_info ASSIGNING FIELD-SYMBOL(<info>).
+      DATA(lv_text) = zabaputil_cl_util_context=>c_escape_xml( <info>-text ).
+      CASE <info>-key.
+        WHEN `Title`.
+          lv_dc = |{ lv_dc }<dc:title><rdf:Alt><rdf:li xml:lang="x-default">{ lv_text }</rdf:li></rdf:Alt></dc:title>|.
+        WHEN `Author`.
+          lv_dc = |{ lv_dc }<dc:creator><rdf:Seq><rdf:li>{ lv_text }</rdf:li></rdf:Seq></dc:creator>|.
+        WHEN `Subject`.
+          lv_dc = |{ lv_dc }<dc:description><rdf:Alt><rdf:li xml:lang="x-default">{ lv_text }</rdf:li></rdf:Alt></dc:description>|.
+        WHEN `Keywords`.
+          lv_pdf = |{ lv_pdf }<pdf:Keywords>{ lv_text }</pdf:Keywords>|.
+        WHEN `Creator`.
+          lv_xmp = |{ lv_xmp }<xmp:CreatorTool>{ lv_text }</xmp:CreatorTool>|.
+      ENDCASE.
+    ENDLOOP.
+
+    result = |<?xpacket begin="{ zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `EFBBBF` ) ) }" | &&
+             |id="W5M0MpCehiHzreSzNTczkc9d"?>\n| &&
+             |<x:xmpmeta xmlns:x="adobe:ns:meta/">\n| &&
+             |<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n| &&
+             |<rdf:Description rdf:about="" xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/">| &&
+             |<pdfaid:part>3</pdfaid:part><pdfaid:conformance>B</pdfaid:conformance></rdf:Description>\n| &&
+             |<rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/">| &&
+             |<dc:format>application/pdf</dc:format>{ lv_dc }</rdf:Description>\n| &&
+             |<rdf:Description rdf:about="" xmlns:xmp="http://ns.adobe.com/xap/1.0/">| &&
+             |<xmp:CreateDate>{ date }</xmp:CreateDate><xmp:ModifyDate>{ date }</xmp:ModifyDate>{ lv_xmp }</rdf:Description>\n| &&
+             |<rdf:Description rdf:about="" xmlns:pdf="http://ns.adobe.com/pdf/1.3/">| &&
+             |<pdf:Producer>abap-util</pdf:Producer>{ lv_pdf }</rdf:Description>\n|.
+    LOOP AT mt_xmp INTO DATA(lv_description).
+      result = |{ result }{ lv_description }\n|.
+    ENDLOOP.
+    result = |{ result }</rdf:RDF>\n</x:xmpmeta>\n<?xpacket end="w"?>|.
+
+  ENDMETHOD.
+
+  METHOD srgb_profile.
+
+    " v2, a display: the sRGB primaries adapted to D50, the white point,
+    " and the sRGB tone curve as 256 points
+    DATA lv_hex TYPE string.
+    lv_hex = `000003DC6E6F6E65021000006D6E74725247422058595A2007EA00010001000000000000616373704150504C00000000` &&
+             `6E6F6E656E6F6E650000000000000000000000000000F6D6000100000000D32D6E6F6E65000000000000000000000000` &&
+             `00000000000000000000000000000000000000000000000000000000000000000000000964657363000000F00000006C` &&
+             `637072740000015C000000217774707400000180000000147258595A00000194000000146758595A000001A800000014` &&
+             `6258595A000001BC0000001472545243000001D00000020C67545243000001D00000020C62545243000001D00000020C` &&
+             `646573630000000000000012735247422049454336313936362D322E3100000000000000000000000000000000000000` &&
+             `000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000` &&
+             `00000000000000000000000074657874000000004E6F20636F707972696768742C2075736520667265656C7900000000` &&
+             `58595A20000000000000F6D6000100000000D32D58595A200000000000006FA4000038F60000038F58595A2000000000` &&
+             `000062960000B787000018DC58595A2000000000000024A200000F830000B6CF63757276000000000000010000000014` &&
+             `0028003C005000630077008B009F00B300C700DB00F10108012001390154016F018C01AB01CA01EB020E02320257027D` &&
+             `02A502CE02F903250353038203B303E50418044D048404BC04F60532056F05AD05ED062F067306B806FE0747079107DD` &&
+             `082A087A08CA091D097209C80A200A790AD50B320B910BF20C550CBA0D200D880DF20E5E0ECC0F3C0FAE10211097110E` &&
+             `11881203128013001381140414891510159A162516B2174117D3186618FB19931A2C1AC81B661C061CA71D4C1DF21E9A` &&
+             `1F441FF120A02150220422B92370242A24E525A32664272627EB28B1297B2A462B142BE32CB62D8A2E612F3A301530F2` &&
+             `31D232B433993480356936553742383339253A1A3B123C0B3D073E063F07400A4110421843234430453F46514765487C` &&
+             `49954AB14BCF4CF04E134F395061518C52B953E9551B5650578758C159FE5B3D5C7E5DC25F096052619E62ED643E6591` &&
+             `66E86840699C6AFA6C5B6DBE6F24708D71F8736674D7764A77C079397AB47C327DB37F3780BD824683D1855F86F08884` &&
+             `8A1B8BB48D508EEF9090923593DC9586973298E29A949C499E019FBBA179A339A4FCA6C2A88BAA56AC25ADF6AFCAB1A1` &&
+             `B37BB557B737B919BAFFBCE7BED2C0C0C2B1C4A5C69CC895CA92CC91CE94D099D2A1D4ADD6BBD8CCDAE0DCF7DF11E12E` &&
+             `E34EE571E797E9C0EBECEE1BF04DF282F4BAF6F5F933FB74FDB8FFFF`.
+    result = lv_hex.
+
+  ENDMETHOD.
+
   METHOD attach.
 
     DATA ls_attachment TYPE ty_s_attachment.
@@ -743,6 +861,28 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
       add_page( ).
     ENDIF.
 
+    " PDF/A embeds every font: a standard font is a reason to stop
+    IF mv_pdfa = abap_true.
+      DATA lo_std TYPE REF TO zabaputil_cl_pdf_font_std.
+      LOOP AT mt_font ASSIGNING FIELD-SYMBOL(<std>).
+        TRY.
+            lo_std ?= <std>-font.
+            RAISE EXCEPTION TYPE zabaputil_cx_util_error
+              EXPORTING
+                val = |PDF/A: the standard font { lo_std->name( ) } is not embedded - use font_ttf( )|.
+          CATCH cx_sy_move_cast_error ##NO_HANDLER.
+        ENDTRY.
+      ENDLOOP.
+      " nor does it show the missing glyph
+      DATA(lt_missing) = missing_chars( ).
+      IF lt_missing IS NOT INITIAL.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |PDF/A: the fonts have no glyph for { concat_lines_of( table = lt_missing
+                                                                         sep   = ` ` ) }|.
+      ENDIF.
+    ENDIF.
+
     DATA(lo_writer) = NEW zabaputil_cl_pdf_writer( mv_compress ).
 
     " every page shares one resource dictionary with all fonts and images
@@ -801,6 +941,12 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
 
       CLEAR lv_annots.
       LOOP AT lo_page->annotations( ) INTO DATA(lv_annotation).
+        " PDF/A: an annotation is printed
+        IF mv_pdfa = abap_true.
+          lv_annotation = replace( val  = lv_annotation
+                                   sub  = `/Subtype /Link `
+                                   with = `/Subtype /Link /F 4 ` ).
+        ENDIF.
         lv_id = lo_writer->add_object( lv_annotation ).
         lv_annots = lv_annots && | { lv_id } 0 R|.
       ENDLOOP.
@@ -808,7 +954,8 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
         IF ls_goto-page < 1 OR ls_goto-page > lines( mt_page ).
           CONTINUE.
         ENDIF.
-        lv_id = lo_writer->add_object( |<< /Type /Annot /Subtype /Link /Rect [{ ls_goto-rect }] /Border [0 0 0] | &&
+        lv_id = lo_writer->add_object( |<< /Type /Annot /Subtype /Link{ COND #( WHEN mv_pdfa = abap_true THEN ` /F 4` ) } | &&
+                                       |/Rect [{ ls_goto-rect }] /Border [0 0 0] | &&
                                        |/Dest { destination( page      = ls_goto-page
                                                              y         = ls_goto-y
                                                              t_page_id = lt_page_id ) } >>| ).
@@ -842,16 +989,49 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
       lv_catalog_extra = | /Outlines { lv_outline } 0 R /PageMode /UseOutlines|.
     ENDIF.
     lv_catalog_extra = lv_catalog_extra && write_attachments( lo_writer ).
+
+    " PDF/A: the metadata, the colours of the device as sRGB, the time
+    DATA lv_date     TYPE string.
+    DATA lv_pdf_date TYPE string.
+    DATA lv_file_id  TYPE string.
+    IF mv_pdfa = abap_true.
+      DATA(lv_stamp) = |{ zabaputil_cl_util_context=>time_get_timestamp( ) }|.
+      lv_date = |{ lv_stamp(4) }-{ lv_stamp+4(2) }-{ lv_stamp+6(2) }T{ lv_stamp+8(2) }:{ lv_stamp+10(2) }:{ lv_stamp+12(2) }+00:00|.
+      lv_pdf_date = |D:{ lv_stamp(14) }+00'00'|.
+      DATA(lv_metadata) = lo_writer->add_stream(
+          dict     = `/Type /Metadata /Subtype /XML`
+          content  = zabaputil_cl_util_context=>conv_get_xstring_by_string( xmp( lv_date ) )
+          compress = abap_false ).
+      DATA(lv_profile) = lo_writer->add_stream( dict    = `/N 3`
+                                                content = srgb_profile( ) ).
+      DATA(lv_intent) = lo_writer->add_object(
+          |<< /Type /OutputIntent /S /GTS_PDFA1 /OutputConditionIdentifier (sRGB IEC61966-2.1) | &&
+          |/Info (sRGB IEC61966-2.1) /DestOutputProfile { lv_profile } 0 R >>| ).
+      lv_catalog_extra = |{ lv_catalog_extra } /Metadata { lv_metadata } 0 R /OutputIntents [{ lv_intent } 0 R]|.
+      lv_file_id = substring( val = to_upper( zabaputil_cl_util_context=>hash_calculate(
+                                                  |{ lv_stamp }{ lines( mt_page ) }{ lines( mt_font ) }{ lv_kids }| ) )
+                              len = 32 ).
+    ENDIF.
     DATA(lv_catalog) = lo_writer->add_object( |<< /Type /Catalog /Pages { lv_pages } 0 R{ lv_catalog_extra } >>| ).
 
     " text strings in UTF-16: a title is not limited to one code page
     LOOP AT mt_info ASSIGNING FIELD-SYMBOL(<info>).
       lv_info = lv_info && | /{ <info>-key } <{ zabaputil_cl_pdf_writer=>hex_utf16( <info>-text ) }>|.
     ENDLOOP.
+    IF lv_pdf_date IS NOT INITIAL.
+      lv_info = |{ lv_info } /CreationDate ({ lv_pdf_date }) /ModDate ({ lv_pdf_date })|.
+    ENDIF.
     lv_info_id = lo_writer->add_object( |<<{ lv_info } /Producer (abap-util) >>| ).
 
-    result = lo_writer->render( root = lv_catalog
-                                info = lv_info_id ).
+    IF mv_pdfa = abap_true.
+      result = lo_writer->render( root    = lv_catalog
+                                  info    = lv_info_id
+                                  version = `1.7`
+                                  id      = lv_file_id ).
+    ELSE.
+      result = lo_writer->render( root = lv_catalog
+                                  info = lv_info_id ).
+    ENDIF.
 
   ENDMETHOD.
 

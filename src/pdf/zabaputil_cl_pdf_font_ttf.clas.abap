@@ -51,7 +51,7 @@ CLASS zabaputil_cl_pdf_font_ttf DEFINITION
         VALUE(result) TYPE i.
 
     "! The code points of the characters the font has no glyph for, that
-    "! were written as its missing glyph so far
+    "! were written as its missing glyph so far - not those only measured
     METHODS missing
       RETURNING
         VALUE(result) TYPE zabaputil_cl_util_context=>ty_t_codepoint.
@@ -80,6 +80,8 @@ CLASS zabaputil_cl_pdf_font_ttf DEFINITION
 
     DATA mv_content       TYPE xstring.
     DATA mv_subset        TYPE abap_bool.
+    " the characters written - not only measured - that the font has no glyph for
+    DATA mt_missing       TYPE HASHED TABLE OF i WITH UNIQUE KEY table_line.
     " where the font starts in the file: 0, or its offset in a collection
     DATA mv_base          TYPE i.
     DATA mv_index         TYPE i.
@@ -638,6 +640,9 @@ CLASS zabaputil_cl_pdf_font_ttf IMPLEMENTATION.
 
     LOOP AT zabaputil_cl_util_context=>c_get_codepoints( val ) INTO lv_cp.
       ls_glyph = glyph_info( lv_cp ).
+      IF ls_glyph-glyph = 0.
+        INSERT lv_cp INTO TABLE mt_missing.
+      ENDIF.
       result = result && zabaputil_cl_pdf_writer=>hex_word( ls_glyph-glyph ).
     ENDLOOP.
     result = |<{ result }>|.
@@ -764,8 +769,8 @@ CLASS zabaputil_cl_pdf_font_ttf IMPLEMENTATION.
 
   METHOD missing.
 
-    LOOP AT mt_glyph ASSIGNING FIELD-SYMBOL(<glyph>) WHERE glyph = 0.
-      INSERT <glyph>-codepoint INTO TABLE result.
+    LOOP AT mt_missing INTO DATA(lv_cp).
+      INSERT lv_cp INTO TABLE result.
     ENDLOOP.
     SORT result.
 

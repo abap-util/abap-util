@@ -79,6 +79,8 @@ CLASS zabaputil_cl_pdf_writer DEFINITION
       IMPORTING
         root          TYPE i
         info          TYPE i DEFAULT 0
+        version       TYPE clike DEFAULT `1.4`
+        id            TYPE clike OPTIONAL
       RETURNING
         VALUE(result) TYPE xstring.
 
@@ -227,7 +229,7 @@ CLASS zabaputil_cl_pdf_writer IMPLEMENTATION.
 
     " the second line is a comment of four bytes above 127: it tells a
     " transfer program that the file is binary
-    lv_hex = hex( |%PDF-1.4\n%| ) && `E2E3CFD3` && `0A`.
+    lv_hex = hex( |%PDF-{ version }\n%| ) && `E2E3CFD3` && `0A`.
 
     lv_xref = |xref\n0 { lines( mt_object ) + 1 }\n0000000000 65535 f \n|.
     LOOP AT mt_object ASSIGNING FIELD-SYMBOL(<object>).
@@ -244,6 +246,10 @@ CLASS zabaputil_cl_pdf_writer IMPLEMENTATION.
 
     IF info > 0.
       lv_info = | /Info { info } 0 R|.
+    ENDIF.
+    " the identifier of the file: twice the same, a new file has no other
+    IF id IS NOT INITIAL.
+      lv_info = |{ lv_info } /ID [<{ id }> <{ id }>]|.
     ENDIF.
     lv_offset = strlen( lv_hex ) DIV 2.
     lv_hex = lv_hex && hex( lv_xref ) &&

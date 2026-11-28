@@ -17,6 +17,8 @@ CLASS ltcl_font_ttf DEFINITION FINAL
     METHODS subset_name_and_file    FOR TESTING.
     METHODS fallback_of_std_font    FOR TESTING.
     METHODS missing_characters      FOR TESTING.
+    METHODS pdfa_document           FOR TESTING.
+    METHODS pdfa_refused            FOR TESTING.
     METHODS not_a_font              FOR TESTING.
     METHODS postscript_outlines     FOR TESTING.
     METHODS collection              FOR TESTING.
@@ -316,6 +318,82 @@ CLASS ltcl_font_ttf IMPLEMENTATION.
                                         act = lo_pdf->missing_chars( ) ).
     cl_abap_unit_assert=>assert_equals( exp = lv_omega
                                         act = zabaputil_cl_pdf_font_std=>char( 937 ) ).
+  ENDMETHOD.
+
+  METHOD pdfa_document.
+    DATA lv_hex TYPE string.
+    DATA(lo_pdf) = zabaputil_cl_pdf=>create( compress = abap_false ).
+    lo_pdf->set_pdfa( )->set_info( title = `T & C` ).
+    DATA(lo_page) = lo_pdf->add_page( ).
+    lo_page->set_font( lo_pdf->font_ttf( font_format_4( ) ) ).
+    lo_page->text( x   = 10
+                   y   = 10
+                   val = `AB` ).
+    lo_page->link( x   = 10
+                   y   = 10
+                   w   = 10
+                   h   = 10
+                   url = `https://example.com` ).
+    lv_hex = lo_pdf->render( ).
+    " PDF 1.7, an identifier, metadata and an output intent with its profile
+    cl_abap_unit_assert=>assert_equals( exp = zabaputil_cl_pdf_writer=>hex( `%PDF-1.7` )
+                                        act = substring( val = lv_hex
+                                                         len = 16 ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( ` /ID [<` ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( `/Type /Metadata /Subtype /XML` ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex(
+        `<< /Type /OutputIntent /S /GTS_PDFA1 /OutputConditionIdentifier (sRGB IEC61966-2.1)` ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex(
+        `<pdfaid:part>3</pdfaid:part><pdfaid:conformance>B</pdfaid:conformance>` ) ) ).
+    " the title in the metadata as in the info dictionary, escaped
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex(
+        `<rdf:li xml:lang="x-default">T &amp; C</rdf:li>` ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( `<pdf:Producer>abap-util</pdf:Producer>` ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( ` /CreationDate (D:` ) ) ).
+    " a link is printed
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( `/Subtype /Link /F 4 ` ) ) ).
+  ENDMETHOD.
+
+  METHOD pdfa_refused.
+    " a standard font is not embedded
+    DATA(lo_pdf) = zabaputil_cl_pdf=>create( ).
+    lo_pdf->set_pdfa( ).
+    lo_pdf->add_page( )->set_font( lo_pdf->font( `Helvetica` ) ).
+    TRY.
+        lo_pdf->render( ).
+        cl_abap_unit_assert=>fail( ).
+      CATCH zabaputil_cx_util_error INTO DATA(lx).
+        cl_abap_unit_assert=>assert_true( xsdbool( lx->get_text( ) CS `Helvetica` ) ).
+    ENDTRY.
+    " the missing glyph is not shown
+    lo_pdf = zabaputil_cl_pdf=>create( ).
+    lo_pdf->set_pdfa( ).
+    DATA(lo_page) = lo_pdf->add_page( ).
+    lo_page->set_font( lo_pdf->font_ttf( font_format_4( ) ) ).
+    lo_page->text( x   = 10
+                   y   = 10
+                   val = `AZ` ).
+    TRY.
+        lo_pdf->render( ).
+        cl_abap_unit_assert=>fail( ).
+      CATCH zabaputil_cx_util_error INTO lx.
+        cl_abap_unit_assert=>assert_true( xsdbool( lx->get_text( ) CS `no glyph for Z` ) ).
+    ENDTRY.
+    " a PDF/A form needs a font to embed
+    DATA(ls_form) = zabaputil_cl_pdf_form=>new_form( ).
+    ls_form-pdfa = abap_true.
+    TRY.
+        zabaputil_cl_pdf_form=>build( ls_form ).
+        cl_abap_unit_assert=>fail( ).
+      CATCH zabaputil_cx_util_error INTO lx.
+        cl_abap_unit_assert=>assert_true( xsdbool( lx->get_text( ) CS `fallback_font` ) ).
+    ENDTRY.
+    " with it, no standard font is asked for
+    ls_form-fallback_font = font_format_4( ).
+    ls_form-t_element = VALUE #( ( type = zabaputil_cl_pdf_form=>cs_type-text text = `AB` ) ).
+    DATA lv_hex TYPE string.
+    lv_hex = zabaputil_cl_pdf_form=>render( ls_form ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( `pdfaid:part` ) ) ).
   ENDMETHOD.
 
   METHOD not_a_font.

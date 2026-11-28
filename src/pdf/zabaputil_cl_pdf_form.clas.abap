@@ -214,6 +214,9 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         "! a TrueType file (.ttf) for the characters the standard fonts do not
         "! have - Polish, Greek, Cyrillic, ...; without it they are question marks
         fallback_font TYPE xstring,
+        "! write PDF/A-3b, for archiving: every text in the fallback font, as
+        "! PDF/A embeds every font - the standard fonts are not
+        pdfa          TYPE abap_bool,
         t_element     TYPE ty_t_element,
       END OF ty_s_form.
 
@@ -351,6 +354,8 @@ CLASS zabaputil_cl_pdf_form DEFINITION
   PRIVATE SECTION.
 
     CONSTANTS c_font  TYPE string VALUE `Helvetica`.
+    " while a PDF/A form is built: the one font of all its texts
+    CLASS-DATA go_pdfa_font TYPE REF TO zabaputil_if_pdf_font.
     CONSTANTS c_color TYPE string VALUE `000000`.
     CONSTANTS c_size  TYPE f VALUE 10.
 
@@ -718,7 +723,16 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     IF val-title IS NOT INITIAL.
       result->set_info( title = val-title ).
     ENDIF.
-    IF val-fallback_font IS NOT INITIAL.
+    CLEAR go_pdfa_font.
+    IF val-pdfa = abap_true.
+      IF val-fallback_font IS INITIAL.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = `PDF/A: the form needs a fallback_font - the standard fonts are not embedded`.
+      ENDIF.
+      result->set_pdfa( ).
+      go_pdfa_font = result->font_ttf( val-fallback_font ).
+    ELSEIF val-fallback_font IS NOT INITIAL.
       result->set_fallback_font( result->font_ttf( val-fallback_font ) ).
     ENDIF.
 
@@ -727,7 +741,7 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
                             top    = val-margin_top
                             right  = val-margin_right
                             bottom = val-margin_bottom ).
-    lo_layout->set_font( font = result->font( c_font )
+    lo_layout->set_font( font = COND #( WHEN go_pdfa_font IS BOUND THEN go_pdfa_font ELSE result->font( c_font ) )
                          size = c_size ).
     IF val-space_before > 0 OR val-space_after > 0.
       lo_layout->set_paragraph_spacing( before = val-space_before
@@ -776,7 +790,7 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     lo_layout->page( ).
 
     " header and footer in the standard font, whatever the last element used
-    lo_layout->set_font( font = result->font( c_font )
+    lo_layout->set_font( font = COND #( WHEN go_pdfa_font IS BOUND THEN go_pdfa_font ELSE result->font( c_font ) )
                          size = c_size ).
     lo_layout->set_color( c_color ).
     lv_header = val-header.
@@ -1716,6 +1730,11 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     IF lv_name IS INITIAL.
       lv_name = c_font.
     ENDIF.
+    " PDF/A: no standard font may even be asked for
+    IF go_pdfa_font IS BOUND.
+      result = go_pdfa_font.
+      RETURN.
+    ENDIF.
     result = pdf->font( lv_name ).
 
   ENDMETHOD.
@@ -1738,6 +1757,10 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
       WHEN `Times-Italic`.
         lv_name = `Times-BoldItalic`.
     ENDCASE.
+    IF go_pdfa_font IS BOUND.
+      result = go_pdfa_font.
+      RETURN.
+    ENDIF.
     result = pdf->font( lv_name ).
 
   ENDMETHOD.
