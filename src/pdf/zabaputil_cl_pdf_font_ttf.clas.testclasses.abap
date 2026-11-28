@@ -15,6 +15,8 @@ CLASS ltcl_font_ttf DEFINITION FINAL
     METHODS write_astral            FOR TESTING.
     METHODS subset_used_glyphs      FOR TESTING.
     METHODS subset_name_and_file    FOR TESTING.
+    METHODS fallback_of_std_font    FOR TESTING.
+    METHODS missing_characters      FOR TESTING.
     METHODS not_a_font              FOR TESTING.
     METHODS postscript_outlines     FOR TESTING.
     METHODS collection              FOR TESTING.
@@ -267,6 +269,52 @@ CLASS ltcl_font_ttf IMPLEMENTATION.
     DATA lo_ttf TYPE REF TO zabaputil_cl_pdf_font_ttf.
     lo_ttf ?= font( font_format_4( ) ).
     cl_abap_unit_assert=>assert_equals( exp = font_format_4( ) act = lo_ttf->file( ) ).
+  ENDMETHOD.
+
+  METHOD fallback_of_std_font.
+    " Helvetica has no U+1F600: it is written in the embedded font, between
+    " the pieces Helvetica writes
+    DATA(lv_smiley) = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `F09F9880` ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf=>create( ).
+    DATA(lo_ttf) = lo_pdf->font_ttf( font_format_12( ) ).
+    DATA(lo_helvetica) = lo_pdf->font( `Helvetica` ).
+    lo_pdf->set_fallback_font( lo_ttf ).
+    DATA(lo_page) = lo_pdf->add_page( ).
+    lo_page->set_font( font = lo_helvetica
+                       size = 10 ).
+    lo_page->text( x   = 100
+                   y   = 100
+                   val = |A{ lv_smiley }B| ).
+    DATA(lv_content) = lo_page->content( ).
+    cl_abap_unit_assert=>assert_equals( exp = 3 act = count( val = lv_content sub = `BT ` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS `BT /F2 10 Tf 100 741.89 Td <41> Tj ET` ) ).
+    " A is 6.67 wide in Helvetica, the smiley 8 in the test font
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS `BT /F1 10 Tf 106.67 741.89 Td <0003> Tj ET` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS `BT /F2 10 Tf 114.67 741.89 Td <42> Tj ET` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `21.34`
+                                        act = num( lo_helvetica->width( val  = |A{ lv_smiley }B|
+                                                                        size = 10 ) ) ).
+    cl_abap_unit_assert=>assert_initial( lo_pdf->missing_chars( ) ).
+  ENDMETHOD.
+
+  METHOD missing_characters.
+    " a question mark of a standard font, the missing glyph of an
+    " embedded one - each character once
+    DATA(lv_omega) = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `CEA9` ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf=>create( ).
+    DATA(lo_page) = lo_pdf->add_page( ).
+    lo_page->set_font( lo_pdf->font( `Helvetica` ) ).
+    lo_page->text( x   = 10
+                   y   = 10
+                   val = |{ lv_omega }€{ lv_omega }| ).
+    lo_page->set_font( lo_pdf->font_ttf( font_format_4( ) ) ).
+    lo_page->text( x   = 10
+                   y   = 20
+                   val = `AZ` ).
+    cl_abap_unit_assert=>assert_equals( exp = VALUE string_table( ( lv_omega ) ( `Z` ) )
+                                        act = lo_pdf->missing_chars( ) ).
+    cl_abap_unit_assert=>assert_equals( exp = lv_omega
+                                        act = zabaputil_cl_pdf_font_std=>char( 937 ) ).
   ENDMETHOD.
 
   METHOD not_a_font.

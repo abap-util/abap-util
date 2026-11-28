@@ -195,6 +195,9 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         "! the fewest lines of a paragraph in the flow at the bottom of a page
         "! and at the top of the next one; 0 or 1 for any
         keep_lines    TYPE i,
+        "! a TrueType file (.ttf) for the characters the standard fonts do not
+        "! have - Polish, Greek, Cyrillic, ...; without it they are question marks
+        fallback_font TYPE xstring,
         t_element     TYPE ty_t_element,
       END OF ty_s_form.
 
@@ -698,6 +701,9 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
                                        orientation = val-orientation ).
     IF val-title IS NOT INITIAL.
       result->set_info( title = val-title ).
+    ENDIF.
+    IF val-fallback_font IS NOT INITIAL.
+      result->set_fallback_font( result->font_ttf( val-fallback_font ) ).
     ENDIF.
 
     DATA(lo_layout) = NEW zabaputil_cl_pdf_layout( result ).

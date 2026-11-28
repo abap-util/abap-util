@@ -8,8 +8,12 @@ CLASS zabaputil_cl_pdf_font_std DEFINITION
     " One of the standard fonts every PDF viewer brings along - nothing is
     " embedded, the file names the font. The text is written in
     " WinAnsiEncoding (Windows-1252): Western European scripts and the
-    " euro sign; a character outside of it becomes a question mark. For
-    " any other script embed a font file, zabaputil_cl_pdf_font_ttf.
+    " euro sign. A character outside of it is written in the fallback
+    " font when the font has one (set_fallback, or for all standard fonts
+    " of a document zabaputil_cl_pdf=>set_fallback_font) - an embedded
+    " TrueType font - and becomes a question mark when it has none;
+    " missing( ) lists those. For a text in another script altogether
+    " embed a font file, zabaputil_cl_pdf_font_ttf.
     "
     " The widths are the ones of the Adobe font metrics (AFM) files of the
     " Core 14 fonts, which Adobe lets everybody use, copy and distribute:
@@ -26,6 +30,44 @@ CLASS zabaputil_cl_pdf_font_std DEFINITION
       IMPORTING
         name     TYPE clike
         resource TYPE clike.
+
+    "! a piece of a text in one of the two fonts
+    TYPES:
+      BEGIN OF ty_s_part,
+        text     TYPE string,
+        "! the piece is for the fallback font
+        fallback TYPE abap_bool,
+      END OF ty_s_part.
+    TYPES ty_t_part TYPE STANDARD TABLE OF ty_s_part WITH EMPTY KEY.
+
+    "! The font for the characters WinAnsiEncoding does not have
+    METHODS set_fallback
+      IMPORTING
+        val TYPE REF TO zabaputil_if_pdf_font.
+
+    METHODS fallback
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_if_pdf_font.
+
+    "! A text in pieces: what WinAnsiEncoding has, and what the fallback
+    "! font writes - one piece when there is no fallback font
+    METHODS parts
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE ty_t_part.
+
+    "! The characters written as a question mark so far, each once
+    METHODS missing
+      RETURNING
+        VALUE(result) TYPE string_table.
+
+    "! The character of a Unicode code point
+    CLASS-METHODS char
+      IMPORTING
+        val           TYPE i
+      RETURNING
+        VALUE(result) TYPE string.
 
     "! The name of the font, `Helvetica-Bold`
     METHODS name
@@ -56,6 +98,8 @@ CLASS zabaputil_cl_pdf_font_std DEFINITION
   PRIVATE SECTION.
 
     DATA mv_name     TYPE string.
+    DATA mo_fallback TYPE REF TO zabaputil_if_pdf_font.
+    DATA mt_missing  TYPE HASHED TABLE OF i WITH UNIQUE KEY table_line.
     DATA mv_resource TYPE string.
     DATA mv_ascent   TYPE i.
     DATA mv_descent  TYPE i.
@@ -86,6 +130,101 @@ CLASS zabaputil_cl_pdf_font_std IMPLEMENTATION.
   METHOD name.
 
     result = mv_name.
+
+  ENDMETHOD.
+
+  METHOD set_fallback.
+
+    mo_fallback = val.
+
+  ENDMETHOD.
+
+  METHOD fallback.
+
+    result = mo_fallback.
+
+  ENDMETHOD.
+
+  METHOD parts.
+
+    DATA ls_part TYPE ty_s_part.
+    DATA lv_char TYPE string.
+    DATA lv_off  TYPE i.
+
+    DATA(lv_text) = CONV string( val ).
+    IF mo_fallback IS NOT BOUND.
+      INSERT VALUE #( text = lv_text ) INTO TABLE result.
+      RETURN.
+    ENDIF.
+
+    " character by character: a code point of more than 16 bits is two
+    " characters of the string, and both go to the fallback font
+    LOOP AT zabaputil_cl_util_context=>c_get_codepoints( lv_text ) INTO DATA(lv_cp).
+      DATA(lv_length) = COND i( WHEN lv_cp > 65535 THEN 2 ELSE 1 ).
+      lv_char = substring( val = lv_text
+                           off = lv_off
+                           len = lv_length ).
+      lv_off = lv_off + lv_length.
+      DATA(lv_fallback) = xsdbool( winansi( lv_cp ) = 0 ).
+      IF lv_fallback <> ls_part-fallback AND ls_part-text IS NOT INITIAL.
+        INSERT ls_part INTO TABLE result.
+        CLEAR ls_part-text.
+      ENDIF.
+      ls_part-fallback = lv_fallback.
+      ls_part-text = ls_part-text && lv_char.
+    ENDLOOP.
+    IF ls_part-text IS NOT INITIAL.
+      INSERT ls_part INTO TABLE result.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD char.
+
+    DATA lv_x     TYPE x LENGTH 1.
+    DATA lv_hex   TYPE string.
+    DATA lv_bytes TYPE xstring.
+
+    " in UTF-8: one byte up to 7F, two up to 7FF, three up to FFFF, four
+    IF val < 128.
+      lv_x = val.
+      lv_hex = lv_x.
+    ELSEIF val < 2048.
+      lv_x = 192 + val DIV 64.
+      lv_hex = lv_x.
+      lv_x = 128 + val MOD 64.
+      lv_hex = lv_hex && lv_x.
+    ELSEIF val < 65536.
+      lv_x = 224 + val DIV 4096.
+      lv_hex = lv_x.
+      lv_x = 128 + ( val DIV 64 ) MOD 64.
+      lv_hex = lv_hex && lv_x.
+      lv_x = 128 + val MOD 64.
+      lv_hex = lv_hex && lv_x.
+    ELSE.
+      lv_x = 240 + val DIV 262144.
+      lv_hex = lv_x.
+      lv_x = 128 + ( val DIV 4096 ) MOD 64.
+      lv_hex = lv_hex && lv_x.
+      lv_x = 128 + ( val DIV 64 ) MOD 64.
+      lv_hex = lv_hex && lv_x.
+      lv_x = 128 + val MOD 64.
+      lv_hex = lv_hex && lv_x.
+    ENDIF.
+    lv_bytes = lv_hex.
+    result = zabaputil_cl_util_context=>conv_get_string_by_xstring( lv_bytes ).
+
+  ENDMETHOD.
+
+  METHOD missing.
+
+    DATA lt_code TYPE STANDARD TABLE OF i WITH EMPTY KEY.
+
+    lt_code = mt_missing.
+    SORT lt_code.
+    LOOP AT lt_code INTO DATA(lv_cp).
+      INSERT char( lv_cp ) INTO TABLE result.
+    ENDLOOP.
 
   ENDMETHOD.
 
@@ -197,6 +336,13 @@ CLASS zabaputil_cl_pdf_font_std IMPLEMENTATION.
     DATA lv_x    TYPE x LENGTH 1.
     DATA lv_hex  TYPE string.
 
+    " what is written as a question mark, for missing( )
+    LOOP AT zabaputil_cl_util_context=>c_get_codepoints( val ) INTO DATA(lv_cp).
+      IF winansi( lv_cp ) = 0.
+        INSERT lv_cp INTO TABLE mt_missing.
+      ENDIF.
+    ENDLOOP.
+
     LOOP AT codes( val ) INTO lv_code.
       lv_x = lv_code.
       lv_hex = lv_x.
@@ -212,6 +358,23 @@ CLASS zabaputil_cl_pdf_font_std IMPLEMENTATION.
     DATA lv_sum   TYPE i.
     DATA lv_size  TYPE f.
     DATA lv_index TYPE i.
+
+    " the pieces of the fallback font are as wide as it makes them
+    IF mo_fallback IS BOUND.
+      DATA(lt_part) = parts( val ).
+      IF lines( lt_part ) > 1 OR ( lines( lt_part ) = 1 AND lt_part[ 1 ]-fallback = abap_true ).
+        LOOP AT lt_part INTO DATA(ls_part).
+          IF ls_part-fallback = abap_true.
+            result = result + mo_fallback->width( val  = ls_part-text
+                                                  size = size ).
+          ELSE.
+            result = result + zabaputil_if_pdf_font~width( val  = ls_part-text
+                                                           size = size ).
+          ENDIF.
+        ENDLOOP.
+        RETURN.
+      ENDIF.
+    ENDIF.
 
     LOOP AT codes( val ) INTO lv_code.
       IF lv_code < 32.

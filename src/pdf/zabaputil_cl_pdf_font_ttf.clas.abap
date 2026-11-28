@@ -44,6 +44,12 @@ CLASS zabaputil_cl_pdf_font_ttf DEFINITION
       RETURNING
         VALUE(result) TYPE i.
 
+    "! The code points of the characters the font has no glyph for, that
+    "! were written as its missing glyph so far
+    METHODS missing
+      RETURNING
+        VALUE(result) TYPE zabaputil_cl_util_context=>ty_t_codepoint.
+
     "! The PostScript name of the font, as its name table gives it
     METHODS name
       RETURNING
@@ -696,6 +702,15 @@ CLASS zabaputil_cl_pdf_font_ttf IMPLEMENTATION.
     result = writer->add_object(
         |<< /Type /Font /Subtype /Type0 /BaseFont /{ lv_name } /Encoding /Identity-H | &&
         |/DescendantFonts [{ lv_cid_font } 0 R] /ToUnicode { lv_to_unicode } 0 R >>| ).
+
+  ENDMETHOD.
+
+  METHOD missing.
+
+    LOOP AT mt_glyph ASSIGNING FIELD-SYMBOL(<glyph>) WHERE glyph = 0.
+      INSERT <glyph>-codepoint INTO TABLE result.
+    ENDLOOP.
+    SORT result.
 
   ENDMETHOD.
 

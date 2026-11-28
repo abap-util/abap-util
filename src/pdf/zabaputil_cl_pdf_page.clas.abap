@@ -483,6 +483,32 @@ CLASS zabaputil_cl_pdf_page IMPLEMENTATION.
         lv_x = lv_x - text_width( lv_text ) / 2.
     ENDCASE.
 
+    " a standard font with a fallback font: the characters it does not
+    " have are written in the other one, piece by piece
+    DATA lo_std TYPE REF TO zabaputil_cl_pdf_font_std.
+    TRY.
+        lo_std ?= mo_font.
+      CATCH cx_sy_move_cast_error ##NO_HANDLER.
+    ENDTRY.
+    IF lo_std IS BOUND AND lo_std->fallback( ) IS BOUND.
+      DATA(lt_part) = lo_std->parts( lv_text ).
+      IF lines( lt_part ) > 1 OR lt_part[ 1 ]-fallback = abap_true.
+        LOOP AT lt_part INTO DATA(ls_part).
+          DATA(lo_font) = COND #( WHEN ls_part-fallback = abap_true THEN lo_std->fallback( ) ELSE mo_font ).
+          lv_show = |BT /{ lo_font->resource( ) } { zabaputil_cl_pdf_writer=>num( mv_font_size ) } Tf | &&
+                    |{ px( lv_x ) } { py( y ) } Td { lo_font->encode( ls_part-text ) } Tj ET|.
+          IF mv_text_color = mv_fill_color.
+            emit( lv_show ).
+          ELSE.
+            emit( |q { mv_text_color } rg { lv_show } Q| ).
+          ENDIF.
+          lv_x = lv_x + lo_font->width( val  = ls_part-text
+                                        size = mv_font_size ) / mv_scale.
+        ENDLOOP.
+        RETURN.
+      ENDIF.
+    ENDIF.
+
     lv_show = |BT /{ mo_font->resource( ) } { zabaputil_cl_pdf_writer=>num( mv_font_size ) } Tf | &&
               |{ px( lv_x ) } { py( y ) } Td { mo_font->encode( lv_text ) } Tj ET|.
     IF mv_text_color = mv_fill_color.

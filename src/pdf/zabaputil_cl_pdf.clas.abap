@@ -84,6 +84,23 @@ CLASS zabaputil_cl_pdf DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_if_pdf_font.
 
+    "! The font every standard font of the document writes the characters
+    "! with that WinAnsiEncoding does not have - those of fonts asked for
+    "! later, too
+    "! @parameter val | an embedded font, from font_ttf( )
+    METHODS set_fallback_font
+      IMPORTING
+        val           TYPE REF TO zabaputil_if_pdf_font
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf.
+
+    "! The characters written so far that no font of the document had: a
+    "! question mark for a standard font, the missing glyph of an embedded
+    "! one. Each once - empty when every character could be written
+    METHODS missing_chars
+      RETURNING
+        VALUE(result) TYPE string_table.
+
     "! An image, to be placed with zabaputil_cl_pdf_page=&gt;image - as often
     "! as needed, the file holds it once
     "! @parameter content | the bytes of a .jpg or .png file
@@ -135,6 +152,7 @@ CLASS zabaputil_cl_pdf DEFINITION
     DATA mv_compress TYPE abap_bool.
     DATA mt_page     TYPE STANDARD TABLE OF REF TO zabaputil_cl_pdf_page WITH EMPTY KEY.
     DATA mt_font     TYPE STANDARD TABLE OF ty_s_font WITH EMPTY KEY.
+    DATA mo_fallback TYPE REF TO zabaputil_if_pdf_font.
     DATA mt_image    TYPE STANDARD TABLE OF REF TO zabaputil_cl_pdf_image WITH EMPTY KEY.
     DATA mt_info     TYPE STANDARD TABLE OF ty_s_info WITH EMPTY KEY.
 
@@ -291,10 +309,59 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    ls_font-font = NEW zabaputil_cl_pdf_font_std( name     = ls_font-name
+    DATA(lo_std) = NEW zabaputil_cl_pdf_font_std( name     = ls_font-name
                                                   resource = |F{ lines( mt_font ) + 1 }| ).
+    IF mo_fallback IS BOUND.
+      lo_std->set_fallback( mo_fallback ).
+    ENDIF.
+    ls_font-font = lo_std.
     INSERT ls_font INTO TABLE mt_font.
     result = ls_font-font.
+
+  ENDMETHOD.
+
+  METHOD set_fallback_font.
+
+    DATA lo_std TYPE REF TO zabaputil_cl_pdf_font_std.
+
+    mo_fallback = val.
+    LOOP AT mt_font ASSIGNING FIELD-SYMBOL(<font>).
+      TRY.
+          lo_std ?= <font>-font.
+          lo_std->set_fallback( val ).
+        CATCH cx_sy_move_cast_error ##NO_HANDLER.
+      ENDTRY.
+    ENDLOOP.
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD missing_chars.
+
+    DATA lo_std TYPE REF TO zabaputil_cl_pdf_font_std.
+    DATA lo_ttf TYPE REF TO zabaputil_cl_pdf_font_ttf.
+
+    LOOP AT mt_font ASSIGNING FIELD-SYMBOL(<font>).
+      TRY.
+          lo_std ?= <font>-font.
+          LOOP AT lo_std->missing( ) INTO DATA(lv_char).
+            IF NOT line_exists( result[ table_line = lv_char ] ).
+              INSERT lv_char INTO TABLE result.
+            ENDIF.
+          ENDLOOP.
+        CATCH cx_sy_move_cast_error ##NO_HANDLER.
+      ENDTRY.
+      TRY.
+          lo_ttf ?= <font>-font.
+          LOOP AT lo_ttf->missing( ) INTO DATA(lv_cp).
+            lv_char = zabaputil_cl_pdf_font_std=>char( lv_cp ).
+            IF NOT line_exists( result[ table_line = lv_char ] ).
+              INSERT lv_char INTO TABLE result.
+            ENDIF.
+          ENDLOOP.
+        CATCH cx_sy_move_cast_error ##NO_HANDLER.
+      ENDTRY.
+    ENDLOOP.
 
   ENDMETHOD.
 
