@@ -124,6 +124,7 @@ Every action in `.github/workflows/` is pinned to a commit sha with the tag as a
 
 - **No regex, no XSLT, no DDIC object.** Format codes, cell addresses and numbers are read character by character.
 - **A sheet is rendered in `add_sheet( )`**, not kept as a reference to the caller's table - the table may be gone by `get_xlsx( )`.
+- **A formula is written without a value, or with one worked out here** (the totals row adds up while the rows are written): `get_xlsx( )` then asks Excel to recalculate on load (`calcPr fullCalcOnLoad`). A totals formula is `SUBTOTAL( )` - over the column of the Excel table by name, over the cells where the sheet has no table.
 - **Reading goes row by row** (`sheet_read_row`) and never builds the whole sheet in memory for `get_table( )`.
 - **`xml_reader_create` sets no option on the sXML reader**: as it comes it reports a text of blanks only where it is all an element holds and leaves out the indentation between elements, and the transpiled runtime implements no `set_option`.
 - **The reading tests are slow in the transpiled runtime by its XML parser** (it searches the document from the start for every token) - keep the workbooks of the tests small; a system parses in the kernel.

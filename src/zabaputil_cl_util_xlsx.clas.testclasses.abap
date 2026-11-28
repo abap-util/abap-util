@@ -131,6 +131,12 @@ CLASS ltcl_write DEFINITION FINAL
     METHODS column_unknown       FOR TESTING RAISING cx_static_check.
     METHODS freeze_and_filter    FOR TESTING RAISING cx_static_check.
     METHODS excel_table          FOR TESTING RAISING cx_static_check.
+    METHODS excel_table_options  FOR TESTING RAISING cx_static_check.
+    METHODS start_cell           FOR TESTING RAISING cx_static_check.
+    METHODS start_cell_invalid   FOR TESTING RAISING cx_static_check.
+    METHODS totals_row           FOR TESTING RAISING cx_static_check.
+    METHODS totals_row_of_table  FOR TESTING RAISING cx_static_check.
+    METHODS formula_column       FOR TESTING RAISING cx_static_check.
     METHODS sheet_names          FOR TESTING RAISING cx_static_check.
     METHODS empty_workbook       FOR TESTING RAISING cx_static_check.
     METHODS no_columns           FOR TESTING RAISING cx_static_check.
@@ -336,6 +342,194 @@ CLASS ltcl_write IMPLEMENTATION.
                                                             name = `xl/tables/table1.xml` ) ).
   ENDMETHOD.
 
+  METHOD excel_table_options.
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>factory(
+        )->add_sheet( val    = rows( )
+                      layout = VALUE #( table_style    = `TableStyleLight9`
+                                        table_name     = `My Orders 2024`
+                                        no_row_stripes = abap_true
+                                        column_stripes = abap_true
+                                        no_filter      = abap_true )
+        )->add_sheet( val    = rows( )
+                      layout = VALUE #( table_style = `TableStyleLight9`
+                                        table_name  = `myorders2024` )
+        )->add_sheet( val    = rows( )
+                      layout = VALUE #( table_style = `TableStyleLight9`
+                                        table_name  = `A1` )
+        )->get_xlsx( ).
+
+    " the name without what Excel does not take in one, no filter, the
+    " stripes as asked for
+    DATA(lv_table) = ltcl_file=>part( file = lv_file
+                                      name = `xl/tables/table1.xml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_table CS `name="MyOrders2024" displayName="MyOrders2024"` ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( lv_table CS `<autoFilter` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_table CS `showRowStripes="0" showColumnStripes="1"` ) ).
+
+    " a name the workbook has, whatever its case, gets a number - and one
+    " that reads as a cell an underscore
+    lv_table = ltcl_file=>part( file = lv_file
+                                name = `xl/tables/table2.xml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_table CS `name="myorders2024_2"` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_table CS `<autoFilter ref="A1:G3"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_table CS `showRowStripes="1" showColumnStripes="0"` ) ).
+    lv_table = ltcl_file=>part( file = lv_file
+                                name = `xl/tables/table3.xml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_table CS `name="_A1"` ) ).
+  ENDMETHOD.
+
+  METHOD start_cell.
+    DATA(lv_sheet) = ltcl_file=>part(
+        file = zabaputil_cl_util_xlsx=>xlsx_by_itab( val    = rows( )
+                                                     layout = VALUE #( start_cell    = `b3`
+                                                                       freeze_header = abap_true
+                                                                       auto_filter   = abap_true ) )
+        name = `xl/worksheets/sheet1.xml` ).
+
+    " the header in B3, the rows under it, the columns from B on
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<dimension ref="B3:H5"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<row r="3"><c r="B3" s="3" t="inlineStr">` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="C4"><v>-5</v></c>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<col min="2" max="2"` ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( lv_sheet CS `<col min="1" max="1"` ) ).
+    " what is frozen ends with the header row, and the filter is on it
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<pane ySplit="3" topLeftCell="A4"` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<autoFilter ref="B3:H5"/>` ) ).
+
+    " an Excel table stands where the rows stand
+    DATA(lv_table) = ltcl_file=>part(
+        file = zabaputil_cl_util_xlsx=>xlsx_by_itab( val    = rows( )
+                                                     layout = VALUE #( start_cell  = `$C$2`
+                                                                       table_style = `TableStyleMedium2` ) )
+        name = `xl/tables/table1.xml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_table CS ` ref="C2:I4"` ) ).
+  ENDMETHOD.
+
+  METHOD start_cell_invalid.
+    TRY.
+        zabaputil_cl_util_xlsx=>xlsx_by_itab( val    = rows( )
+                                              layout = VALUE #( start_cell = `here` ) ).
+        cl_abap_unit_assert=>fail( `a start cell that is none has to raise` ).
+      CATCH zabaputil_cx_util_error INTO DATA(x).
+        cl_abap_unit_assert=>assert_true( xsdbool( x->get_text( ) CS `XLSX_START_CELL` ) ).
+    ENDTRY.
+    TRY.
+        zabaputil_cl_util_xlsx=>xlsx_by_itab( val    = rows( )
+                                              layout = VALUE #( start_cell = `B0` ) ).
+        cl_abap_unit_assert=>fail( `row 0 has to raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD totals_row.
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>xlsx_by_itab(
+        val    = rows( )
+        layout = VALUE #( auto_filter = abap_true
+                          t_column    = VALUE #( ( name = `TEXT` total = `Total` )
+                                                 ( name = `NUM` total = `SUM` )
+                                                 ( name = `AMOUNT` total = `average` format = `0.00` )
+                                                 ( name = `DATE` total = `count` )
+                                                 ( name = `NUMC` total = `max` ) ) ) ).
+    DATA(lv_sheet) = ltcl_file=>part( file = lv_file
+                                      name = `xl/worksheets/sheet1.xml` ).
+
+    " a row under the rows: the label bold, a formula over the cells of
+    " the column with the value it gives - -5 and 0, -12.5 and 0
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<dimension ref="A1:E4"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool(
+        lv_sheet CS `<row r="4"><c r="A4" s="3" t="inlineStr"><is><t xml:space="preserve">Total</t></is></c>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="B4"><f>SUBTOTAL(109,B2:B3)</f><v>-5</v></c>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="C4" s="1"><f>SUBTOTAL(101,C2:C3)</f><v>-6.25</v></c>` ) ).
+    " a count is a number, not a date: the cells that hold a value, one
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="D4"><f>SUBTOTAL(103,D2:D3)</f><v>1</v></c>` ) ).
+    " a NUMC is text: nothing to add up here, the formula stands
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="E4"><f>SUBTOTAL(104,E2:E3)</f>` ) ).
+    " the filter ends above the totals row
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<autoFilter ref="A1:E3"/>` ) ).
+
+    " Excel is asked to work the formulas out when it opens the file
+    cl_abap_unit_assert=>assert_true( xsdbool( ltcl_file=>part( file = lv_file
+                                                                name = `xl/workbook.xml` )
+                                               CS `</sheets><calcPr fullCalcOnLoad="1"/></workbook>` ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( ltcl_file=>part( file = zabaputil_cl_util_xlsx=>xlsx_by_itab( rows( ) )
+                                                                 name = `xl/workbook.xml` ) CS `calcPr` ) ).
+
+    " read back, a totals cell holds the value that was written with it
+    DATA(lt_cell) = zabaputil_cl_util_xlsx=>factory_by_xlsx( lv_file )->get_cells( ).
+    cl_abap_unit_assert=>assert_equals( exp = `-6.25`
+                                        act = lt_cell[ row = 4 col = 3 ]-value ).
+
+    " no row, no totals row
+    DATA lt_none TYPE ty_t_row.
+    lv_sheet = ltcl_file=>part(
+        file = zabaputil_cl_util_xlsx=>xlsx_by_itab(
+                   val    = lt_none
+                   layout = VALUE #( t_column = VALUE #( ( name = `NUM` total = `sum` ) ) ) )
+        name = `xl/worksheets/sheet1.xml` ).
+    cl_abap_unit_assert=>assert_false( xsdbool( lv_sheet CS `SUBTOTAL` ) ).
+  ENDMETHOD.
+
+  METHOD totals_row_of_table.
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>xlsx_by_itab(
+        val    = rows( )
+        layout = VALUE #( table_style = `TableStyleMedium2`
+                          table_name  = `Orders`
+                          t_column    = VALUE #( ( name = `TEXT` header = `Name` total = `Total` )
+                                                 ( name = `NUM` header = `Qty [pcs] #1` total = `sum` )
+                                                 ( name = `AMOUNT` total = `min` ) ) ) ).
+
+    " the table reaches over the totals row, its filter does not
+    DATA(lv_table) = ltcl_file=>part( file = lv_file
+                                      name = `xl/tables/table1.xml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_table CS ` ref="A1:C4" totalsRowCount="1"><autoFilter ref="A1:C3"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_table CS `<tableColumn id="1" name="Name" totalsRowLabel="Total"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_table CS `name="Qty [pcs] #1" totalsRowFunction="sum"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_table CS `name="AMOUNT" totalsRowFunction="min"/>` ) ).
+
+    " the formula names the column of the table - with what a reference
+    " reads as its own syntax marked - and the label is not bold: the
+    " table formats its totals row
+    DATA(lv_sheet) = ltcl_file=>part( file = lv_file
+                                      name = `xl/worksheets/sheet1.xml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool(
+        lv_sheet CS `<c r="A4" t="inlineStr"><is><t xml:space="preserve">Total</t></is></c>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool(
+        lv_sheet CS `<c r="B4"><f>SUBTOTAL(109,Orders[Qty '[pcs'] '#1])</f><v>-5</v></c>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool(
+        lv_sheet CS `<c r="C4"><f>SUBTOTAL(105,Orders[AMOUNT])</f><v>-12.5</v></c>` ) ).
+  ENDMETHOD.
+
+  METHOD formula_column.
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>xlsx_by_itab(
+        val    = rows( )
+        layout = VALUE #( t_column = VALUE #( ( name = `NUM` )
+                                              ( name = `AMOUNT` )
+                                              ( header = `Value` formula = `=A{row}*B{row}` format = `0.00` total = `sum` )
+                                              ( formula = `IF(A{row}<0,"neg","")` ) ) ) ).
+    DATA(lv_sheet) = ltcl_file=>part( file = lv_file
+                                      name = `xl/worksheets/sheet1.xml` ).
+
+    " every cell of the column the formula for its row, without a value
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `>Value</t>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="C2" s="1"><f>A2*B2</f></c>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="C3" s="1"><f>A3*B3</f></c>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="D2"><f>IF(A2&lt;0,&quot;neg&quot;,&quot;&quot;)</f></c>` ) ).
+    " a column without a name and without a header is named by its place
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `>Column4</t>` ) ).
+    " its total is a formula too, and nothing was added up for it here
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="C4" s="1"><f>SUBTOTAL(109,C2:C3)</f></c>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ltcl_file=>part( file = lv_file
+                                                                name = `xl/workbook.xml` ) CS `fullCalcOnLoad` ) ).
+
+    " read back, a formula without a value is no cell - the columns with
+    " values are read as before
+    DATA lt_back TYPE ty_t_row.
+    zabaputil_cl_util_xlsx=>itab_by_xlsx( EXPORTING val    = lv_file
+                                          IMPORTING result = lt_back ).
+    cl_abap_unit_assert=>assert_equals( exp = -5
+                                        act = lt_back[ 1 ]-num ).
+  ENDMETHOD.
+
   METHOD sheet_names.
     DATA lt_none TYPE ty_t_row.
 
@@ -444,6 +638,7 @@ CLASS ltcl_roundtrip DEFINITION FINAL
     METHODS elementary_line    FOR TESTING RAISING cx_static_check.
     METHODS text_like_a_code   FOR TESTING RAISING cx_static_check.
     METHODS timestamp          FOR TESTING RAISING cx_static_check.
+    METHODS start_cell         FOR TESTING RAISING cx_static_check.
     METHODS other_target_types FOR TESTING RAISING cx_static_check.
 
 ENDCLASS.
@@ -694,6 +889,24 @@ CLASS ltcl_roundtrip IMPLEMENTATION.
                                           IMPORTING result = lt_back ).
     cl_abap_unit_assert=>assert_equals( exp = lt_stamp
                                         act = lt_back ).
+  ENDMETHOD.
+
+  METHOD start_cell.
+    " rows that do not start in A1 are read by the row their header is in
+    DATA lt_back TYPE ty_t_row.
+
+    DATA(lo_xlsx) = zabaputil_cl_util_xlsx=>factory_by_xlsx(
+                        zabaputil_cl_util_xlsx=>xlsx_by_itab( val    = rows( )
+                                                              layout = VALUE #( start_cell = `C5` ) ) ).
+    lo_xlsx->get_table( EXPORTING header_row = 5
+                        IMPORTING result     = lt_back ).
+    cl_abap_unit_assert=>assert_equals( exp = rows( )
+                                        act = lt_back ).
+
+    DATA(lt_cell) = lo_xlsx->get_cells( ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = VALUE zabaputil_cl_util_xlsx=>ty_s_cell( row = 5 col = 3 kind = `S` value = `TEXT` )
+        act = lt_cell[ 1 ] ).
   ENDMETHOD.
 
   METHOD other_target_types.

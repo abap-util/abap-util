@@ -29,9 +29,14 @@
 "!     DATA(lr_any) = lo_xlsx->get_table_ref( index = 2 ).
 "!     DATA(lt_cell) = lo_xlsx->get_cells( ).
 "!
-"! Not in it: formatting cell by cell, formulas (a formula cell is read with
-"! its last value), merged cells, charts, images, an .xls file of Excel
-"! 97-2003, a workbook with a password, changing a workbook that was read.
+"! The layout of a sheet also places it (start_cell), names and styles its
+"! Excel table, and gives it formula columns and a totals row - see
+"! ty_s_layout and ty_s_column.
+"!
+"! Not in it: formatting cell by cell, a formula in a single cell (a formula
+"! cell is read with its last value), merged cells, charts, images, an .xls
+"! file of Excel 97-2003, a workbook with a password, changing a workbook
+"! that was read.
 CLASS zabaputil_cl_util_xlsx DEFINITION
   PUBLIC FINAL
   CREATE PROTECTED.
@@ -43,14 +48,24 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
       "! is read into a component of another name
       BEGIN OF ty_s_column,
         "! the component of the row
-        name   TYPE string,
+        name    TYPE string,
         "! the text of the header cell - empty: the component name
-        header TYPE string,
+        header  TYPE string,
         "! a number format as Excel writes it (`#,##0.00`, `0.0%`,
         "! `dd.mm.yyyy`) - empty: by the type of the component
-        format TYPE string,
+        format  TYPE string,
         "! the width in characters - 0: by the content
-        width  TYPE i,
+        width   TYPE i,
+        "! a formula instead of a component: every cell of the column holds
+        "! it, with `{row}` for the number of its row (`C{row}*D{row}`). Such
+        "! a column needs no name, and Excel works its values out when the
+        "! file is opened
+        formula TYPE string,
+        "! the cell of the column in a totals row under the rows: `sum`,
+        "! `average`, `count`, `countNums`, `min`, `max`, `stdDev` or `var` -
+        "! any other text is a label (`Total`). One column with it gives
+        "! the sheet the row
+        total   TYPE string,
       END OF ty_s_column.
     TYPES ty_t_column TYPE STANDARD TABLE OF ty_s_column WITH EMPTY KEY.
 
@@ -59,20 +74,32 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
       "! order under a bold header row of the component names
       BEGIN OF ty_s_layout,
         "! the columns and their order - empty: every elementary component
-        t_column      TYPE ty_t_column,
-        "! no header row, the data starts in row 1
-        no_header     TYPE abap_bool,
+        t_column       TYPE ty_t_column,
+        "! no header row, the data starts in the first row
+        no_header      TYPE abap_bool,
         "! the header from the data element (medium text) where a component
         "! has one and the column names no header itself
-        ddic_header   TYPE abap_bool,
+        ddic_header    TYPE abap_bool,
         "! the header row stays in place while the rows scroll
-        freeze_header TYPE abap_bool,
+        freeze_header  TYPE abap_bool,
         "! filter buttons on the header row
-        auto_filter   TYPE abap_bool,
+        auto_filter    TYPE abap_bool,
         "! the rows as an Excel table of that style (`TableStyleMedium2`,
         "! `TableStyleLight9`, ...), with stripes and filter buttons. Needs
         "! the header row and at least one row
-        table_style   TYPE string,
+        table_style    TYPE string,
+        "! the name of the Excel table, as a formula names it - empty:
+        "! Table1, Table2, ... What Excel does not take in a name is made
+        "! valid
+        table_name     TYPE string,
+        "! the Excel table without the stripes of its rows
+        no_row_stripes TYPE abap_bool,
+        "! the Excel table with stripes down its columns
+        column_stripes TYPE abap_bool,
+        "! the Excel table without its filter buttons
+        no_filter      TYPE abap_bool,
+        "! the cell the header row starts in (`B3`) - empty: A1
+        start_cell     TYPE string,
       END OF ty_s_layout.
 
     TYPES:
@@ -270,13 +297,25 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
     " a column while its sheet is written
     TYPES:
       BEGIN OF ty_s_out_col,
-        name    TYPE string,
-        header  TYPE string,
-        letters TYPE string,
-        cat     TYPE string,
-        style   TYPE string,
-        width   TYPE i,
-        len     TYPE i,
+        name        TYPE string,
+        header      TYPE string,
+        letters     TYPE string,
+        cat         TYPE string,
+        style       TYPE string,
+        width       TYPE i,
+        len         TYPE i,
+        formula     TYPE string,
+        " the totals row: the function and its number in SUBTOTAL( ), or a
+        " label - and what the rows add up to, for the value the cell
+        " shows before Excel has worked the formula out
+        total_fn    TYPE string,
+        total_code  TYPE i,
+        total_label TYPE string,
+        sum         TYPE decfloat34,
+        low         TYPE decfloat34,
+        high        TYPE decfloat34,
+        cells       TYPE i,
+        numbers     TYPE i,
       END OF ty_s_out_col.
     TYPES ty_t_out_col TYPE STANDARD TABLE OF ty_s_out_col WITH EMPTY KEY.
 
@@ -315,6 +354,8 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
     DATA mt_xf        TYPE STANDARD TABLE OF ty_s_xf WITH EMPTY KEY.
     DATA mt_numfmt    TYPE string_table.
     DATA mv_tables    TYPE i.
+    DATA mt_table_name TYPE string_table.
+    DATA mv_formulas  TYPE abap_bool.
 
     " reading
     DATA mv_loaded     TYPE abap_bool.
@@ -348,8 +389,34 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
       IMPORTING
         t_field       TYPE ty_t_field
         layout        TYPE ty_s_layout
+        offset        TYPE i
       RETURNING
         VALUE(result) TYPE ty_t_out_col.
+
+    "! a function of a totals row and its number in SUBTOTAL( ) - code 0
+    "! for a text that is none, a label
+    CLASS-METHODS total_function
+      IMPORTING
+        val  TYPE string
+      EXPORTING
+        name TYPE string
+        code TYPE i.
+
+    "! what a totals cell shows before Excel has worked its formula out -
+    "! empty for a function that is not worked out here
+    METHODS total_value
+      IMPORTING
+        col           TYPE ty_s_out_col
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! a name Excel takes for a table, and that no other table of the
+    "! workbook has
+    METHODS table_name_get
+      IMPORTING
+        val           TYPE string
+      RETURNING
+        VALUE(result) TYPE string.
 
     "! the index of a cell format, added when the workbook has none like it
     METHODS style_get
@@ -381,8 +448,11 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
     METHODS table_xml
       IMPORTING
         id            TYPE i
+        name          TYPE string
         range         TYPE string
-        style         TYPE string
+        filter        TYPE string
+        layout        TYPE ty_s_layout
+        totals        TYPE abap_bool
         t_col         TYPE ty_t_out_col
       RETURNING
         VALUE(result) TYPE string.
@@ -595,12 +665,16 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     DATA lv_value   TYPE string.
     DATA lv_ref     TYPE string.
     DATA lv_row     TYPE i.
+    DATA lv_col0    TYPE i.
+    DATA lv_row0    TYPE i.
     DATA lv_date    TYPE d.
     DATA lv_time    TYPE t.
     DATA lv_serial  TYPE i.
     DATA lv_seconds TYPE i.
     DATA lv_number  TYPE decfloat34.
     DATA lv_elementary TYPE abap_bool.
+    DATA lv_totals  TYPE abap_bool.
+    DATA lv_table_name TYPE string.
     DATA ls_sheet   TYPE ty_s_out_sheet.
     FIELD-SYMBOLS <line> TYPE any.
     FIELD-SYMBOLS <row>  TYPE any.
@@ -612,7 +686,26 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
         EXPORTING
           val = `XLSX_READ_ONLY - a workbook that was read takes no sheet`.
     ENDIF.
-    IF lines( val ) >= cv_max_row.
+
+    " where the header row starts: A1, or the cell the layout names
+    IF layout-start_cell IS NOT INITIAL.
+      DATA(lv_start_row) = digits_only( layout-start_cell ).
+      lv_col0 = column_to_number( layout-start_cell ) - 1.
+      IF lv_col0 < 0 OR lv_start_row IS INITIAL OR strlen( lv_start_row ) > 7.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |XLSX_START_CELL - { layout-start_cell } is no cell of a sheet|.
+      ENDIF.
+      lv_row0 = lv_start_row.
+      lv_row0 = lv_row0 - 1.
+      IF lv_row0 < 0.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |XLSX_START_CELL - { layout-start_cell } is no cell of a sheet|.
+      ENDIF.
+    ENDIF.
+    " the header and the totals row are two more
+    IF lines( val ) + lv_row0 + 2 > cv_max_row.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
         EXPORTING
           val = |XLSX_TOO_MANY_ROWS - a sheet holds { cv_max_row } rows, the table has { lines( val ) }|.
@@ -624,31 +717,59 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
                 IMPORTING elementary = lv_elementary
                           result     = lt_field ).
     DATA(lt_col) = columns_get( t_field = lt_field
-                                layout  = layout ).
+                                layout  = layout
+                                offset  = lv_col0 ).
     DATA(lv_table) = xsdbool( layout-table_style IS NOT INITIAL AND layout-no_header = abap_false
                               AND val IS NOT INITIAL AND lt_col IS NOT INITIAL ).
-
-    IF layout-no_header = abap_false AND lt_col IS NOT INITIAL.
-      lv_row = 1.
-      " an Excel table formats its header itself
-      DATA(lv_head_style) = ``.
-      IF lv_table = abap_false.
-        lv_head_style = | s="{ style_get( bold = abap_true ) }"|.
+    IF lv_table = abap_true.
+      lv_table_name = table_name_get( layout-table_name ).
+    ENDIF.
+    LOOP AT lt_col ASSIGNING <col>.
+      IF <col>-total_fn IS NOT INITIAL OR <col>-total_label IS NOT INITIAL.
+        " a totals row under no rows adds up nothing
+        lv_totals = xsdbool( val IS NOT INITIAL ).
       ENDIF.
+    ENDLOOP.
+
+    " an Excel table formats its header and its totals row itself
+    DATA(lv_head_style) = ``.
+    IF lv_table = abap_false.
+      lv_head_style = | s="{ style_get( bold = abap_true ) }"|.
+    ENDIF.
+
+    lv_row = lv_row0.
+    IF layout-no_header = abap_false AND lt_col IS NOT INITIAL.
+      lv_row = lv_row + 1.
       LOOP AT lt_col ASSIGNING <col>.
-        lv_cells = lv_cells && cell_text( address = |{ <col>-letters }1|
+        lv_cells = lv_cells && cell_text( address = |{ <col>-letters }{ lv_row }|
                                           val     = <col>-header
                                           style   = lv_head_style ).
         " the filter button takes its room in the header cell
         <col>-len = strlen( <col>-header ) + 3.
       ENDLOOP.
-      INSERT |<row r="1">{ lv_cells }</row>| INTO TABLE lt_xml.
+      INSERT |<row r="{ lv_row }">{ lv_cells }</row>| INTO TABLE lt_xml.
     ENDIF.
+    DATA(lv_first_data) = lv_row + 1.
 
     LOOP AT val ASSIGNING <row>.
       lv_row = lv_row + 1.
       CLEAR lv_cells.
       LOOP AT lt_col ASSIGNING <col>.
+        lv_ref = |{ <col>-letters }{ lv_row }|.
+
+        IF <col>-formula IS NOT INITIAL.
+          " no value with it: Excel works the formula out when it opens
+          " the file (get_xlsx asks it to)
+          lv_value = replace( val  = <col>-formula
+                              sub  = `{row}`
+                              with = |{ lv_row }|
+                              occ  = 0 ).
+          lv_value = zabaputil_cl_util_context=>c_escape_xml( lv_value ).
+          lv_cells = |{ lv_cells }<c r="{ lv_ref }"{ <col>-style }><f>{ lv_value }</f></c>|.
+          mv_formulas = abap_true.
+          CONTINUE.
+        ENDIF.
+
         IF lv_elementary = abap_true.
           ASSIGN <row> TO <cell>.
         ELSE.
@@ -657,7 +778,6 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
             CONTINUE.
           ENDIF.
         ENDIF.
-        lv_ref = |{ <col>-letters }{ lv_row }|.
         CLEAR lv_text.
 
         CASE <col>-cat.
@@ -667,6 +787,17 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
             " decimal separator, whatever the user's settings
             lv_text = |{ <cell> }|.
             lv_cells = |{ lv_cells }<c r="{ lv_ref }"{ <col>-style }><v>{ lv_text }</v></c>|.
+            IF <col>-total_fn IS NOT INITIAL.
+              lv_number = <cell>.
+              <col>-sum = <col>-sum + lv_number.
+              IF <col>-numbers = 0 OR lv_number < <col>-low.
+                <col>-low = lv_number.
+              ENDIF.
+              IF <col>-numbers = 0 OR lv_number > <col>-high.
+                <col>-high = lv_number.
+              ENDIF.
+              <col>-numbers = <col>-numbers + 1.
+            ENDIF.
 
           WHEN cs_cat-date.
             lv_date = <cell>.
@@ -741,6 +872,9 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
 
         ENDCASE.
 
+        IF lv_text IS NOT INITIAL.
+          <col>-cells = <col>-cells + 1.
+        ENDIF.
         IF strlen( lv_text ) > <col>-len.
           <col>-len = strlen( lv_text ).
         ENDIF.
@@ -749,12 +883,73 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
         INSERT |<row r="{ lv_row }">{ lv_cells }</row>| INTO TABLE lt_xml.
       ENDIF.
     ENDLOOP.
+    DATA(lv_last_data) = lv_row.
+
+    IF lv_totals = abap_true.
+      " a formula over the rows: SUBTOTAL( ) leaves out what a filter
+      " hides. In an Excel table it names the column, else its cells
+      lv_row = lv_row + 1.
+      CLEAR lv_cells.
+      LOOP AT lt_col ASSIGNING <col>.
+        lv_ref = |{ <col>-letters }{ lv_row }|.
+        IF <col>-total_fn IS NOT INITIAL.
+          IF lv_table = abap_true.
+            " in the name of a column, what a structured reference reads
+            " as its own syntax is marked with an apostrophe
+            lv_text = <col>-header.
+            lv_text = replace( val  = lv_text
+                               sub  = `'`
+                               with = `''`
+                               occ  = 0 ).
+            lv_text = replace( val  = lv_text
+                               sub  = `[`
+                               with = `'[`
+                               occ  = 0 ).
+            lv_text = replace( val  = lv_text
+                               sub  = `]`
+                               with = `']`
+                               occ  = 0 ).
+            lv_text = replace( val  = lv_text
+                               sub  = `#`
+                               with = `'#`
+                               occ  = 0 ).
+            lv_value = |SUBTOTAL({ <col>-total_code },{ lv_table_name }[{ lv_text }])|.
+          ELSE.
+            lv_value = |SUBTOTAL({ <col>-total_code },{ <col>-letters }{ lv_first_data }:{ <col>-letters }{ lv_last_data })|.
+          ENDIF.
+          lv_value = zabaputil_cl_util_context=>c_escape_xml( lv_value ).
+          " a count is a number whatever the column holds
+          DATA(lv_total_style) = <col>-style.
+          IF <col>-total_fn = `count` OR <col>-total_fn = `countNums`.
+            CLEAR lv_total_style.
+          ENDIF.
+          lv_text = total_value( <col> ).
+          IF lv_text IS NOT INITIAL.
+            lv_text = |<v>{ lv_text }</v>|.
+          ENDIF.
+          lv_cells = |{ lv_cells }<c r="{ lv_ref }"{ lv_total_style }><f>{ lv_value }</f>{ lv_text }</c>|.
+          mv_formulas = abap_true.
+        ELSEIF <col>-total_label IS NOT INITIAL.
+          lv_cells = lv_cells && cell_text( address = lv_ref
+                                            val     = <col>-total_label
+                                            style   = lv_head_style ).
+        ENDIF.
+      ENDLOOP.
+      INSERT |<row r="{ lv_row }">{ lv_cells }</row>| INTO TABLE lt_xml.
+    ENDIF.
 
     " what stands in front of the rows is known only now: the range of the
     " sheet and the widths of its columns
     DATA(lv_range) = `A1`.
-    IF lt_col IS NOT INITIAL AND lv_row > 0.
-      lv_range = |A1:{ column_to_letters( lines( lt_col ) ) }{ lv_row }|.
+    DATA(lv_filter) = ``.
+    IF lt_col IS NOT INITIAL AND lv_row > lv_row0.
+      DATA(lv_left) = column_to_letters( lv_col0 + 1 ).
+      DATA(lv_right) = column_to_letters( lv_col0 + lines( lt_col ) ).
+      lv_range = |{ lv_left }{ lv_row0 + 1 }:{ lv_right }{ lv_row }|.
+      " the filter ends above the totals row
+      DATA(lv_filter_end) = nmax( val1 = lv_last_data
+                                  val2 = lv_row0 + 1 ).
+      lv_filter = |{ lv_left }{ lv_row0 + 1 }:{ lv_right }{ lv_filter_end }|.
     ENDIF.
     DATA(lv_tab_selected) = ``.
     IF mt_out_sheet IS INITIAL.
@@ -762,7 +957,7 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     ENDIF.
     DATA(lv_pane) = ``.
     IF layout-freeze_header = abap_true AND layout-no_header = abap_false.
-      lv_pane = `<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>`.
+      lv_pane = |<pane ySplit="{ lv_row0 + 1 }" topLeftCell="A{ lv_row0 + 2 }" activePane="bottomLeft" state="frozen"/>|.
     ENDIF.
 
     INSERT |{ cv_xml_head }<worksheet xmlns="{ cs_ns-main }" xmlns:r="{ cs_ns-rel }">| INTO TABLE lt_head.
@@ -773,7 +968,7 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     IF lt_col IS NOT INITIAL.
       INSERT `<cols>` INTO TABLE lt_head.
       LOOP AT lt_col ASSIGNING <col>.
-        DATA(lv_tabix) = sy-tabix.
+        DATA(lv_index) = lv_col0 + sy-tabix.
         DATA(lv_width) = <col>-width.
         IF lv_width <= 0.
           " by the longest content, in bounds: a long text does not push
@@ -782,7 +977,7 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
                                         val2 = 6 )
                            val2 = 60 ).
         ENDIF.
-        INSERT |<col min="{ lv_tabix }" max="{ lv_tabix }" width="{ lv_width }" customWidth="1"/>|
+        INSERT |<col min="{ lv_index }" max="{ lv_index }" width="{ lv_width }" customWidth="1"/>|
                INTO TABLE lt_head.
       ENDLOOP.
       INSERT `</cols>` INTO TABLE lt_head.
@@ -792,14 +987,20 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     INSERT `</sheetData>` INTO TABLE lt_xml.
     IF lv_table = abap_true.
       mv_tables = mv_tables + 1.
+      IF layout-no_filter = abap_true.
+        CLEAR lv_filter.
+      ENDIF.
       ls_sheet-table_xml = zabaputil_cl_util_context=>conv_get_xstring_by_string(
-                               table_xml( id    = mv_tables
-                                          range = lv_range
-                                          style = layout-table_style
-                                          t_col = lt_col ) ).
+                               table_xml( id     = mv_tables
+                                          name   = lv_table_name
+                                          range  = lv_range
+                                          filter = lv_filter
+                                          layout = layout
+                                          totals = lv_totals
+                                          t_col  = lt_col ) ).
       INSERT `<tableParts count="1"><tablePart r:id="rId1"/></tableParts>` INTO TABLE lt_xml.
     ELSEIF layout-auto_filter = abap_true AND layout-no_header = abap_false AND lt_col IS NOT INITIAL.
-      INSERT |<autoFilter ref="{ lv_range }"/>| INTO TABLE lt_xml.
+      INSERT |<autoFilter ref="{ lv_filter }"/>| INTO TABLE lt_xml.
     ENDIF.
     INSERT `</worksheet>` INTO TABLE lt_xml.
 
@@ -890,40 +1091,60 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
 
     DATA ls_col   TYPE ty_s_out_col.
     DATA lt_taken TYPE string_table.
-    FIELD-SYMBOLS <field> TYPE ty_s_field.
+    DATA ls_field TYPE ty_s_field.
 
     " the columns the layout names, in its order - or every field
     DATA(lt_column) = layout-t_column.
     IF lt_column IS INITIAL.
-      LOOP AT t_field ASSIGNING <field>.
-        INSERT VALUE #( name = <field>-name ) INTO TABLE lt_column.
+      LOOP AT t_field INTO ls_field.
+        INSERT VALUE #( name = ls_field-name ) INTO TABLE lt_column.
       ENDLOOP.
     ENDIF.
-    IF lines( lt_column ) > cv_max_col.
+    IF lines( lt_column ) + offset > cv_max_col.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
         EXPORTING
           val = |XLSX_TOO_MANY_COLUMNS - a sheet holds { cv_max_col } columns|.
     ENDIF.
 
     LOOP AT lt_column REFERENCE INTO DATA(lr_column).
+      DATA(lv_position) = lines( result ) + 1.
       DATA(lv_name) = zabaputil_cl_util_context=>c_trim_upper( lr_column->name ).
-      ASSIGN t_field[ name = lv_name ] TO <field>.
-      IF sy-subrc <> 0.
-        RAISE EXCEPTION TYPE zabaputil_cx_util_error
-          EXPORTING
-            val = |XLSX_COLUMN_UNKNOWN - the row has no elementary component { lv_name }|.
-      ENDIF.
 
       CLEAR ls_col.
-      ls_col-name = <field>-name.
-      ls_col-cat = <field>-cat.
+      CLEAR ls_field.
+      IF lr_column->formula IS NOT INITIAL.
+        " a formula column has no component behind it: a number, whatever
+        " the formula gives
+        ls_field-name = lv_name.
+        ls_field-cat = cs_cat-number.
+        ls_col-formula = lr_column->formula.
+        IF ls_col-formula(1) = `=`.
+          ls_col-formula = substring( val = ls_col-formula
+                                      off = 1 ).
+        ENDIF.
+      ELSE.
+        LOOP AT t_field INTO ls_field.
+          IF ls_field-name = lv_name.
+            EXIT.
+          ENDIF.
+          CLEAR ls_field.
+        ENDLOOP.
+        IF ls_field IS INITIAL.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |XLSX_COLUMN_UNKNOWN - the row has no elementary component { lv_name }|.
+        ENDIF.
+      ENDIF.
+
+      ls_col-name = ls_field-name.
+      ls_col-cat = ls_field-cat.
       ls_col-width = lr_column->width.
-      ls_col-letters = column_to_letters( lines( result ) + 1 ).
+      ls_col-letters = column_to_letters( offset + lv_position ).
 
       ls_col-header = lr_column->header.
-      IF ls_col-header IS INITIAL AND layout-ddic_header = abap_true AND <field>-rollname IS NOT INITIAL.
+      IF ls_col-header IS INITIAL AND layout-ddic_header = abap_true AND ls_field-rollname IS NOT INITIAL.
         TRY.
-            DATA(ls_text) = zabaputil_cl_util_context=>rtti_get_data_element_texts( <field>-rollname ).
+            DATA(ls_text) = zabaputil_cl_util_context=>rtti_get_data_element_texts( ls_field-rollname ).
             ls_col-header = ls_text-medium.
             IF ls_col-header IS INITIAL.
               ls_col-header = ls_text-long.
@@ -934,6 +1155,10 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
       ENDIF.
       IF ls_col-header IS INITIAL.
         ls_col-header = ls_col-name.
+      ENDIF.
+      IF ls_col-header IS INITIAL.
+        " a formula column without a name and without a header
+        ls_col-header = |Column{ lv_position }|.
       ENDIF.
       " an Excel table takes every column name once, and so does a reader
       " that goes by the header
@@ -952,6 +1177,15 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
         ENDDO.
         ls_col-header = lv_header.
         INSERT lv_upper INTO TABLE lt_taken.
+      ENDIF.
+
+      IF lr_column->total IS NOT INITIAL.
+        total_function( EXPORTING val  = lr_column->total
+                        IMPORTING name = ls_col-total_fn
+                                  code = ls_col-total_code ).
+        IF ls_col-total_code = 0.
+          ls_col-total_label = lr_column->total.
+        ENDIF.
       ENDIF.
 
       DATA(lv_style) = 0.
@@ -976,6 +1210,136 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
 
       INSERT ls_col INTO TABLE result.
     ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD total_function.
+
+    CLEAR name.
+    CLEAR code.
+
+    " the names a table part knows, and the numbers SUBTOTAL( ) takes for
+    " them - the ones from 101 on, which leave out a hidden row
+    " in a variable: 7.02 takes no function as the operand of a CASE
+    DATA(lv_name) = to_lower( condense( val ) ).
+    CASE lv_name.
+      WHEN `sum`.
+        name = `sum`.
+        code = 109.
+      WHEN `average`.
+        name = `average`.
+        code = 101.
+      WHEN `count`.
+        name = `count`.
+        code = 103.
+      WHEN `countnums`.
+        name = `countNums`.
+        code = 102.
+      WHEN `max`.
+        name = `max`.
+        code = 104.
+      WHEN `min`.
+        name = `min`.
+        code = 105.
+      WHEN `stddev`.
+        name = `stdDev`.
+        code = 107.
+      WHEN `var`.
+        name = `var`.
+        code = 110.
+    ENDCASE.
+
+  ENDMETHOD.
+
+  METHOD total_value.
+
+    DATA lv_number TYPE decfloat34.
+
+    " a formula column has no values here to add up
+    IF col-formula IS NOT INITIAL.
+      RETURN.
+    ENDIF.
+
+    CASE col-total_fn.
+      WHEN `count`.
+        result = |{ col-cells }|.
+        RETURN.
+      WHEN `countNums`.
+        result = |{ col-numbers }|.
+        RETURN.
+      WHEN `sum`.
+        lv_number = col-sum.
+      WHEN `average`.
+        IF col-numbers = 0.
+          RETURN.
+        ENDIF.
+        lv_number = col-sum / col-numbers.
+      WHEN `min`.
+        lv_number = col-low.
+      WHEN `max`.
+        lv_number = col-high.
+      WHEN OTHERS.
+        " stdDev, var: left to Excel
+        RETURN.
+    ENDCASE.
+    result = number_plain( |{ lv_number }| ).
+
+  ENDMETHOD.
+
+  METHOD table_name_get.
+
+    DATA lv_pos TYPE i.
+
+    " letters, digits, underscores and periods, a letter or an underscore
+    " in front
+    DATA(lv_len) = strlen( val ).
+    WHILE lv_pos < lv_len.
+      DATA(lv_char) = substring( val = val
+                                 off = lv_pos
+                                 len = 1 ).
+      IF lv_char CA `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.`.
+        result = result && lv_char.
+      ELSEIF lv_char <> ` `.
+        result = result && `_`.
+      ENDIF.
+      lv_pos = lv_pos + 1.
+    ENDWHILE.
+    IF result IS INITIAL.
+      result = |Table{ mv_tables + 1 }|.
+    ENDIF.
+    IF result(1) CA `0123456789.`.
+      result = `_` && result.
+    ENDIF.
+    " a name that reads as a cell - up to three letters, then digits only
+    " (A1, XFD12) - is none
+    lv_len = strlen( result ).
+    lv_pos = 0.
+    WHILE lv_pos < lv_len AND lv_pos < 4 AND result+lv_pos(1) NA cv_digits.
+      lv_pos = lv_pos + 1.
+    ENDWHILE.
+    IF lv_pos >= 1 AND lv_pos <= 3 AND lv_pos < lv_len.
+      DATA(lv_letters) = result(lv_pos).
+      DATA(lv_rest) = result+lv_pos.
+      IF lv_rest CO cv_digits AND lv_letters CO `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz`.
+        result = `_` && result.
+      ENDIF.
+    ENDIF.
+    IF strlen( result ) > 200.
+      result = result(200).
+    ENDIF.
+
+    " once in the workbook, whatever its case
+    DATA(lv_base) = result.
+    DATA(lv_suffix) = 1.
+    DO.
+      DATA(lv_upper) = to_upper( result ).
+      IF NOT line_exists( mt_table_name[ table_line = lv_upper ] ).
+        EXIT.
+      ENDIF.
+      lv_suffix = lv_suffix + 1.
+      result = |{ lv_base }_{ lv_suffix }|.
+    ENDDO.
+    INSERT lv_upper INTO TABLE mt_table_name.
 
   ENDMETHOD.
 
@@ -1114,16 +1478,37 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
 
     DATA lt_xml TYPE string_table.
 
-    INSERT |{ cv_xml_head }<table xmlns="{ cs_ns-main }" id="{ id }" name="Table{ id }" displayName="Table{ id }"|
-        && | ref="{ range }" totalsRowShown="0"><autoFilter ref="{ range }"/>|
-        && |<tableColumns count="{ lines( t_col ) }">| INTO TABLE lt_xml.
+    DATA(lv_totals) = ` totalsRowShown="0"`.
+    IF totals = abap_true.
+      lv_totals = ` totalsRowCount="1"`.
+    ENDIF.
+    INSERT |{ cv_xml_head }<table xmlns="{ cs_ns-main }" id="{ id }" name="{ name }" displayName="{ name }"|
+        && | ref="{ range }"{ lv_totals }>| INTO TABLE lt_xml.
+    IF filter IS NOT INITIAL.
+      INSERT |<autoFilter ref="{ filter }"/>| INTO TABLE lt_xml.
+    ENDIF.
+    INSERT |<tableColumns count="{ lines( t_col ) }">| INTO TABLE lt_xml.
     LOOP AT t_col REFERENCE INTO DATA(lr_col).
-      INSERT |<tableColumn id="{ sy-tabix }" name="{ zabaputil_cl_util_context=>c_escape_xml( lr_col->header ) }"/>|
-             INTO TABLE lt_xml.
+      DATA(lv_total) = ``.
+      IF lr_col->total_fn IS NOT INITIAL.
+        lv_total = | totalsRowFunction="{ lr_col->total_fn }"|.
+      ELSEIF lr_col->total_label IS NOT INITIAL.
+        lv_total = | totalsRowLabel="{ zabaputil_cl_util_context=>c_escape_xml( lr_col->total_label ) }"|.
+      ENDIF.
+      INSERT |<tableColumn id="{ sy-tabix }" name="{ zabaputil_cl_util_context=>c_escape_xml( lr_col->header ) }"|
+          && |{ lv_total }/>| INTO TABLE lt_xml.
     ENDLOOP.
-    INSERT |</tableColumns><tableStyleInfo name="{ zabaputil_cl_util_context=>c_escape_xml( style ) }"|
-        && | showFirstColumn="0" showLastColumn="0" showRowStripes="1" showColumnStripes="0"/></table>|
-           INTO TABLE lt_xml.
+    DATA(lv_rows) = `1`.
+    IF layout-no_row_stripes = abap_true.
+      lv_rows = `0`.
+    ENDIF.
+    DATA(lv_columns) = `0`.
+    IF layout-column_stripes = abap_true.
+      lv_columns = `1`.
+    ENDIF.
+    INSERT |</tableColumns><tableStyleInfo name="{ zabaputil_cl_util_context=>c_escape_xml( layout-table_style ) }"|
+        && | showFirstColumn="0" showLastColumn="0" showRowStripes="{ lv_rows }"|
+        && | showColumnStripes="{ lv_columns }"/></table>| INTO TABLE lt_xml.
     result = concat_lines_of( lt_xml ).
 
   ENDMETHOD.
@@ -1232,7 +1617,13 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     ENDLOOP.
 
     INSERT `</Types>` INTO TABLE lt_types.
-    INSERT `</sheets></workbook>` INTO TABLE lt_book.
+    INSERT `</sheets>` INTO TABLE lt_book.
+    IF mv_formulas = abap_true.
+      " the formulas carry no value, or one worked out here: Excel works
+      " them out when it opens the file
+      INSERT `<calcPr fullCalcOnLoad="1"/>` INTO TABLE lt_book.
+    ENDIF.
+    INSERT `</workbook>` INTO TABLE lt_book.
     INSERT |<Relationship Id="rId{ lines( mt_out_sheet ) + 1 }" Type="{ cs_ns-rel }/styles" Target="styles.xml"/>|
         && `</Relationships>` INTO TABLE lt_rels.
 

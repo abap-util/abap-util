@@ -264,8 +264,23 @@ lo_book->get_table( EXPORTING sheet  = `Flights`
                     IMPORTING result = lt_flights ).
 DATA(lr_any)   = lo_book->get_table_ref( index = 2 ).         " columns named after the header row
 DATA(lt_cells) = lo_book->get_cells( sheet = `Bookings` ).    " row, col, kind, value
+
+" A block that starts in B3, as an Excel table with a name, a formula column and a totals row
+DATA(lv_report) = zabaputil_cl_util_xlsx=>xlsx_by_itab(
+    val    = lt_bookings
+    layout = VALUE #( start_cell     = `B3`
+                      table_style    = `TableStyleMedium2`
+                      table_name     = `Bookings`
+                      column_stripes = abap_true
+                      t_column       = VALUE #( ( name = `BOOKID` header = `Booking` total = `Total` )
+                                                ( name = `SEATS`  header = `Seats`   total = `sum` )
+                                                ( name = `PRICE`  header = `Price`   format = `#,##0.00` )
+                                                ( header = `Amount` formula = `D{row}*E{row}`
+                                                  format = `#,##0.00` total = `sum` ) ) ) ).
 ```
-A number is written as a number, a date as a date, a time as a time, a timestamp as a date with its time, a flag as a boolean; a NUMC keeps its leading zeros. Reading tells a date from a number by the format of its cell and hands it back as `YYYY-MM-DD`. Not covered: formatting cell by cell, formulas (a formula cell is read with its last value), merged cells, charts, images, `.xls` files, workbooks with a password.
+An Excel table can also go without its row stripes (`no_row_stripes`) or its filter buttons (`no_filter`). A totals cell is `sum`, `average`, `count`, `countNums`, `min`, `max`, `stdDev`, `var` or a label; in a formula `{row}` stands for the number of the row.
+
+A number is written as a number, a date as a date, a time as a time, a timestamp as a date with its time, a flag as a boolean; a NUMC keeps its leading zeros. Reading tells a date from a number by the format of its cell and hands it back as `YYYY-MM-DD`. Not covered: formatting cell by cell, formulas in single cells (a formula cell is read with its last value), merged cells, charts, images, `.xls` files, workbooks with a password.
 
 `zabaputil_cl_util_context=>conv_get_xlsx_by_itab( lt_flights )` stays the one-sheet writer inside the context class, for a copy that does not carry the XLSX class.
 
