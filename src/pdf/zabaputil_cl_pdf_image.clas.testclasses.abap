@@ -322,12 +322,57 @@ CLASS ltcl_image IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD png_interlaced.
-    TRY.
-        image( image_inter( ) ).
-        cl_abap_unit_assert=>fail( ).
-      CATCH zabaputil_cx_util_error INTO DATA(lx).
-        cl_abap_unit_assert=>assert_true( xsdbool( lx->get_text( ) CS `interlaced` ) ).
-    ENDTRY.
+    " Adam7: the seven passes, filtered with all five filters, come back as
+    " the rows of a plain image - filter 0, then the pixels
+    IF has_gzip( ) = abap_false.
+      RETURN.
+    ENDIF.
+    DATA lv_png  TYPE string.
+    DATA lv_rows TYPE string.
+    DATA lv_idat TYPE xstring.
+
+    " 1 x 1 RGB
+    DATA(lo_inter) = image( image_inter( ) ).
+    lv_idat = lo_inter->mv_idat.
+    cl_abap_unit_assert=>assert_equals( exp = CONV xstring( `00010203` )
+                                        act = zabaputil_cl_util_context=>zlib_decompress( lv_idat ) ).
+
+    " 5 x 5 RGB
+    lv_png = `89504E470D0A1A0A0000000D4948445200000005000000050802000001750A81240000006149444154789C015600A9FF00A5` &&
+             `4DCA00D6237B004DFAD78AF22100BB1D6D01AEB3FE009D5C34201E69EEE8B900182530132CDE0160BE319E1C6F02B4696FEB` &&
+             `498F002ED91E3F721FCB1971174494D6493C01997F5CE3AA3D81864C967657432F73F56322B64903FC980000000049454E44` &&
+             `AE426082`.
+    lv_rows = `00A54DCA182530BB1D6D132CDED6237B002ED91E3F721FCB1971174494D6493C009D5C3460BE31201E69FEDAA0EEE8B90099` &&
+             `7F5C7C2999FDAFE593253CD654AF004DFAD71427A0AEB3FEE9232F8AF221`.
+    lo_inter = image( CONV xstring( lv_png ) ).
+    lv_idat = lo_inter->mv_idat.
+    cl_abap_unit_assert=>assert_equals( exp = CONV xstring( lv_rows )
+                                        act = zabaputil_cl_util_context=>zlib_decompress( lv_idat ) ).
+
+    " 10 x 3 grey of one bit: eight pixels a byte
+    lv_png = `89504E470D0A1A0A0000000D494844520000000A000000030100000001F541934E0000001549444154789C6374606C00C20A` &&
+             `C60F2C198C9EE5001AE603DBB22E78E50000000049454E44AE426082`.
+    lv_rows = `007D800049C0003BC0`.
+    lo_inter = image( CONV xstring( lv_png ) ).
+    lv_idat = lo_inter->mv_idat.
+    cl_abap_unit_assert=>assert_equals( exp = CONV xstring( lv_rows )
+                                        act = zabaputil_cl_util_context=>zlib_decompress( lv_idat ) ).
+
+    " 3 x 3 RGBA: the alpha channel is split off the plain rows
+    lv_png = `89504E470D0A1A0A0000000D4948445200000003000000030806000001212F85290000003349444154789C633954E6ABC5C2` &&
+             `F623B68DE5A4E9B7B312724E0F59A27CCBCA993F593FD76799C0E4754D77E137571DD5EE8D005D9210E1156D929600000000` &&
+             `49454E44AE426082`.
+    lv_rows = `00C2764D2A5A4D767706F85D860090024AD6BDA3401BE9C8CBCC00C935F6CD1F61226AE15338AE`.
+    DATA(lo_image) = image( CONV xstring( lv_png ) ).
+    lv_idat = lo_image->mv_idat.
+    cl_abap_unit_assert=>assert_equals( exp = CONV xstring( lv_rows )
+                                        act = zabaputil_cl_util_context=>zlib_decompress( lv_idat ) ).
+    DATA lv_color TYPE xstring.
+    DATA lv_alpha TYPE xstring.
+    lo_image->png_split_alpha( IMPORTING color = lv_color
+                                         alpha = lv_alpha ).
+    cl_abap_unit_assert=>assert_equals( exp = 3 * ( 1 + 3 * 3 ) act = xstrlen( lv_color ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 3 * ( 1 + 3 ) act = xstrlen( lv_alpha ) ).
   ENDMETHOD.
 
   METHOD png_without_data.

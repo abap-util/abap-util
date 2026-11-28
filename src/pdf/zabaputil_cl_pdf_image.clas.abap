@@ -11,8 +11,9 @@ CLASS zabaputil_cl_pdf_image DEFINITION
     " of a PNG without an alpha channel: it is deflated already, the PDF
     " names the PNG predictor. A PNG with an alpha channel is unpacked,
     " split into colour and transparency and packed again - plain ABAP over
-    " every pixel, so keep such an image at the size it is printed in.
-    " Not supported: interlaced PNG files.
+    " every pixel, so keep such an image at the size it is printed in. So
+    " is an interlaced PNG: its seven passes are put together into rows,
+    " which are packed again.
 
     "! @parameter content  | the bytes of the .jpg or .png file
     "! @parameter resource | the name in the resource dictionary, `I1`
@@ -54,6 +55,13 @@ CLASS zabaputil_cl_pdf_image DEFINITION
 
   PRIVATE SECTION.
 
+    TYPES ty_t_byte TYPE STANDARD TABLE OF i WITH EMPTY KEY.
+    TYPES:
+      BEGIN OF ty_s_row,
+        t_byte TYPE ty_t_byte,
+      END OF ty_s_row.
+    TYPES ty_t_row TYPE STANDARD TABLE OF ty_s_row WITH EMPTY KEY.
+
     DATA mv_content    TYPE xstring.
     DATA mv_resource   TYPE string.
     DATA mv_format     TYPE string.
@@ -69,6 +77,7 @@ CLASS zabaputil_cl_pdf_image DEFINITION
     DATA mv_palette    TYPE string.
     DATA mv_trns       TYPE string.
     DATA mv_idat       TYPE string.
+    DATA mv_interlaced TYPE abap_bool.
 
     METHODS u8
       IMPORTING
@@ -102,6 +111,25 @@ CLASS zabaputil_cl_pdf_image DEFINITION
         writer        TYPE REF TO zabaputil_cl_pdf_writer
       RETURNING
         VALUE(result) TYPE i.
+
+    "! The image data of an interlaced PNG as the rows of a plain one:
+    "! the seven passes unfiltered, their pixels put where they belong,
+    "! and every row with filter 0, packed again
+    METHODS png_deinterlace
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! The rows of a filtered image unfiltered: for every row its bytes
+    CLASS-METHODS png_unfilter
+      IMPORTING
+        data          TYPE xstring
+        offset        TYPE i
+        rows          TYPE i
+        row_bytes     TYPE i
+        bpp           TYPE i
+      EXPORTING
+        next          TYPE i
+        result        TYPE ty_t_row.
 
     "! The entry that makes a colour of a PNG without alpha channel
     "! transparent, from its tRNS chunk
@@ -279,11 +307,8 @@ CLASS zabaputil_cl_pdf_image IMPLEMENTATION.
           mv_height = u32( lv_data + 4 ).
           mv_depth = u8( lv_data + 8 ).
           mv_color_type = u8( lv_data + 9 ).
-          IF u8( lv_data + 12 ) <> 0.
-            RAISE EXCEPTION TYPE zabaputil_cx_util_error
-              EXPORTING
-                val = `PDF: interlaced PNG files are not supported`.
-          ENDIF.
+          " Adam7: the pixels come in seven passes
+          mv_interlaced = xsdbool( u8( lv_data + 12 ) <> 0 ).
         WHEN `504C5445`.
           " PLTE
           mv_palette = lv_chunk.
@@ -326,6 +351,10 @@ CLASS zabaputil_cl_pdf_image IMPLEMENTATION.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
         EXPORTING
           val = `PDF: the PNG file is damaged (bit depth of an image with alpha channel)`.
+    ENDIF.
+
+    IF mv_interlaced = abap_true.
+      mv_idat = png_deinterlace( ).
     ENDIF.
 
   ENDMETHOD.
@@ -412,6 +441,213 @@ CLASS zabaputil_cl_pdf_image IMPLEMENTATION.
                                    compress = abap_false ).
 
     ENDIF.
+
+  ENDMETHOD.
+
+  METHOD png_deinterlace.
+
+    DATA lv_packed   TYPE xstring.
+    DATA lv_raw      TYPE xstring.
+    DATA lt_image    TYPE ty_t_row.
+    DATA ls_row      TYPE ty_s_row.
+    DATA lt_pass     TYPE ty_t_row.
+    DATA lv_offset   TYPE i.
+    DATA lv_x        TYPE i.
+    DATA lv_y        TYPE i.
+    DATA lv_bit      TYPE i.
+    DATA lv_value    TYPE i.
+    DATA lv_target   TYPE i.
+    DATA lv_hex      TYPE x LENGTH 1.
+    DATA lt_hex      TYPE string_table.
+    DATA lv_line     TYPE string.
+    DATA lv_b        TYPE i.
+    DATA lv_k        TYPE i.
+
+    " the seven passes: first column and row, and the steps between them
+    TYPES:
+      BEGIN OF ty_s_pass,
+        x0 TYPE i,
+        y0 TYPE i,
+        dx TYPE i,
+        dy TYPE i,
+      END OF ty_s_pass.
+    DATA lt_adam7 TYPE STANDARD TABLE OF ty_s_pass WITH EMPTY KEY.
+    lt_adam7 = VALUE #( ( x0 = 0 y0 = 0 dx = 8 dy = 8 )
+                        ( x0 = 4 y0 = 0 dx = 8 dy = 8 )
+                        ( x0 = 0 y0 = 4 dx = 4 dy = 8 )
+                        ( x0 = 2 y0 = 0 dx = 4 dy = 4 )
+                        ( x0 = 0 y0 = 2 dx = 2 dy = 4 )
+                        ( x0 = 1 y0 = 0 dx = 2 dy = 2 )
+                        ( x0 = 0 y0 = 1 dx = 1 dy = 2 ) ).
+
+    lv_packed = mv_idat.
+    lv_raw = zabaputil_cl_util_context=>zlib_decompress( lv_packed ).
+
+    " the samples of a pixel, alpha included, and their bits
+    DATA(lv_channels) = mv_colors.
+    IF mv_color_type = 4 OR mv_color_type = 6.
+      lv_channels = lv_channels + 1.
+    ENDIF.
+    DATA(lv_bits) = lv_channels * mv_depth.
+    DATA(lv_bpp) = nmax( val1 = 1
+                         val2 = lv_bits DIV 8 ).
+    DATA(lv_row_bytes) = ( mv_width * lv_bits + 7 ) DIV 8.
+
+    " the image, every byte 0 to begin with
+    DO lv_row_bytes TIMES.
+      INSERT 0 INTO TABLE ls_row-t_byte.
+    ENDDO.
+    DO mv_height TIMES.
+      INSERT ls_row INTO TABLE lt_image.
+    ENDDO.
+
+    LOOP AT lt_adam7 ASSIGNING FIELD-SYMBOL(<pass>).
+      DATA(lv_width) = 0.
+      DATA(lv_height) = 0.
+      IF mv_width > <pass>-x0.
+        lv_width = ( mv_width - <pass>-x0 + <pass>-dx - 1 ) DIV <pass>-dx.
+      ENDIF.
+      IF mv_height > <pass>-y0.
+        lv_height = ( mv_height - <pass>-y0 + <pass>-dy - 1 ) DIV <pass>-dy.
+      ENDIF.
+      " a pass without pixels has no rows at all, not even a filter byte
+      IF lv_width = 0 OR lv_height = 0.
+        CONTINUE.
+      ENDIF.
+
+      png_unfilter( EXPORTING data      = lv_raw
+                              offset    = lv_offset
+                              rows      = lv_height
+                              row_bytes = ( lv_width * lv_bits + 7 ) DIV 8
+                              bpp       = lv_bpp
+                    IMPORTING next      = lv_offset
+                              result    = lt_pass ).
+
+      " every pixel of the pass to its place in the image
+      lv_y = 0.
+      LOOP AT lt_pass ASSIGNING FIELD-SYMBOL(<pass_row>).
+        ASSIGN lt_image[ <pass>-y0 + lv_y * <pass>-dy + 1 ] TO FIELD-SYMBOL(<image_row>).
+        lv_x = 0.
+        WHILE lv_x < lv_width.
+          lv_target = <pass>-x0 + lv_x * <pass>-dx.
+          IF lv_bits >= 8.
+            " whole bytes
+            lv_k = 0.
+            WHILE lv_k < lv_bits DIV 8.
+              <image_row>-t_byte[ lv_target * ( lv_bits DIV 8 ) + lv_k + 1 ] =
+                  <pass_row>-t_byte[ lv_x * ( lv_bits DIV 8 ) + lv_k + 1 ].
+              lv_k = lv_k + 1.
+            ENDWHILE.
+          ELSE.
+            " 1, 2 or 4 bits of one byte, from the left
+            lv_bit = lv_x * lv_bits.
+            lv_b = <pass_row>-t_byte[ lv_bit DIV 8 + 1 ].
+            lv_value = ( lv_b DIV ipow( base = 2
+                                        exp  = 8 - lv_bit MOD 8 - lv_bits ) ) MOD ipow( base = 2
+                                                                                        exp  = lv_bits ).
+            lv_bit = lv_target * lv_bits.
+            ASSIGN <image_row>-t_byte[ lv_bit DIV 8 + 1 ] TO FIELD-SYMBOL(<byte>).
+            <byte> = <byte> + lv_value * ipow( base = 2
+                                               exp  = 8 - lv_bit MOD 8 - lv_bits ).
+          ENDIF.
+          lv_x = lv_x + 1.
+        ENDWHILE.
+        lv_y = lv_y + 1.
+      ENDLOOP.
+    ENDLOOP.
+
+    " the rows of a plain PNG: filter 0, then the bytes
+    LOOP AT lt_image ASSIGNING <image_row>.
+      INSERT `00` INTO TABLE lt_hex.
+      CLEAR lv_line.
+      LOOP AT <image_row>-t_byte INTO lv_b.
+        lv_hex = lv_b.
+        lv_line = lv_line && lv_hex.
+      ENDLOOP.
+      INSERT lv_line INTO TABLE lt_hex.
+    ENDLOOP.
+    lv_raw = concat_lines_of( lt_hex ).
+    result = zabaputil_cl_util_context=>zlib_compress( lv_raw ).
+
+  ENDMETHOD.
+
+  METHOD png_unfilter.
+
+    DATA ls_row    TYPE ty_s_row.
+    DATA ls_prev   TYPE ty_s_row.
+    DATA lv_filter TYPE i.
+    DATA lv_x      TYPE x LENGTH 1.
+    DATA lv_i      TYPE i.
+    DATA lv_raw    TYPE i.
+    DATA lv_a      TYPE i.
+    DATA lv_b      TYPE i.
+    DATA lv_c      TYPE i.
+    DATA lv_p      TYPE i.
+    DATA lv_pa     TYPE i.
+    DATA lv_pb     TYPE i.
+    DATA lv_pc     TYPE i.
+    DATA lv_value  TYPE i.
+
+    CLEAR result.
+    next = offset.
+    DATA(lv_length) = xstrlen( data ).
+
+    " the row above the first one is zeros
+    DO row_bytes TIMES.
+      INSERT 0 INTO TABLE ls_prev-t_byte.
+    ENDDO.
+
+    DO rows TIMES.
+      IF next + 1 + row_bytes > lv_length.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = `PDF: the PNG file is damaged (image data too short)`.
+      ENDIF.
+      lv_x = data+next(1).
+      lv_filter = lv_x.
+      next = next + 1.
+      CLEAR ls_row.
+      lv_i = 0.
+      WHILE lv_i < row_bytes.
+        lv_x = data+next(1).
+        lv_raw = lv_x.
+        next = next + 1.
+        lv_a = 0.
+        lv_c = 0.
+        IF lv_i >= bpp.
+          lv_a = ls_row-t_byte[ lv_i - bpp + 1 ].
+          lv_c = ls_prev-t_byte[ lv_i - bpp + 1 ].
+        ENDIF.
+        lv_b = ls_prev-t_byte[ lv_i + 1 ].
+        CASE lv_filter.
+          WHEN 1.
+            lv_value = lv_raw + lv_a.
+          WHEN 2.
+            lv_value = lv_raw + lv_b.
+          WHEN 3.
+            lv_value = lv_raw + ( lv_a + lv_b ) DIV 2.
+          WHEN 4.
+            " Paeth: the neighbour closest to a + b - c
+            lv_p = lv_a + lv_b - lv_c.
+            lv_pa = abs( lv_p - lv_a ).
+            lv_pb = abs( lv_p - lv_b ).
+            lv_pc = abs( lv_p - lv_c ).
+            IF lv_pa <= lv_pb AND lv_pa <= lv_pc.
+              lv_value = lv_raw + lv_a.
+            ELSEIF lv_pb <= lv_pc.
+              lv_value = lv_raw + lv_b.
+            ELSE.
+              lv_value = lv_raw + lv_c.
+            ENDIF.
+          WHEN OTHERS.
+            lv_value = lv_raw.
+        ENDCASE.
+        INSERT lv_value MOD 256 INTO TABLE ls_row-t_byte.
+        lv_i = lv_i + 1.
+      ENDWHILE.
+      INSERT ls_row INTO TABLE result.
+      ls_prev = ls_row.
+    ENDDO.
 
   ENDMETHOD.
 
