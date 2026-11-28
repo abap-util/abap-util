@@ -3042,6 +3042,175 @@ ENDCLASS.
 
 
 "! ================================================================
+"! DEFLATE / ZLIB / ADLER-32 / CODE POINTS
+"! ================================================================
+CLASS ltcl_gzip_ops DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+
+    METHODS gzip_roundtrip                 FOR TESTING.
+    METHODS gzip_shrinks                   FOR TESTING.
+    METHODS zlib_roundtrip                 FOR TESTING.
+    METHODS zlib_header_and_checksum       FOR TESTING.
+    METHODS zlib_decompress_foreign        FOR TESTING.
+    METHODS zlib_decompress_no_stream      FOR TESTING.
+    METHODS adler32_known                  FOR TESTING.
+    METHODS adler32_empty                  FOR TESTING.
+    METHODS adler32_long                   FOR TESTING.
+    METHODS codepoints_ascii               FOR TESTING.
+    METHODS codepoints_multibyte           FOR TESTING.
+    METHODS codepoints_empty               FOR TESTING.
+
+    METHODS has_gzip
+      RETURNING
+        VALUE(result) TYPE abap_bool.
+
+ENDCLASS.
+
+CLASS ltcl_gzip_ops IMPLEMENTATION.
+
+  METHOD has_gzip.
+    TRY.
+        zabaputil_cl_util_context=>gzip_compress( CONV xstring( `00` ) ).
+        result = abap_true.
+      CATCH cx_root.
+        result = abap_false.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD gzip_roundtrip.
+    IF has_gzip( ) = abap_false.
+      RETURN.
+    ENDIF.
+
+    DATA(lv_in) = CONV xstring( `48656C6C6F2C2048656C6C6F2C2048656C6C6F21` ).
+    DATA(lv_packed) = zabaputil_cl_util_context=>gzip_compress( lv_in ).
+    cl_abap_unit_assert=>assert_not_initial( lv_packed ).
+    cl_abap_unit_assert=>assert_equals( exp = lv_in
+                                        act = zabaputil_cl_util_context=>gzip_decompress( lv_packed ) ).
+  ENDMETHOD.
+
+  METHOD gzip_shrinks.
+    IF has_gzip( ) = abap_false.
+      RETURN.
+    ENDIF.
+
+    DATA lv_hex TYPE string.
+    DO 500 TIMES.
+      lv_hex = lv_hex && `41424344`.
+    ENDDO.
+    DATA(lv_in) = CONV xstring( lv_hex ).
+    DATA(lv_packed) = zabaputil_cl_util_context=>gzip_compress( lv_in ).
+    cl_abap_unit_assert=>assert_true( xsdbool( xstrlen( lv_packed ) < 200 ) ).
+  ENDMETHOD.
+
+  METHOD zlib_roundtrip.
+    IF has_gzip( ) = abap_false.
+      RETURN.
+    ENDIF.
+
+    DATA(lv_in) = CONV xstring( `000102030405060708090A0B0C0D0E0FFFFEFDFC` ).
+    DATA(lv_packed) = zabaputil_cl_util_context=>zlib_compress( lv_in ).
+    cl_abap_unit_assert=>assert_equals( exp = lv_in
+                                        act = zabaputil_cl_util_context=>zlib_decompress( lv_packed ) ).
+  ENDMETHOD.
+
+  METHOD zlib_header_and_checksum.
+    IF has_gzip( ) = abap_false.
+      RETURN.
+    ENDIF.
+
+    " `Wikipedia` in ASCII, Adler-32 11E60398
+    DATA(lv_packed) = zabaputil_cl_util_context=>zlib_compress( CONV xstring( `57696B697065646961` ) ).
+    DATA(lv_len) = xstrlen( lv_packed ).
+    DATA(lv_off) = lv_len - 4.
+    DATA(lv_head) = lv_packed(2).
+    DATA(lv_tail) = lv_packed+lv_off(4).
+    cl_abap_unit_assert=>assert_equals( exp = CONV xstring( `789C` )
+                                        act = lv_head ).
+    cl_abap_unit_assert=>assert_equals( exp = CONV xstring( `11E60398` )
+                                        act = lv_tail ).
+  ENDMETHOD.
+
+  METHOD zlib_decompress_foreign.
+    IF has_gzip( ) = abap_false.
+      RETURN.
+    ENDIF.
+
+    " `hello hello hello hello`, packed by another implementation with the
+    " best compression - the header is 78 DA there, not 78 9C
+    DATA(lv_packed) = CONV xstring( `78DACB48CDC9C957C8402701680308B1` ).
+    cl_abap_unit_assert=>assert_equals(
+        exp = CONV xstring( `68656C6C6F2068656C6C6F2068656C6C6F2068656C6C6F` )
+        act = zabaputil_cl_util_context=>zlib_decompress( lv_packed ) ).
+  ENDMETHOD.
+
+  METHOD zlib_decompress_no_stream.
+    TRY.
+        zabaputil_cl_util_context=>zlib_decompress( CONV xstring( `0102030405060708` ) ).
+        cl_abap_unit_assert=>fail( ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+
+    TRY.
+        zabaputil_cl_util_context=>zlib_decompress( CONV xstring( `789C` ) ).
+        cl_abap_unit_assert=>fail( ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD adler32_known.
+    cl_abap_unit_assert=>assert_equals(
+        exp = CONV xstring( `11E60398` )
+        act = zabaputil_cl_util_context=>hash_adler32( CONV xstring( `57696B697065646961` ) ) ).
+  ENDMETHOD.
+
+  METHOD adler32_empty.
+    DATA lv_empty TYPE xstring.
+    cl_abap_unit_assert=>assert_equals( exp = CONV xstring( `00000001` )
+                                        act = zabaputil_cl_util_context=>hash_adler32( lv_empty ) ).
+  ENDMETHOD.
+
+  METHOD adler32_long.
+    " 5000 bytes FF, past the deferred modulo - the value another
+    " implementation computes for them
+    DATA lv_hex TYPE string.
+    DO 5000 TIMES.
+      lv_hex = lv_hex && `FF`.
+    ENDDO.
+    cl_abap_unit_assert=>assert_equals( exp = CONV xstring( `54B27596` )
+                                        act = zabaputil_cl_util_context=>hash_adler32( CONV xstring( lv_hex ) ) ).
+  ENDMETHOD.
+
+  METHOD codepoints_ascii.
+    DATA(lt_cp) = zabaputil_cl_util_context=>c_get_codepoints( `Az 0` ).
+    cl_abap_unit_assert=>assert_equals( exp = 4 act = lines( lt_cp ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 65 act = lt_cp[ 1 ] ).
+    cl_abap_unit_assert=>assert_equals( exp = 122 act = lt_cp[ 2 ] ).
+    cl_abap_unit_assert=>assert_equals( exp = 32 act = lt_cp[ 3 ] ).
+    cl_abap_unit_assert=>assert_equals( exp = 48 act = lt_cp[ 4 ] ).
+  ENDMETHOD.
+
+  METHOD codepoints_multibyte.
+    " a-umlaut (C3 A4), the euro sign (E2 82 AC) and U+1F600 (F0 9F 98 80)
+    DATA(lv_text) = zabaputil_cl_util_context=>conv_get_string_by_xstring(
+                        CONV xstring( `C3A4E282ACF09F9880` ) ).
+    DATA(lt_cp) = zabaputil_cl_util_context=>c_get_codepoints( lv_text ).
+    cl_abap_unit_assert=>assert_equals( exp = 3 act = lines( lt_cp ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 228 act = lt_cp[ 1 ] ).
+    cl_abap_unit_assert=>assert_equals( exp = 8364 act = lt_cp[ 2 ] ).
+    cl_abap_unit_assert=>assert_equals( exp = 128512 act = lt_cp[ 3 ] ).
+  ENDMETHOD.
+
+  METHOD codepoints_empty.
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>c_get_codepoints( `` ) ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+"! ================================================================
 "! RTTI / TABLE DESCRIPTION
 "! ================================================================
 CLASS ltcl_rtti_ext DEFINITION FINAL
