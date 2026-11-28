@@ -38,6 +38,8 @@ CLASS ltcl_layout DEFINITION FINAL
     METHODS table_by_position       FOR TESTING.
     METHODS table_header_font       FOR TESTING.
     METHODS table_without_columns   FOR TESTING.
+    METHODS table_from_texts        FOR TESTING.
+    METHODS table_nested_component  FOR TESTING.
     METHODS finish_page_numbers     FOR TESTING.
     METHODS finish_header           FOR TESTING.
     METHODS finish_once             FOR TESTING.
@@ -409,6 +411,46 @@ CLASS ltcl_layout IMPLEMENTATION.
     mo_layout->table( columns = VALUE #( ( name = `NAME` title = `Name` width = 100 align = `L` ) )
                       rows    = lt_row ).
     cl_abap_unit_assert=>assert_equals( exp = `68.5` act = num( mo_layout->y( ) ) ).
+  ENDMETHOD.
+
+  METHOD table_nested_component.
+    " a component that is a table is an empty cell, not a dump
+    TYPES:
+      BEGIN OF ty_s_deep,
+        name  TYPE string,
+        t_sub TYPE string_table,
+      END OF ty_s_deep.
+    DATA lt_deep TYPE STANDARD TABLE OF ty_s_deep WITH EMPTY KEY.
+    INSERT VALUE #( name  = `Nut`
+                    t_sub = VALUE #( ( `x` ) ) ) INTO TABLE lt_deep.
+    mo_layout->table( columns = VALUE #( ( name = `NAME`  title = `` width = 100 align = `L` )
+                                         ( name = `T_SUB` title = `` width = 100 align = `L` ) )
+                      rows    = lt_deep ).
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = count( val = mo_pdf->page( 1 )->content( )
+                                                     sub = ` Tj` ) ).
+  ENDMETHOD.
+
+  METHOD table_from_texts.
+    " cells that are texts already; a row with fewer cells than columns
+    " has empty ones at its end
+    DATA lt_row TYPE zabaputil_cl_pdf_layout=>ty_t_text_row.
+    INSERT VALUE #( ( `Nut` ) ( `7` ) ) INTO TABLE lt_row.
+    INSERT VALUE #( ( `Bolt` ) ) INTO TABLE lt_row.
+    mo_layout->table_text( columns = VALUE #( ( name = `` title = `Name` width = 100 align = `L` )
+                                              ( name = `` title = `Qty`  width = 100 align = `R` ) )
+                           rows    = lt_row ).
+    cl_abap_unit_assert=>assert_equals( exp = `105.5` act = num( mo_layout->y( ) ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = shown( page = 1
+                                                     text = `Bolt` ) ).
+    DATA(lv_content) = mo_pdf->page( 1 )->content( ).
+    cl_abap_unit_assert=>assert_true(
+        xsdbool( lv_content CS `q 0 0 0 rg BT /F1 10 Tf 241 761.78 Td <37> Tj ET Q` ) ).
+    " header 2, first row 2, second row 1
+    cl_abap_unit_assert=>assert_equals( exp = 5
+                                        act = count( val = lv_content
+                                                     sub = ` Tj` ) ).
   ENDMETHOD.
 
   METHOD finish_page_numbers.

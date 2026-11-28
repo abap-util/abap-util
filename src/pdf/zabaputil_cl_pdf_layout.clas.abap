@@ -34,6 +34,8 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
         align TYPE string,
       END OF ty_s_column.
     TYPES ty_t_column TYPE STANDARD TABLE OF ty_s_column WITH EMPTY KEY.
+    "! the rows of a table as texts, a string_table per row
+    TYPES ty_t_text_row TYPE STANDARD TABLE OF string_table WITH EMPTY KEY.
 
     "! @parameter pdf | the document; the margins start at 20 mm on every side
     METHODS constructor
@@ -108,7 +110,8 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
     "! table. A cell wraps inside its column, a row is never cut in two,
     "! and the header row is repeated on every page the table reaches.
     "! A value is written as a string template writes it - format dates
-    "! and amounts into text components first
+    "! and amounts into text components first. A component that is no
+    "! single value (a structure, a table, a reference) is an empty cell
     "! @parameter columns     | the columns, from left to right
     "! @parameter rows        | an internal table of structures
     "! @parameter header_font | the font of the header row; the current font without it
@@ -116,6 +119,20 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
       IMPORTING
         columns       TYPE ty_t_column
         rows          TYPE ANY TABLE
+        header_font   TYPE REF TO zabaputil_if_pdf_font OPTIONAL
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_layout.
+
+    "! The same table from texts: one row per line of rows, one text per
+    "! column - for cells that are formatted already, or come from
+    "! somewhere else than the components of a structure
+    "! @parameter columns     | the columns, from left to right; name is not used
+    "! @parameter rows        | the rows, each with the texts of its cells
+    "! @parameter header_font | the font of the header row; the current font without it
+    METHODS table_text
+      IMPORTING
+        columns       TYPE ty_t_column
+        rows          TYPE ty_t_text_row
         header_font   TYPE REF TO zabaputil_if_pdf_font OPTIONAL
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_cl_pdf_layout.
@@ -568,15 +585,53 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
 
   METHOD table.
 
-    DATA lv_fixed  TYPE f.
-    DATA lv_open   TYPE i.
-    DATA lv_share  TYPE f.
-    DATA lt_cell   TYPE string_table.
-    DATA lv_index  TYPE i.
-    DATA lv_title  TYPE abap_bool.
+    DATA lt_row   TYPE ty_t_text_row.
+    DATA lt_cell  TYPE string_table.
+    DATA lv_index TYPE i.
+    DATA lv_kind  TYPE string.
 
     FIELD-SYMBOLS <row>   TYPE any.
     FIELD-SYMBOLS <value> TYPE any.
+
+    LOOP AT rows ASSIGNING <row>.
+      CLEAR lt_cell.
+      LOOP AT columns ASSIGNING FIELD-SYMBOL(<column>).
+        lv_index = sy-tabix.
+        UNASSIGN <value>.
+        IF <column>-name IS INITIAL.
+          ASSIGN COMPONENT lv_index OF STRUCTURE <row> TO <value>.
+        ELSE.
+          ASSIGN COMPONENT <column>-name OF STRUCTURE <row> TO <value>.
+        ENDIF.
+        " a component that is a structure, a table or a reference is no
+        " text - and a string template of one is a runtime error
+        IF <value> IS ASSIGNED.
+          lv_kind = zabaputil_cl_util_context=>rtti_get_type_kind( <value> ).
+          IF lv_kind = `u` OR lv_kind = `v` OR lv_kind = `h` OR lv_kind = `l` OR lv_kind = `r`.
+            UNASSIGN <value>.
+          ENDIF.
+        ENDIF.
+        IF <value> IS ASSIGNED.
+          INSERT |{ <value> }| INTO TABLE lt_cell.
+        ELSE.
+          INSERT `` INTO TABLE lt_cell.
+        ENDIF.
+      ENDLOOP.
+      INSERT lt_cell INTO TABLE lt_row.
+    ENDLOOP.
+
+    result = table_text( columns     = columns
+                         rows        = lt_row
+                         header_font = header_font ).
+
+  ENDMETHOD.
+
+  METHOD table_text.
+
+    DATA lv_fixed TYPE f.
+    DATA lv_open  TYPE i.
+    DATA lv_share TYPE f.
+    DATA lv_title TYPE abap_bool.
 
     result = me.
     font_check( ).
@@ -618,23 +673,8 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
       table_header( ).
     ENDIF.
 
-    LOOP AT rows ASSIGNING <row>.
-      CLEAR lt_cell.
-      LOOP AT mt_column ASSIGNING <column>.
-        lv_index = sy-tabix.
-        UNASSIGN <value>.
-        IF <column>-name IS INITIAL.
-          ASSIGN COMPONENT lv_index OF STRUCTURE <row> TO <value>.
-        ELSE.
-          ASSIGN COMPONENT <column>-name OF STRUCTURE <row> TO <value>.
-        ENDIF.
-        IF <value> IS ASSIGNED.
-          INSERT |{ <value> }| INTO TABLE lt_cell.
-        ELSE.
-          INSERT `` INTO TABLE lt_cell.
-        ENDIF.
-      ENDLOOP.
-      table_row( cells = lt_cell
+    LOOP AT rows ASSIGNING FIELD-SYMBOL(<row>).
+      table_row( cells = <row>
                  font  = mo_font ).
     ENDLOOP.
 

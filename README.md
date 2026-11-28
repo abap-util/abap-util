@@ -618,6 +618,25 @@ lo_layout->set_footer( `Page {page} of {pages}` ).
 lo_layout->finish( ).
 ```
 
+```abap
+" A form: the document described as data, printed with the data of one order
+DATA(ls_form) = zabaputil_cl_pdf_form=>new_form( ).
+ls_form-t_element = VALUE #(
+    ( type = zabaputil_cl_pdf_form=>cs_type-text  text = `Delivery note {VBELN}` size = 16 font = `Helvetica-Bold` )
+    ( type = zabaputil_cl_pdf_form=>cs_type-table source = `T_ITEMS`
+      t_column = VALUE #( ( name = `MATNR` title = `Material` width = 40 align = `L` )
+                          ( name = `MENGE` title = `Quantity` width = 25 align = `R` ) ) ) ).
+DATA(lv_pdf) = zabaputil_cl_pdf_form=>render( val = ls_form data = ls_delivery ).
+
+" The data may be an object instead: its public attributes are what the form prints.
+" A class that implements zabaputil_if_pdf_data is a form's data class - an editor
+" reads its fields and creates a sample instance for its preview
+DATA(lt_fields) = zabaputil_cl_pdf_form=>fields( NEW zabaputil_cl_pdf_data_demo( ) ).
+DATA(lv_sample) = zabaputil_cl_pdf_form=>render(
+                      val  = ls_form
+                      data = zabaputil_cl_pdf_form=>data_sample( `ZABAPUTIL_CL_PDF_DATA_DEMO` ) ).
+```
+
 | Class | Purpose |
 |---|---|
 | `zabaputil_cl_pdf` | the document: pages, fonts, images, properties, `render( )` |
@@ -626,6 +645,8 @@ lo_layout->finish( ).
 | `zabaputil_cl_pdf_font_std` | the standard fonts (Helvetica, Times, Courier) with their metrics - Western European text, nothing embedded |
 | `zabaputil_cl_pdf_font_ttf` | an embedded TrueType font (`lo_pdf->font_ttf( lv_ttf )`) - any script the font has glyphs for |
 | `zabaputil_cl_pdf_image` | JPEG and PNG images, PNG with transparency |
+| `zabaputil_cl_pdf_form` | a form as data - elements in the flow or at fixed positions, `{NAME}` placeholders for the components of the data - and its printout; an absolute form (`ty_s_form-absolute`) places every element at its x, y, w, h, as a designer with a canvas draws it, and moves what stands below a table to where the table ends |
+| `zabaputil_if_pdf_data`, `zabaputil_cl_pdf_data_demo` | the data class of a form - its public attributes are the form's interface - and one by example |
 | `zabaputil_cl_pdf_writer` | the file format: objects, streams, cross-reference table |
 
 Not there yet: font subsetting (a TrueType font is embedded whole), OpenType/CFF fonts, text shaping (ligatures, right-to-left scripts), several fonts within one line, interlaced PNG files.
