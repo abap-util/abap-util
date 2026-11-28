@@ -1859,10 +1859,11 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
       result = c_bar_height.
     ENDIF.
 
-    " the text below the bars takes a line of its size from the height
+    " the text below the bars takes a line of its size from the height, and
+    " a quarter of one more as the gap between them
     lv_bars = result.
     IF element-size > 0.
-      lv_text = element-size * 5 / 4 / pdf->scale( ).
+      lv_text = element-size * 3 / 2 / pdf->scale( ).
       lv_bars = result - lv_text.
       IF lv_bars < result / 2.
         lv_bars = result / 2.
@@ -1884,7 +1885,7 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
                       size = element-size ).
       page->set_text_color( element_color( element ) ).
       page->text( x     = x + lv_width / 2
-                  y     = y + lv_bars + lo_font->ascent( element-size ) / pdf->scale( )
+                  y     = y + lv_bars + ( element-size / 4 + lo_font->ascent( element-size ) ) / pdf->scale( )
                   val   = text
                   align = `C` ).
     ENDIF.
