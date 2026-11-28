@@ -118,6 +118,8 @@ CLASS ltcl_form DEFINITION FINAL
     METHODS table_options           FOR TESTING.
     METHODS header_footer_areas     FOR TESTING.
     METHODS markup_text             FOR TESTING.
+    METHODS justified_fixed_text    FOR TESTING.
+    METHODS paragraph_options       FOR TESTING.
 
     "! the table of the test data with as many rows as asked for
     METHODS items
@@ -1221,6 +1223,37 @@ CLASS ltcl_form IMPLEMENTATION.
         xsdbool( lv_content CS |{ lo_pdf->font( `Helvetica-Oblique` )->encode( `fixed` ) } Tj| ) ).
     " without markup the tags are text
     cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 1 text = `<b>plain</b>` ) ).
+  ENDMETHOD.
+
+  METHOD justified_fixed_text.
+    " two lines in 30 mm: the first is stretched, so its last word ends at
+    " the right edge of the box; the last one is not
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text fixed = abap_true x = 20 y = 100 w = 30 align = `J`
+          text = |aaa bbb ccc ddd eee fff ggg\nhhh iii| ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( ms_form ).
+    DATA(lo_font) = lo_pdf->font( `Helvetica` ).
+    DATA(lv_content) = lo_pdf->page( 1 )->content( ).
+    " the words are written one by one, the last lines of the paragraphs whole
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS |{ lo_font->encode( `aaa` ) } Tj| ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS |{ lo_font->encode( `hhh iii` ) } Tj| ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( lv_content CS |{ lo_font->encode( `aaa bbb` ) }| ) ).
+  ENDMETHOD.
+
+  METHOD paragraph_options.
+    ms_form-space_after = 5.
+    ms_form-keep_lines = 2.
+    ms_form-t_element = VALUE #( ( type = zabaputil_cl_pdf_form=>cs_type-text text = |a\nb| )
+                                 ( type = zabaputil_cl_pdf_form=>cs_type-text text = `c` ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( ms_form ).
+    DATA(ls_plain) = zabaputil_cl_pdf_form=>new_form( ).
+    ls_plain-t_element = VALUE #( ( type = zabaputil_cl_pdf_form=>cs_type-text text = `a` )
+                                  ( type = zabaputil_cl_pdf_form=>cs_type-space h = 5 )
+                                  ( type = zabaputil_cl_pdf_form=>cs_type-text text = `b` )
+                                  ( type = zabaputil_cl_pdf_form=>cs_type-space h = 5 )
+                                  ( type = zabaputil_cl_pdf_form=>cs_type-text text = `c` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = zabaputil_cl_pdf_form=>build( ls_plain )->page( 1 )->content( )
+                                        act = lo_pdf->page( 1 )->content( ) ).
   ENDMETHOD.
 
   METHOD absolute_pushed_over.

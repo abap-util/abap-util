@@ -57,6 +57,20 @@ CLASS ltcl_layout DEFINITION FINAL
     METHODS markup_plain_brackets   FOR TESTING.
     METHODS markup_fonts_and_lines  FOR TESTING.
     METHODS markup_font_styles      FOR TESTING.
+    METHODS justified               FOR TESTING.
+    METHODS justified_markup        FOR TESTING.
+    METHODS paragraph_spacing       FOR TESTING.
+    METHODS keep_lines_orphan       FOR TESTING.
+    METHODS keep_lines_widow        FOR TESTING.
+    METHODS keep_lines_together     FOR TESTING.
+
+    "! Words of four characters, aa01 aa02 ...: 16 make a line
+    METHODS words
+      IMPORTING
+        val           TYPE i
+        from          TYPE i DEFAULT 1
+      RETURNING
+        VALUE(result) TYPE string.
     METHODS finish_page_numbers     FOR TESTING.
     METHODS finish_header           FOR TESTING.
     METHODS finish_once             FOR TESTING.
@@ -760,6 +774,83 @@ CLASS ltcl_layout IMPLEMENTATION.
                                         act = zabaputil_cl_pdf_font_std=>styled( name   = `Helvetica`
                                                                                  bold   = abap_true
                                                                                  italic = abap_true ) ).
+  ENDMETHOD.
+
+  METHOD words.
+    DATA lv_number TYPE n LENGTH 2.
+    DO val TIMES.
+      lv_number = from + sy-index - 1.
+      result = |{ result } aa{ lv_number }|.
+    ENDDO.
+    result = condense( result ).
+  ENDMETHOD.
+
+  METHOD justified.
+    " 16 words of 24 points on the first line leave 111.28 points for 15
+    " gaps: the last word ends at the right margin. The last line of the
+    " paragraph is not stretched
+    mo_layout->text( val   = words( 20 )
+                     align = `J` ).
+    DATA(lv_content) = mo_pdf->page( 1 )->content( ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS |50 783.28 Td { mo_font->encode( `aa01` ) } Tj| ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS |521.28 783.28 Td { mo_font->encode( `aa16` ) } Tj| ) ).
+    cl_abap_unit_assert=>assert_true(
+        xsdbool( lv_content CS |50 770.78 Td { mo_font->encode( `aa17 aa18 aa19 aa20` ) } Tj| ) ).
+  ENDMETHOD.
+
+  METHOD justified_markup.
+    mo_layout->rich_text( val   = |<b>{ words( 20 ) }</b>|
+                          align = `j` ).
+    DATA(lv_content) = mo_pdf->page( 1 )->content( ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS |/F2 10 Tf 521.28 783.28 Td { mo_font->encode( `aa16` ) } Tj| ) ).
+  ENDMETHOD.
+
+  METHOD paragraph_spacing.
+    " nothing before the first paragraph at the top of the page: 12.5 + 5,
+    " then 10 + 12.5 + 5
+    mo_layout->set_paragraph_spacing( before = 10
+                                      after  = 5 ).
+    mo_layout->text( |a\nb| ).
+    cl_abap_unit_assert=>assert_equals( exp = `95` act = num( mo_layout->y( ) ) ).
+  ENDMETHOD.
+
+  METHOD keep_lines_orphan.
+    " one line is left on the page; a paragraph of three lines does not
+    " leave one of them there
+    mo_layout->set_keep_lines( min = 2 ).
+    mo_layout->set_y( `776.89` ).
+    mo_layout->text( words( 48 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = mo_pdf->page_count( ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = count( val = mo_pdf->page( 1 )->content( ) sub = `Tj` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `87.5` act = num( mo_layout->y( ) ) ).
+  ENDMETHOD.
+
+  METHOD keep_lines_widow.
+    " three lines are left; the fourth would be alone on the next page, so
+    " the third goes along. Two lines left would leave the first one alone:
+    " then the whole paragraph goes
+    mo_layout->set_keep_lines( min = 2 ).
+    mo_layout->set_y( `751.89` ).
+    mo_layout->text( words( 64 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 1 text = words( 16 ) ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 1 text = words( val = 16 from = 17 ) ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 2 text = words( val = 16 from = 33 ) ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 2 text = words( val = 16 from = 49 ) ) ).
+
+    " without the rule, three lines here and one there
+    fresh( ).
+    mo_layout->set_y( `751.89` ).
+    mo_layout->text( words( 64 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 1 text = words( val = 16 from = 33 ) ) ).
+  ENDMETHOD.
+
+  METHOD keep_lines_together.
+    mo_layout->set_keep_lines( min      = 1
+                               together = abap_true ).
+    mo_layout->set_y( `764.39` ).
+    mo_layout->text( words( 48 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = count( val = mo_pdf->page( 1 )->content( ) sub = `Tj` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 2 text = words( 16 ) ) ).
   ENDMETHOD.
 
 ENDCLASS.

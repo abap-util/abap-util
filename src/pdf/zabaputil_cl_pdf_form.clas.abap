@@ -109,7 +109,7 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         size       TYPE ty_length,
         "! the colour of the text, the line or the outline, RRGGBB
         color      TYPE string,
-        "! L, C or R
+        "! L, C or R; J for a text justified at its width (in the flow: the margins)
         align      TYPE string,
         "! the colour a rectangle is filled with, RRGGBB; empty for none
         fill       TYPE string,
@@ -189,6 +189,12 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         "! every element at its x, y, w, h instead of in the flow; what stands
         "! below a table follows where the table ends
         absolute      TYPE abap_bool,
+        "! space before and after a paragraph of a text in the flow, in mm
+        space_before  TYPE ty_length,
+        space_after   TYPE ty_length,
+        "! the fewest lines of a paragraph in the flow at the bottom of a page
+        "! and at the top of the next one; 0 or 1 for any
+        keep_lines    TYPE i,
         t_element     TYPE ty_t_element,
       END OF ty_s_form.
 
@@ -701,6 +707,13 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
                             bottom = val-margin_bottom ).
     lo_layout->set_font( font = result->font( c_font )
                          size = c_size ).
+    IF val-space_before > 0 OR val-space_after > 0.
+      lo_layout->set_paragraph_spacing( before = val-space_before
+                                        after  = val-space_after ).
+    ENDIF.
+    IF val-keep_lines > 1.
+      lo_layout->set_keep_lines( min = val-keep_lines ).
+    ENDIF.
 
     IF val-absolute = abap_true.
       absolute_elements( pdf       = result
@@ -2150,6 +2163,12 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
                              occ  = 0 ).
     SPLIT lv_text AT lv_line_feed INTO TABLE DATA(lt_paragraph).
     LOOP AT lt_paragraph INTO DATA(lv_paragraph).
+      " justified: the last line of a paragraph keeps a line feed at its
+      " end, text_draw( ) writes it at the left
+      IF to_upper( element-align ) = `J` AND element-w > 0 AND result IS NOT INITIAL.
+        DATA(lv_last) = lines( result ).
+        result[ lv_last ] = result[ lv_last ] && lv_line_feed.
+      ENDIF.
       IF element-w > 0.
         IF element-markup = abap_true.
           DATA(lt_wrapped) = layout->wrap_markup( val   = lv_paragraph
@@ -2167,6 +2186,10 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
         INSERT lv_paragraph INTO TABLE result.
       ENDIF.
     ENDLOOP.
+    IF to_upper( element-align ) = `J` AND element-w > 0 AND result IS NOT INITIAL.
+      lv_last = lines( result ).
+      result[ lv_last ] = result[ lv_last ] && lv_line_feed.
+    ENDIF.
 
   ENDMETHOD.
 
@@ -2200,6 +2223,44 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
     " y is the top of the first line
     lv_y = y + lo_font->ascent( lv_size ) / pdf->scale( ).
+
+    IF lv_align = `J`.
+      " the lines stretched to the width, the last of a paragraph not
+      layout->set_font( font = lo_font
+                        size = lv_size ).
+      layout->set_color( element_color( element ) ).
+      LOOP AT lines INTO DATA(lv_justified).
+        DATA(lv_length) = strlen( lv_justified ).
+        IF lv_length > 0 AND substring( val = lv_justified
+                                        off = lv_length - 1 ) = |\n|.
+          lv_justified = substring( val = lv_justified
+                                    len = lv_length - 1 ).
+          IF element-markup = abap_true.
+            layout->markup_line( page = page
+                                 x    = lv_x
+                                 y    = lv_y
+                                 val  = lv_justified ).
+          ELSE.
+            page->set_font( font = lo_font
+                            size = lv_size ).
+            page->set_text_color( element_color( element ) ).
+            page->text( x   = lv_x
+                        y   = lv_y
+                        val = lv_justified ).
+          ENDIF.
+        ELSE.
+          layout->justified_line( page   = page
+                                  x      = lv_x
+                                  y      = lv_y
+                                  val    = lv_justified
+                                  width  = element-w
+                                  markup = element-markup ).
+        ENDIF.
+        lv_y = lv_y + line_height( pdf     = pdf
+                                   element = element ).
+      ENDLOOP.
+      RETURN.
+    ENDIF.
 
     IF element-markup = abap_true.
       " the layout knows the cuts of the font

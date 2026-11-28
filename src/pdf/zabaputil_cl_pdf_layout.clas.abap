@@ -138,10 +138,45 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_cl_pdf_layout.
 
+    "! Space before and after every paragraph of text( ) and rich_text( ) -
+    "! a paragraph is what a line feed ends
+    METHODS set_paragraph_spacing
+      IMPORTING
+        before        TYPE numeric DEFAULT 0
+        after         TYPE numeric DEFAULT 0
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_layout.
+
+    "! How a paragraph is broken over two pages
+    "! @parameter min      | the fewest lines of a paragraph at the bottom of a
+    "!                       page and at the top of the next one; 1 for any
+    "! @parameter together | a paragraph that fits on a page is not broken
+    METHODS set_keep_lines
+      IMPORTING
+        min           TYPE i DEFAULT 2
+        together      TYPE abap_bool DEFAULT abap_false
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_layout.
+
+    "! One line stretched to a width: the blanks between its words are
+    "! wider. In the current font, size and colour
+    "! @parameter y      | the baseline
+    "! @parameter width  | the width of the line
+    "! @parameter markup | the line has markup
+    METHODS justified_line
+      IMPORTING
+        page   TYPE REF TO zabaputil_cl_pdf_page
+        x      TYPE numeric
+        y      TYPE numeric
+        val    TYPE clike
+        width  TYPE numeric
+        markup TYPE abap_bool DEFAULT abap_false.
+
     "! A text, wrapped at the right margin; a line feed in it starts a new
     "! line. It continues on the next page when this one is full
     "! @parameter val   | the text
-    "! @parameter align | L, C or R
+    "! @parameter align | L, C or R; J for justified - the last line of a
+    "!                    paragraph stays at the left
     METHODS text
       IMPORTING
         val           TYPE clike
@@ -288,7 +323,7 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
     "! <b>bold</b>, <i>italic</i>, <u>underlined</u>, <color=CC0000>red</color>,
     "! nested as they are opened; a `<` that opens none of them is a `<`
     "! @parameter val   | the text
-    "! @parameter align | L, C or R
+    "! @parameter align | L, C, R or J
     METHODS rich_text
       IMPORTING
         val           TYPE clike
@@ -404,6 +439,10 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
     DATA mt_carry        TYPE string_table.
     " data rows written, for the zebra stripes
     DATA mv_data_rows    TYPE i.
+    DATA mv_before       TYPE f.
+    DATA mv_after        TYPE f.
+    DATA mv_keep_min     TYPE i VALUE 1.
+    DATA mv_keep_all     TYPE abap_bool.
     DATA mo_bold         TYPE REF TO zabaputil_if_pdf_font.
     DATA mo_italic       TYPE REF TO zabaputil_if_pdf_font.
     DATA mo_bold_italic  TYPE REF TO zabaputil_if_pdf_font.
@@ -510,6 +549,21 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
         area   TYPE ty_s_area
         number TYPE i
         middle TYPE f.
+
+    "! The paragraphs of a text, wrapped and written in the flow
+    METHODS flow_text
+      IMPORTING
+        val    TYPE clike
+        align  TYPE clike
+        markup TYPE abap_bool.
+
+    "! The line of a paragraph the next page starts with: 0 when the
+    "! paragraph is not broken on this page, 1 when it starts on the next
+    METHODS paragraph_break
+      IMPORTING
+        lines         TYPE i
+      RETURNING
+        VALUE(result) TYPE i.
 
     "! The pieces of a text with markup
     CLASS-METHODS runs
@@ -795,9 +849,80 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
 
   METHOD text.
 
-    DATA lv_x TYPE f.
-
     result = me.
+    flow_text( val    = val
+               align  = align
+               markup = abap_false ).
+
+  ENDMETHOD.
+
+  METHOD set_paragraph_spacing.
+
+    mv_before = before.
+    mv_after = after.
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD set_keep_lines.
+
+    mv_keep_min = min.
+    IF mv_keep_min < 1.
+      mv_keep_min = 1.
+    ENDIF.
+    mv_keep_all = together.
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD paragraph_break.
+
+    CONSTANTS lc_tolerance TYPE f VALUE '0.001'.
+
+    DATA lv_here  TYPE i.
+    DATA lv_fresh TYPE i.
+
+    " the lines that fit here and on an empty page
+    DATA(lv_height) = line_height( ).
+    lv_here = ( mo_page->height( ) - mv_bottom - mv_y + lc_tolerance ) / lv_height - 1 / 2.
+    lv_fresh = ( mo_page->height( ) - mv_bottom - mv_top + lc_tolerance ) / lv_height - 1 / 2.
+    IF lv_here < 0.
+      lv_here = 0.
+    ENDIF.
+    IF lines <= lv_here.
+      RETURN.
+    ENDIF.
+
+    " at the top of a page there is nothing to keep
+    IF mv_y <= mv_top + lc_tolerance.
+      RETURN.
+    ENDIF.
+
+    " a paragraph that fits on a page of its own starts one
+    IF mv_keep_all = abap_true AND lines <= lv_fresh.
+      result = 1.
+      RETURN.
+    ENDIF.
+
+    " too few lines here: all of them on the next page; too few there:
+    " some of these go along
+    result = lv_here + 1.
+    IF lv_here < mv_keep_min.
+      result = 1.
+    ELSEIF lines - lv_here < mv_keep_min.
+      result = lines - mv_keep_min + 1.
+      IF result - 1 < mv_keep_min.
+        result = 1.
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD flow_text.
+
+    DATA lv_x     TYPE f.
+    DATA lv_break TYPE i.
+
     font_check( ).
 
     DATA(lv_text) = CONV string( val ).
@@ -815,14 +940,32 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
 
       " the width of this page - a page break inside the text may change it
       page( ).
-      DATA(lt_line) = wrap_font( font  = mo_font
-                                 val   = lv_paragraph
-                                 width = mo_page->width( ) - mv_left - mv_right ).
+      IF mv_before > 0 AND mv_y > mv_top.
+        mv_y = mv_y + mv_before.
+      ENDIF.
+      DATA(lv_width) = mo_page->width( ) - mv_left - mv_right.
+      IF markup = abap_true.
+        DATA(lt_line) = wrap_markup( val   = lv_paragraph
+                                     width = lv_width ).
+      ELSE.
+        lt_line = wrap_font( font  = mo_font
+                             val   = lv_paragraph
+                             width = lv_width ).
+      ENDIF.
       IF lt_line IS INITIAL.
         INSERT `` INTO TABLE lt_line.
       ENDIF.
 
+      lv_break = 0.
+      IF mv_keep_min > 1 OR mv_keep_all = abap_true.
+        lv_break = paragraph_break( lines( lt_line ) ).
+      ENDIF.
+
       LOOP AT lt_line INTO DATA(lv_line).
+        DATA(lv_index) = sy-tabix.
+        IF lv_index = lv_break AND mv_y > mv_top.
+          new_page( ).
+        ENDIF.
         ensure( lv_height ).
         CASE lv_align.
           WHEN `R`.
@@ -832,16 +975,121 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
           WHEN OTHERS.
             lv_x = mv_left.
         ENDCASE.
-        mo_page->set_font( font = mo_font
-                           size = mv_size ).
-        mo_page->set_text_color( mv_color ).
-        mo_page->text( x     = lv_x
+        IF lv_align = `J` AND lv_index < lines( lt_line ).
+          justified_line( page   = mo_page
+                          x      = lv_x
+                          y      = mv_y + baseline( mo_font )
+                          val    = lv_line
+                          width  = lv_width
+                          markup = markup ).
+        ELSEIF markup = abap_true.
+          markup_line( page  = mo_page
+                       x     = lv_x
                        y     = mv_y + baseline( mo_font )
                        val   = lv_line
-                       align = lv_align ).
+                       align = COND #( WHEN lv_align = `J` THEN `L` ELSE lv_align ) ).
+        ELSE.
+          mo_page->set_font( font = mo_font
+                             size = mv_size ).
+          mo_page->set_text_color( mv_color ).
+          mo_page->text( x     = lv_x
+                         y     = mv_y + baseline( mo_font )
+                         val   = lv_line
+                         align = COND #( WHEN lv_align = `J` THEN `L` ELSE lv_align ) ).
+        ENDIF.
         mv_y = mv_y + lv_height.
       ENDLOOP.
 
+      IF mv_after > 0.
+        mv_y = mv_y + mv_after.
+      ENDIF.
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD justified_line.
+
+    DATA lt_word  TYPE string_table.
+    DATA lv_words TYPE f.
+    DATA lv_x     TYPE f.
+
+    font_check( ).
+
+    " the words of the line, each with the markup it is in
+    IF markup = abap_true.
+      DATA(lt_run) = runs( CONV string( val ) ).
+      DATA lt_piece TYPE ty_t_run.
+      LOOP AT lt_run INTO DATA(ls_run).
+        SPLIT ls_run-text AT ` ` INTO TABLE DATA(lt_part).
+        LOOP AT lt_part INTO DATA(lv_part).
+          IF sy-tabix > 1.
+            INSERT markup( lt_piece ) INTO TABLE lt_word.
+            CLEAR lt_piece.
+          ENDIF.
+          IF lv_part IS NOT INITIAL.
+            DATA(ls_piece) = ls_run.
+            ls_piece-text = lv_part.
+            INSERT ls_piece INTO TABLE lt_piece.
+          ENDIF.
+        ENDLOOP.
+        IF strlen( ls_run-text ) > 0 AND substring( val = ls_run-text
+                                                   off = strlen( ls_run-text ) - 1 ) = ` `.
+          INSERT markup( lt_piece ) INTO TABLE lt_word.
+          CLEAR lt_piece.
+        ENDIF.
+      ENDLOOP.
+      INSERT markup( lt_piece ) INTO TABLE lt_word.
+    ELSE.
+      SPLIT CONV string( val ) AT ` ` INTO TABLE lt_word.
+    ENDIF.
+    DELETE lt_word WHERE table_line IS INITIAL.
+    IF lines( lt_word ) < 2.
+      IF markup = abap_true.
+        markup_line( page = page
+                     x    = x
+                     y    = y
+                     val  = val ).
+      ELSE.
+        page->set_font( font = mo_font
+                        size = mv_size ).
+        page->set_text_color( mv_color ).
+        page->text( x   = x
+                    y   = y
+                    val = val ).
+      ENDIF.
+      RETURN.
+    ENDIF.
+
+    " what the words leave of the width is shared by the gaps between them
+    LOOP AT lt_word INTO DATA(lv_word).
+      IF markup = abap_true.
+        lv_words = lv_words + runs_width( runs( lv_word ) ) / mv_scale.
+      ELSE.
+        lv_words = lv_words + mo_font->width( val  = lv_word
+                                              size = mv_size ) / mv_scale.
+      ENDIF.
+    ENDLOOP.
+    DATA(lv_gap) = ( CONV f( width ) - lv_words ) / ( lines( lt_word ) - 1 ).
+
+    lv_x = x.
+    LOOP AT lt_word INTO lv_word.
+      IF markup = abap_true.
+        markup_line( page = page
+                     x    = lv_x
+                     y    = y
+                     val  = lv_word ).
+        lv_x = lv_x + runs_width( runs( lv_word ) ) / mv_scale + lv_gap.
+      ELSE.
+        page->set_font( font = mo_font
+                        size = mv_size ).
+        page->set_text_color( mv_color ).
+        page->text( x   = lv_x
+                    y   = y
+                    val = lv_word ).
+        lv_x = lv_x + mo_font->width( val  = lv_word
+                                      size = mv_size ) / mv_scale + lv_gap.
+      ENDIF.
     ENDLOOP.
 
   ENDMETHOD.
@@ -1788,47 +2036,10 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
 
   METHOD rich_text.
 
-    DATA lv_x TYPE f.
-
     result = me.
-    font_check( ).
-
-    DATA(lv_text) = CONV string( val ).
-    DATA(lv_line_feed) = |\n|.
-    lv_text = replace( val  = lv_text
-                       sub  = |\r\n|
-                       with = lv_line_feed
-                       occ  = 0 ).
-    SPLIT lv_text AT lv_line_feed INTO TABLE DATA(lt_paragraph).
-
-    DATA(lv_align) = to_upper( align ).
-    DATA(lv_height) = line_height( ).
-
-    LOOP AT lt_paragraph INTO DATA(lv_paragraph).
-      page( ).
-      DATA(lt_line) = wrap_markup( val   = lv_paragraph
-                                   width = mo_page->width( ) - mv_left - mv_right ).
-      IF lt_line IS INITIAL.
-        INSERT `` INTO TABLE lt_line.
-      ENDIF.
-      LOOP AT lt_line INTO DATA(lv_line).
-        ensure( lv_height ).
-        CASE lv_align.
-          WHEN `R`.
-            lv_x = mo_page->width( ) - mv_right.
-          WHEN `C`.
-            lv_x = ( mv_left + mo_page->width( ) - mv_right ) / 2.
-          WHEN OTHERS.
-            lv_x = mv_left.
-        ENDCASE.
-        markup_line( page  = mo_page
-                     x     = lv_x
-                     y     = mv_y + baseline( mo_font )
-                     val   = lv_line
-                     align = lv_align ).
-        mv_y = mv_y + lv_height.
-      ENDLOOP.
-    ENDLOOP.
+    flow_text( val    = val
+               align  = align
+               markup = abap_true ).
 
   ENDMETHOD.
 

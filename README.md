@@ -618,6 +618,9 @@ DATA(lo_layout) = NEW zabaputil_cl_pdf_layout( lo_pdf ).
 lo_layout->set_font( font = lo_pdf->font( ) size = 10 ).
 lo_layout->text( `A paragraph that wraps at the right margin ...` ).
 lo_layout->rich_text( `Markup: <b>bold</b>, <i>italic</i>, <u>underlined</u>, <color=CC0000>red</color>` ).
+" Justified text, space around paragraphs, no single lines at a page break
+lo_layout->set_paragraph_spacing( after = 3 )->set_keep_lines( min = 2 ).
+lo_layout->text( val = lv_long_text align = `J` ).
 lo_layout->table( columns = VALUE #( ( name = `MATNR` title = `Material`    width = 40 align = `L` )
                                      ( name = `MAKTX` title = `Description` width = 0  align = `L` )
                                      ( name = `MENGE` title = `Quantity`    width = 25 align = `R` ) )
