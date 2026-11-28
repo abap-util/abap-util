@@ -16,6 +16,9 @@ CLASS ltcl_layout DEFINITION FINAL
 
     METHODS setup.
 
+    "! A new document and layout, as every test begins with
+    METHODS fresh.
+
     METHODS wrap_at_width           FOR TESTING.
     METHODS wrap_exact_fit          FOR TESTING.
     METHODS wrap_long_word          FOR TESTING.
@@ -40,6 +43,13 @@ CLASS ltcl_layout DEFINITION FINAL
     METHODS table_without_columns   FOR TESTING.
     METHODS table_from_texts        FOR TESTING.
     METHODS table_nested_component  FOR TESTING.
+    METHODS table_total             FOR TESTING.
+    METHODS table_subtotal          FOR TESTING.
+    METHODS table_carry_over        FOR TESTING.
+    METHODS table_row_higher_page   FOR TESTING.
+    METHODS table_zebra             FOR TESTING.
+    METHODS table_border_none       FOR TESTING.
+    METHODS table_border_rows       FOR TESTING.
     METHODS finish_page_numbers     FOR TESTING.
     METHODS finish_header           FOR TESTING.
     METHODS finish_once             FOR TESTING.
@@ -64,6 +74,10 @@ ENDCLASS.
 CLASS ltcl_layout IMPLEMENTATION.
 
   METHOD setup.
+    fresh( ).
+  ENDMETHOD.
+
+  METHOD fresh.
     " A4 in points with a margin of 50: the lines are 495.28 wide and end
     " at 791.89. Courier at 10 points: 6 points per character, a line
     " every 12.5 points, 59 lines per page
@@ -505,6 +519,131 @@ CLASS ltcl_layout IMPLEMENTATION.
         cl_abap_unit_assert=>fail( ).
       CATCH zabaputil_cx_util_error ##NO_HANDLER.
     ENDTRY.
+  ENDMETHOD.
+
+  METHOD table_total.
+    DATA(lt_row) = VALUE ty_t_row( ( name = `Nut`  qty = 7 )
+                                   ( name = `Bolt` qty = 12 ) ).
+    mo_layout->table( columns = VALUE #( ( name = `NAME` title = `Name` width = 100 align = `L` )
+                                         ( name = `QTY`  title = `Qty`  width = 100 align = `R` ) )
+                      rows    = lt_row
+                      options = VALUE #( t_sum = VALUE #( ( `qty` ) ) ) ).
+    " the header, two rows and the total: four rows of 18.5
+    cl_abap_unit_assert=>assert_equals( exp = `124` act = num( mo_layout->y( ) ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 1 text = `Total` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 1 text = `19` ) ).
+
+    " a text of its own
+    fresh( ).
+    mo_layout->table( columns = VALUE #( ( name = `NAME` title = `Name` width = 100 align = `L` )
+                                         ( name = `QTY`  title = `Qty`  width = 100 align = `R` ) )
+                      rows    = lt_row
+                      options = VALUE #( t_sum = VALUE #( ( `QTY` ) ) total_text = `Summe` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 1 text = `Summe` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = shown( page = 1 text = `Total` ) ).
+
+    " nothing to add up, no total
+    fresh( ).
+    mo_layout->table( columns = VALUE #( ( name = `NAME` title = `Name` width = 100 align = `L` ) )
+                      rows    = lt_row
+                      options = VALUE #( t_sum = VALUE #( ( `QTY` ) ) ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = shown( page = 1 text = `Total` ) ).
+  ENDMETHOD.
+
+  METHOD table_subtotal.
+    DATA(lt_row) = VALUE ty_t_row( ( name = `Nut`  qty = 1 )
+                                   ( name = `Nut`  qty = 2 )
+                                   ( name = `Bolt` qty = 5 ) ).
+    mo_layout->table( columns = VALUE #( ( name = `NAME` title = `Name` width = 100 align = `L` )
+                                         ( name = `QTY`  title = `Qty`  width = 100 align = `R` ) )
+                      rows    = lt_row
+                      options = VALUE #( t_sum = VALUE #( ( `QTY` ) ) group = `name` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = shown( page = 1 text = `Subtotal` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 1 text = `3` ) ).
+    " the subtotal of Bolt and its row
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = shown( page = 1 text = `5` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 1 text = `8` ) ).
+    " the header, three rows, two subtotals and the total
+    cl_abap_unit_assert=>assert_equals( exp = `179.5` act = num( mo_layout->y( ) ) ).
+  ENDMETHOD.
+
+  METHOD table_carry_over.
+    " the rows of a page leave room for the carry-over: 38 rows below the
+    " header, then the sum of 1 to 38 carried to the next page
+    DATA lt_row TYPE ty_t_row.
+    DO 50 TIMES.
+      INSERT VALUE #( name = |Row { sy-index }|
+                      qty  = sy-index ) INTO TABLE lt_row.
+    ENDDO.
+    mo_layout->table( columns = VALUE #( ( name = `NAME` title = `Name` width = 100 align = `L` )
+                                         ( name = `QTY`  title = `Qty`  width = 100 align = `R` ) )
+                      rows    = lt_row
+                      options = VALUE #( t_sum = VALUE #( ( `QTY` ) ) carry = abap_true ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = mo_pdf->page_count( ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 1 text = `Row 38` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 1 text = `Carried forward` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 1 text = `741` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 2 text = `Name` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 2 text = `Brought forward` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 2 text = `741` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 2 text = `Row 39` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 2 text = `1275` ) ).
+    " the carry-over is below the last row, above the bottom margin
+    cl_abap_unit_assert=>assert_true(
+        xsdbool( mo_pdf->page( 1 )->content( ) CS `50 51.89 100 18.5 re S` ) ).
+  ENDMETHOD.
+
+  METHOD table_row_higher_page.
+    " 80 words of ten characters, one per line: 1000 points, more than a
+    " page. 58 lines fit on the first page, 22 go on on the second
+    DATA lv_name TYPE string.
+    DO 80 TIMES.
+      lv_name = |{ lv_name } aaaaaaaaaa|.
+    ENDDO.
+    mo_layout->table( columns = VALUE #( ( name = `NAME` title = `` width = 100 align = `L` ) )
+                      rows    = VALUE ty_t_row( ( name = lv_name ) ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = mo_pdf->page_count( ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 58 act = shown( page = 1 text = `aaaaaaaaaa` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 22 act = shown( page = 2 text = `aaaaaaaaaa` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `331` act = num( mo_layout->y( ) ) ).
+  ENDMETHOD.
+
+  METHOD table_zebra.
+    DATA(lt_row) = VALUE ty_t_row( ( name = `A` ) ( name = `B` ) ( name = `C` ) ).
+    mo_layout->table( columns = VALUE #( ( name = `NAME` title = `Name` width = 100 align = `L` ) )
+                      rows    = lt_row
+                      options = VALUE #( zebra = `CCCCCC` ) ).
+    DATA(lv_content) = mo_pdf->page( 1 )->content( ).
+    " the second row is filled, the first and the third are not
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = count( val = lv_content sub = `0.8 0.8 0.8 rg` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS |0.8 0.8 0.8 rg\n50 736.39 100 18.5 re B| ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = count( val = lv_content sub = `re S` ) ).
+  ENDMETHOD.
+
+  METHOD table_border_none.
+    DATA(lt_row) = VALUE ty_t_row( ( name = `A` ) ( name = `B` ) ).
+    mo_layout->table( columns = VALUE #( ( name = `NAME` title = `Name` width = 100 align = `L` ) )
+                      rows    = lt_row
+                      options = VALUE #( border = `none` zebra = `CCCCCC` header_fill = `FFFFFF` ) ).
+    DATA(lv_content) = mo_pdf->page( 1 )->content( ).
+    " filled without an outline, no lines at all
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = count( val = lv_content sub = `re S` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = count( val = lv_content sub = `re B` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = count( val = lv_content sub = `re f` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS |1 1 1 rg\n50 773.39 100 18.5 re f| ) ).
+  ENDMETHOD.
+
+  METHOD table_border_rows.
+    DATA(lt_row) = VALUE ty_t_row( ( name = `A` ) ( name = `B` ) ).
+    mo_layout->table( columns = VALUE #( ( name = `NAME` title = `` width = 100 align = `L` ) )
+                      rows    = lt_row
+                      options = VALUE #( border = zabaputil_cl_pdf_layout=>cs_border-rows border_color = `FF0000` ) ).
+    DATA(lv_content) = mo_pdf->page( 1 )->content( ).
+    " a red line below each row, no cells
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = count( val = lv_content sub = `re S` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS `1 0 0 RG` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS `50 773.39 m 150 773.39 l S` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS `50 754.89 m 150 754.89 l S` ) ).
   ENDMETHOD.
 
 ENDCLASS.

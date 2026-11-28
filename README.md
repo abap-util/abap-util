@@ -621,6 +621,12 @@ lo_layout->table( columns = VALUE #( ( name = `MATNR` title = `Material`    widt
                                      ( name = `MAKTX` title = `Description` width = 0  align = `L` )
                                      ( name = `MENGE` title = `Quantity`    width = 25 align = `R` ) )
                   rows    = lt_items ). " the header row is repeated on every page
+" Sums, a subtotal per group, a carry-over at the page break, stripes and lines
+lo_layout->table( columns = lt_columns
+                  rows    = lt_items
+                  options = VALUE #( t_sum = VALUE #( ( `NETWR` ) ) group = `MATKL` carry = abap_true
+                                     total_text = `Total` zebra = `F0F0F0`
+                                     border = zabaputil_cl_pdf_layout=>cs_border-rows ) ).
 lo_layout->set_footer( `Page {page} of {pages}` ).
 lo_layout->finish( ).
 ```
@@ -664,7 +670,7 @@ DATA(lv_sample) = zabaputil_cl_pdf_form=>render(
 |---|---|
 | `zabaputil_cl_pdf` | the document: pages, fonts, images, properties, `render( )` |
 | `zabaputil_cl_pdf_page` | one page: text, lines, rectangles, ellipses, images, links at fixed positions |
-| `zabaputil_cl_pdf_layout` | flowing content: wrapped paragraphs, tables over several pages, header and footer |
+| `zabaputil_cl_pdf_layout` | flowing content: wrapped paragraphs, tables over several pages (sums, subtotals, carry-over, zebra stripes, line styles; a row higher than a page is cut between its lines), header and footer |
 | `zabaputil_cl_pdf_font_std` | the standard fonts (Helvetica, Times, Courier) with their metrics - Western European text, nothing embedded |
 | `zabaputil_cl_pdf_font_ttf` | an embedded TrueType font (`lo_pdf->font_ttf( lv_ttf )`) - any script the font has glyphs for |
 | `zabaputil_cl_pdf_image` | JPEG and PNG images, PNG with transparency |

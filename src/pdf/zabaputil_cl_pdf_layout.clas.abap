@@ -37,6 +37,44 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
     "! the rows of a table as texts, a string_table per row
     TYPES ty_t_text_row TYPE STANDARD TABLE OF string_table WITH EMPTY KEY.
 
+    CONSTANTS:
+      BEGIN OF cs_border,
+        "! the lines of every cell, the default
+        grid TYPE string VALUE `GRID`,
+        "! a line below every row only
+        rows TYPE string VALUE `ROWS`,
+        "! no lines
+        none TYPE string VALUE `NONE`,
+      END OF cs_border.
+
+    "! How a table looks and what it adds up - all of it off by default
+    TYPES:
+      BEGIN OF ty_s_table_options,
+        "! the components whose values are added up: a total row at the end.
+        "! Only table( ) adds up - it knows the values, table_text( ) the texts
+        t_sum         TYPE string_table,
+        "! the text of the total row, in its first column; `Total` without it
+        total_text    TYPE string,
+        "! a component: a subtotal row whenever its value changes
+        group         TYPE string,
+        "! the text of a subtotal row; `Subtotal` without it
+        subtotal_text TYPE string,
+        "! the sums so far at the bottom of a page and at the top of the next one
+        carry         TYPE abap_bool,
+        "! `Carried forward` without it
+        carry_text    TYPE string,
+        "! `Brought forward` without it
+        brought_text  TYPE string,
+        "! the fill colour of every second row, RRGGBB; empty for none
+        zebra         TYPE string,
+        "! one of cs_border; empty for GRID
+        border        TYPE string,
+        "! the colour of the lines, RRGGBB; empty for 999999
+        border_color  TYPE string,
+        "! the fill colour of the header row, RRGGBB; empty for E8E8E8
+        header_fill   TYPE string,
+      END OF ty_s_table_options.
+
     "! @parameter pdf | the document; the margins start at 20 mm on every side
     METHODS constructor
       IMPORTING
@@ -107,19 +145,22 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
         VALUE(result) TYPE REF TO zabaputil_cl_pdf_layout.
 
     "! A table with a header row and one row per line of an internal
-    "! table. A cell wraps inside its column, a row is never cut in two,
-    "! and the header row is repeated on every page the table reaches.
+    "! table. A cell wraps inside its column, a row is cut in two only when
+    "! it is higher than a page, and the header row is repeated on every
+    "! page the table reaches.
     "! A value is written as a string template writes it - format dates
     "! and amounts into text components first. A component that is no
     "! single value (a structure, a table, a reference) is an empty cell
     "! @parameter columns     | the columns, from left to right
     "! @parameter rows        | an internal table of structures
-    "! @parameter header_font | the font of the header row; the current font without it
+    "! @parameter header_font | the font of the header row and of the sums; the current font without it
+    "! @parameter options     | sums, carry-over, zebra stripes, lines
     METHODS table
       IMPORTING
         columns       TYPE ty_t_column
         rows          TYPE ANY TABLE
         header_font   TYPE REF TO zabaputil_if_pdf_font OPTIONAL
+        options       TYPE ty_s_table_options OPTIONAL
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_cl_pdf_layout.
 
@@ -129,11 +170,13 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
     "! @parameter columns     | the columns, from left to right; name is not used
     "! @parameter rows        | the rows, each with the texts of its cells
     "! @parameter header_font | the font of the header row; the current font without it
+    "! @parameter options     | zebra stripes and lines; the sums are table( )'s
     METHODS table_text
       IMPORTING
         columns       TYPE ty_t_column
         rows          TYPE ty_t_text_row
         header_font   TYPE REF TO zabaputil_if_pdf_font OPTIONAL
+        options       TYPE ty_s_table_options OPTIONAL
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_cl_pdf_layout.
 
@@ -206,6 +249,26 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
       END OF ty_s_cell.
     TYPES ty_t_cell TYPE STANDARD TABLE OF ty_s_cell WITH EMPTY KEY.
 
+    CONSTANTS:
+      BEGIN OF cs_kind,
+        data     TYPE c LENGTH 1 VALUE `D`,
+        header   TYPE c LENGTH 1 VALUE `H`,
+        subtotal TYPE c LENGTH 1 VALUE `S`,
+        total    TYPE c LENGTH 1 VALUE `T`,
+        carry    TYPE c LENGTH 1 VALUE `C`,
+      END OF cs_kind.
+
+    "! a row of a table as it is printed: a row of the data or a sum
+    TYPES:
+      BEGIN OF ty_s_line,
+        kind    TYPE c LENGTH 1,
+        t_cell  TYPE string_table,
+        "! of a data row: the sums before it, a cell per column - what a
+        "! page that ends in front of it carries forward
+        t_carry TYPE string_table,
+      END OF ty_s_line.
+    TYPES ty_t_line TYPE STANDARD TABLE OF ty_s_line WITH EMPTY KEY.
+
     " the lines of a rule and of the table cells: half a point, grey
     CONSTANTS c_line_width TYPE f VALUE '0.5'.
     CONSTANTS c_line_color TYPE string VALUE `999999`.
@@ -235,6 +298,11 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
     " table repeats the header
     DATA mt_column       TYPE ty_t_column.
     DATA mo_header_font  TYPE REF TO zabaputil_if_pdf_font.
+    DATA ms_options      TYPE ty_s_table_options.
+    " the sums before the row that is being written, for a carry-over
+    DATA mt_carry        TYPE string_table.
+    " data rows written, for the zebra stripes
+    DATA mv_data_rows    TYPE i.
 
     METHODS new_page.
 
@@ -269,11 +337,58 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
 
     METHODS table_header.
 
+    "! The rows of a table, its sums among them
+    METHODS table_lines
+      IMPORTING
+        columns     TYPE ty_t_column
+        lines       TYPE ty_t_line
+        header_font TYPE REF TO zabaputil_if_pdf_font OPTIONAL
+        options     TYPE ty_s_table_options.
+
     METHODS table_row
       IMPORTING
         cells     TYPE string_table
         font      TYPE REF TO zabaputil_if_pdf_font
-        is_header TYPE abap_bool DEFAULT abap_false.
+        is_header TYPE abap_bool DEFAULT abap_false
+        kind      TYPE c DEFAULT `D`.
+
+    "! The height a row of these cells needs
+    METHODS row_height
+      IMPORTING
+        cells         TYPE string_table
+        font          TYPE REF TO zabaputil_if_pdf_font
+      RETURNING
+        VALUE(result) TYPE f.
+
+    "! The row of a carry-over: its text in the first column, the sums
+    METHODS carry_cells
+      IMPORTING
+        text          TYPE string
+      RETURNING
+        VALUE(result) TYPE string_table.
+
+    "! The table goes on on the next page: the sums so far below the last
+    "! row, the header row and the sums again on the new page
+    METHODS table_page_break
+      IMPORTING
+        with_carry TYPE abap_bool.
+
+    "! One piece of a row: the lines from first to last of every cell
+    METHODS row_piece
+      IMPORTING
+        cells     TYPE ty_t_cell
+        first     TYPE i
+        last      TYPE i
+        font      TYPE REF TO zabaputil_if_pdf_font
+        kind      TYPE c.
+
+    "! A text that is the value of a component of a row, as a string
+    "! template writes it; empty for a structure, a table or a reference
+    CLASS-METHODS cell_text
+      IMPORTING
+        val           TYPE any
+      RETURNING
+        VALUE(result) TYPE string.
 
     METHODS margin_line
       IMPORTING
@@ -585,17 +700,97 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
 
   METHOD table.
 
-    DATA lt_row   TYPE ty_t_text_row.
-    DATA lt_cell  TYPE string_table.
-    DATA lv_index TYPE i.
-    DATA lv_kind  TYPE string.
+    DATA lt_line   TYPE ty_t_line.
+    DATA ls_line   TYPE ty_s_line.
+    DATA ls_sum    TYPE ty_s_line.
+    DATA lv_pass   TYPE i.
+    DATA lv_index  TYPE i.
+    DATA lv_group  TYPE string.
+    DATA lv_last   TYPE string.
+    DATA lv_first  TYPE abap_bool VALUE abap_true.
+    DATA lt_sum    TYPE STANDARD TABLE OF REF TO data WITH EMPTY KEY.
+    DATA lt_sub    TYPE STANDARD TABLE OF REF TO data WITH EMPTY KEY.
+    DATA lr_sum    TYPE REF TO data.
+    DATA lt_is_sum TYPE STANDARD TABLE OF abap_bool WITH EMPTY KEY.
+    DATA lv_any    TYPE abap_bool.
 
     FIELD-SYMBOLS <row>   TYPE any.
     FIELD-SYMBOLS <value> TYPE any.
+    FIELD-SYMBOLS <sum>   TYPE any.
+    FIELD-SYMBOLS <sub>   TYPE any.
+    FIELD-SYMBOLS <group> TYPE any.
+
+    " the columns that are added up: by the name of their component
+    LOOP AT columns ASSIGNING FIELD-SYMBOL(<column>).
+      DATA(lv_sum) = abap_false.
+      LOOP AT options-t_sum INTO DATA(lv_name).
+        IF to_upper( condense( lv_name ) ) = to_upper( condense( <column>-name ) ) AND <column>-name IS NOT INITIAL.
+          lv_sum = abap_true.
+        ENDIF.
+      ENDLOOP.
+      INSERT lv_sum INTO TABLE lt_is_sum.
+      IF lv_sum = abap_true.
+        lv_any = abap_true.
+      ENDIF.
+      INSERT lr_sum INTO TABLE lt_sum.
+      INSERT lr_sum INTO TABLE lt_sub.
+    ENDLOOP.
 
     LOOP AT rows ASSIGNING <row>.
-      CLEAR lt_cell.
-      LOOP AT columns ASSIGNING FIELD-SYMBOL(<column>).
+      CLEAR ls_line.
+      ls_line-kind = cs_kind-data.
+
+      " a new group: the subtotal of the one before
+      IF options-group IS NOT INITIAL AND lv_any = abap_true.
+        UNASSIGN <group>.
+        ASSIGN COMPONENT to_upper( options-group ) OF STRUCTURE <row> TO <group>.
+        CLEAR lv_group.
+        IF <group> IS ASSIGNED.
+          lv_group = cell_text( <group> ).
+        ENDIF.
+        IF lv_first = abap_false AND lv_group <> lv_last.
+          CLEAR ls_sum.
+          ls_sum-kind = cs_kind-subtotal.
+          LOOP AT lt_sub INTO lr_sum.
+            lv_index = sy-tabix.
+            IF lr_sum IS BOUND.
+              ASSIGN lr_sum->* TO <sub>.
+              INSERT cell_text( <sub> ) INTO TABLE ls_sum-t_cell.
+              CLEAR <sub>.
+            ELSE.
+              INSERT `` INTO TABLE ls_sum-t_cell.
+            ENDIF.
+            lr_sum = lt_sum[ lv_index ].
+            IF lr_sum IS BOUND.
+              ASSIGN lr_sum->* TO <sum>.
+              INSERT cell_text( <sum> ) INTO TABLE ls_sum-t_carry.
+            ELSE.
+              INSERT `` INTO TABLE ls_sum-t_carry.
+            ENDIF.
+          ENDLOOP.
+          IF lt_is_sum[ 1 ] = abap_false.
+            ls_sum-t_cell[ 1 ] = COND #( WHEN options-subtotal_text IS INITIAL
+                                         THEN `Subtotal` ELSE options-subtotal_text ).
+          ENDIF.
+          INSERT ls_sum INTO TABLE lt_line.
+        ENDIF.
+        lv_last = lv_group.
+        lv_first = abap_false.
+      ENDIF.
+
+      " the sums before the row, for the page that ends in front of it
+      IF lv_any = abap_true.
+        LOOP AT lt_sum INTO lr_sum.
+          IF lr_sum IS BOUND.
+            ASSIGN lr_sum->* TO <sum>.
+            INSERT cell_text( <sum> ) INTO TABLE ls_line-t_carry.
+          ELSE.
+            INSERT `` INTO TABLE ls_line-t_carry.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+
+      LOOP AT columns ASSIGNING <column>.
         lv_index = sy-tabix.
         UNASSIGN <value>.
         IF <column>-name IS INITIAL.
@@ -603,37 +798,119 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
         ELSE.
           ASSIGN COMPONENT <column>-name OF STRUCTURE <row> TO <value>.
         ENDIF.
-        " a component that is a structure, a table or a reference is no
-        " text - and a string template of one is a runtime error
         IF <value> IS ASSIGNED.
-          lv_kind = zabaputil_cl_util_context=>rtti_get_type_kind( <value> ).
-          IF lv_kind = `u` OR lv_kind = `v` OR lv_kind = `h` OR lv_kind = `l` OR lv_kind = `r`.
-            UNASSIGN <value>.
+          INSERT cell_text( <value> ) INTO TABLE ls_line-t_cell.
+        ELSE.
+          INSERT `` INTO TABLE ls_line-t_cell.
+        ENDIF.
+
+        " added up in a field of the type of the value: the sum is written
+        " as the values are
+        IF <value> IS ASSIGNED AND lt_is_sum[ lv_index ] = abap_true.
+          DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( <value> ).
+          IF lv_kind CA `bsI8PFae`.
+            IF lt_sum[ lv_index ] IS NOT BOUND.
+              CREATE DATA lr_sum LIKE <value>.
+              lt_sum[ lv_index ] = lr_sum.
+              CREATE DATA lr_sum LIKE <value>.
+              lt_sub[ lv_index ] = lr_sum.
+            ENDIF.
+            lr_sum = lt_sum[ lv_index ].
+            ASSIGN lr_sum->* TO <sum>.
+            <sum> = <sum> + <value>.
+            lr_sum = lt_sub[ lv_index ].
+            ASSIGN lr_sum->* TO <sub>.
+            <sub> = <sub> + <value>.
           ENDIF.
         ENDIF.
-        IF <value> IS ASSIGNED.
-          INSERT |{ <value> }| INTO TABLE lt_cell.
-        ELSE.
-          INSERT `` INTO TABLE lt_cell.
-        ENDIF.
       ENDLOOP.
-      INSERT lt_cell INTO TABLE lt_row.
+      INSERT ls_line INTO TABLE lt_line.
     ENDLOOP.
 
-    result = table_text( columns     = columns
-                         rows        = lt_row
-                         header_font = header_font ).
+    IF lv_any = abap_true AND lines( lt_line ) > 0.
+      " the subtotal of the last group, and the total
+      DO 2 TIMES.
+        lv_pass = sy-index.
+        IF lv_pass = 1 AND options-group IS INITIAL.
+          CONTINUE.
+        ENDIF.
+        CLEAR ls_line.
+        ls_line-kind = COND #( WHEN lv_pass = 1 THEN cs_kind-subtotal ELSE cs_kind-total ).
+        LOOP AT columns ASSIGNING <column>.
+          lv_index = sy-tabix.
+          IF lv_pass = 1.
+            lr_sum = lt_sub[ lv_index ].
+          ELSE.
+            lr_sum = lt_sum[ lv_index ].
+          ENDIF.
+          IF lr_sum IS BOUND.
+            ASSIGN lr_sum->* TO <sum>.
+            INSERT cell_text( <sum> ) INTO TABLE ls_line-t_cell.
+          ELSE.
+            INSERT `` INTO TABLE ls_line-t_cell.
+          ENDIF.
+          lr_sum = lt_sum[ lv_index ].
+          IF lr_sum IS BOUND.
+            ASSIGN lr_sum->* TO <sum>.
+            INSERT cell_text( <sum> ) INTO TABLE ls_line-t_carry.
+          ELSE.
+            INSERT `` INTO TABLE ls_line-t_carry.
+          ENDIF.
+        ENDLOOP.
+        IF lt_is_sum[ 1 ] = abap_false.
+          IF ls_line-kind = cs_kind-total.
+            ls_line-t_cell[ 1 ] = COND #( WHEN options-total_text IS INITIAL THEN `Total` ELSE options-total_text ).
+          ELSE.
+            ls_line-t_cell[ 1 ] = COND #( WHEN options-subtotal_text IS INITIAL THEN `Subtotal` ELSE options-subtotal_text ).
+          ENDIF.
+        ENDIF.
+        INSERT ls_line INTO TABLE lt_line.
+      ENDDO.
+    ENDIF.
+
+    table_lines( columns     = columns
+                 lines       = lt_line
+                 header_font = header_font
+                 options     = options ).
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD cell_text.
+
+    " a component that is a structure, a table or a reference is no
+    " text - and a string template of one is a runtime error
+    DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( val ).
+    IF lv_kind = `u` OR lv_kind = `v` OR lv_kind = `h` OR lv_kind = `l` OR lv_kind = `r`.
+      RETURN.
+    ENDIF.
+    result = |{ val }|.
 
   ENDMETHOD.
 
   METHOD table_text.
+
+    DATA lt_line TYPE ty_t_line.
+
+    LOOP AT rows ASSIGNING FIELD-SYMBOL(<row>).
+      INSERT VALUE #( kind   = cs_kind-data
+                      t_cell = <row> ) INTO TABLE lt_line.
+    ENDLOOP.
+    table_lines( columns     = columns
+                 lines       = lt_line
+                 header_font = header_font
+                 options     = options ).
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD table_lines.
 
     DATA lv_fixed TYPE f.
     DATA lv_open  TYPE i.
     DATA lv_share TYPE f.
     DATA lv_title TYPE abap_bool.
 
-    result = me.
     font_check( ).
     IF columns IS INITIAL.
       RETURN.
@@ -664,6 +941,11 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
       ENDLOOP.
     ENDIF.
 
+    ms_options = options.
+    ms_options-border = to_upper( ms_options-border ).
+    mv_data_rows = 0.
+    CLEAR mt_carry.
+
     CLEAR mo_header_font.
     IF lv_title = abap_true.
       mo_header_font = header_font.
@@ -673,13 +955,28 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
       table_header( ).
     ENDIF.
 
-    LOOP AT rows ASSIGNING FIELD-SYMBOL(<row>).
-      table_row( cells = <row>
-                 font  = mo_font ).
+    DATA(lo_sum_font) = header_font.
+    IF lo_sum_font IS NOT BOUND.
+      lo_sum_font = mo_font.
+    ENDIF.
+
+    LOOP AT lines ASSIGNING FIELD-SYMBOL(<line>).
+      mt_carry = <line>-t_carry.
+      IF <line>-kind = cs_kind-data.
+        table_row( cells = <line>-t_cell
+                   font  = mo_font
+                   kind  = <line>-kind ).
+      ELSE.
+        table_row( cells = <line>-t_cell
+                   font  = lo_sum_font
+                   kind  = <line>-kind ).
+      ENDIF.
     ENDLOOP.
 
     CLEAR mt_column.
     CLEAR mo_header_font.
+    CLEAR ms_options.
+    CLEAR mt_carry.
 
   ENDMETHOD.
 
@@ -692,7 +989,71 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
     ENDLOOP.
     table_row( cells     = lt_cell
                font      = mo_header_font
-               is_header = abap_true ).
+               is_header = abap_true
+               kind      = cs_kind-header ).
+
+  ENDMETHOD.
+
+  METHOD carry_cells.
+
+    LOOP AT mt_column ASSIGNING FIELD-SYMBOL(<column>).
+      IF sy-tabix <= lines( mt_carry ).
+        INSERT mt_carry[ sy-tabix ] INTO TABLE result.
+      ELSE.
+        INSERT `` INTO TABLE result.
+      ENDIF.
+    ENDLOOP.
+    IF result IS NOT INITIAL AND result[ 1 ] IS INITIAL.
+      result[ 1 ] = text.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD row_height.
+
+    DATA lv_lines TYPE i VALUE 1.
+    DATA lv_cell  TYPE string.
+
+    DATA(lv_pad) = 3 / mv_scale.
+    LOOP AT mt_column ASSIGNING FIELD-SYMBOL(<column>).
+      CLEAR lv_cell.
+      IF sy-tabix <= lines( cells ).
+        lv_cell = cells[ sy-tabix ].
+      ENDIF.
+      DATA(lt_wrapped) = wrap_font( font  = font
+                                    val   = lv_cell
+                                    width = <column>-width - lv_pad * 2 ).
+      IF lines( lt_wrapped ) > lv_lines.
+        lv_lines = lines( lt_wrapped ).
+      ENDIF.
+    ENDLOOP.
+    result = lv_lines * line_height( ) + lv_pad * 2.
+
+  ENDMETHOD.
+
+  METHOD table_page_break.
+
+    DATA(lo_sum_font) = mo_header_font.
+    IF lo_sum_font IS NOT BOUND.
+      lo_sum_font = mo_font.
+    ENDIF.
+
+    IF with_carry = abap_true.
+      table_row( cells = carry_cells( COND #( WHEN ms_options-carry_text IS INITIAL
+                                              THEN `Carried forward` ELSE ms_options-carry_text ) )
+                 font  = lo_sum_font
+                 kind  = cs_kind-carry ).
+    ENDIF.
+    new_page( ).
+    IF mo_header_font IS BOUND.
+      table_header( ).
+    ENDIF.
+    IF with_carry = abap_true.
+      table_row( cells = carry_cells( COND #( WHEN ms_options-brought_text IS INITIAL
+                                              THEN `Brought forward` ELSE ms_options-brought_text ) )
+                 font  = lo_sum_font
+                 kind  = cs_kind-carry ).
+    ENDIF.
 
   ENDMETHOD.
 
@@ -701,12 +1062,12 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
     DATA lt_wrapped TYPE ty_t_cell.
     DATA ls_wrapped TYPE ty_s_cell.
     DATA lv_lines   TYPE i VALUE 1.
-    DATA lv_x       TYPE f.
-    DATA lv_text_x  TYPE f.
-    DATA lv_text_y  TYPE f.
     DATA lv_index   TYPE i.
-    DATA lv_align   TYPE string.
     DATA lv_cell    TYPE string.
+    DATA lv_first   TYPE i VALUE 1.
+    DATA lv_fit     TYPE i.
+    DATA lv_reserve TYPE f.
+    DATA lv_fresh   TYPE f.
 
     CONSTANTS lc_tolerance TYPE f VALUE '0.001'.
 
@@ -729,38 +1090,127 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
       INSERT ls_wrapped INTO TABLE lt_wrapped.
     ENDLOOP.
 
-    " a row stays in one piece: when it does not fit, the table goes on
-    " at the top of the next page, under a header row of its own
-    DATA(lv_row_height) = lv_lines * lv_height + lv_pad * 2.
-    IF mv_y + lv_row_height > mo_page->height( ) - mv_bottom + lc_tolerance AND mv_y > mv_top + lc_tolerance.
-      new_page( ).
-      IF is_header = abap_false AND mo_header_font IS BOUND.
-        table_header( ).
-      ENDIF.
+    " a data row leaves room for the carry-over below it
+    DATA(lv_carry) = xsdbool( ms_options-carry = abap_true AND mt_carry IS NOT INITIAL
+                              AND kind <> cs_kind-header AND kind <> cs_kind-carry ).
+    IF lv_carry = abap_true.
+      lv_reserve = row_height( cells = carry_cells( ms_options-carry_text )
+                               font  = COND #( WHEN mo_header_font IS BOUND THEN mo_header_font ELSE mo_font ) ).
     ENDIF.
 
-    mo_page->set_draw_color( c_line_color ).
+    " a row stays in one piece: when it does not fit, the table goes on
+    " at the top of the next page, under a header row of its own. Only a
+    " row higher than a page is cut, between two of its lines
+    DO.
+      DATA(lv_rest) = lv_lines - lv_first + 1.
+      DATA(lv_bottom) = mo_page->height( ) - mv_bottom - lv_reserve.
+      " the header row goes to the next page whole, the row of a carry-over
+      " has its room
+      IF is_header = abap_true AND mv_y + lv_rest * lv_height + lv_pad * 2 > lv_bottom + lc_tolerance
+          AND mv_y > mv_top + lc_tolerance.
+        new_page( ).
+      ENDIF.
+      IF mv_y + lv_rest * lv_height + lv_pad * 2 <= lv_bottom + lc_tolerance OR is_header = abap_true
+          OR kind = cs_kind-carry.
+        row_piece( cells = lt_wrapped
+                   first = lv_first
+                   last  = lv_lines
+                   font  = font
+                   kind  = kind ).
+        EXIT.
+      ENDIF.
+
+      " what a fresh page has room for, below its header row
+      lv_fresh = mo_page->height( ) - mv_bottom - lv_reserve - mv_top.
+      IF mo_header_font IS BOUND.
+        lv_fresh = lv_fresh - row_height( cells = VALUE #( FOR c IN mt_column ( c-title ) )
+                                          font  = mo_header_font ).
+      ENDIF.
+      IF lv_carry = abap_true.
+        lv_fresh = lv_fresh - lv_reserve.
+      ENDIF.
+      IF mv_y > mv_top + lc_tolerance AND lv_rest * lv_height + lv_pad * 2 <= lv_fresh + lc_tolerance.
+        table_page_break( lv_carry ).
+        CONTINUE.
+      ENDIF.
+
+      " higher than a page: as many lines as fit here, the rest on the next
+      lv_fit = ( lv_bottom - mv_y - lv_pad * 2 + lc_tolerance ) / lv_height - 1 / 2.
+      IF lv_fit < 1 AND mv_y > mv_top + lc_tolerance.
+        table_page_break( lv_carry ).
+        CONTINUE.
+      ENDIF.
+      IF lv_fit < 1.
+        lv_fit = 1.
+      ENDIF.
+      row_piece( cells = lt_wrapped
+                 first = lv_first
+                 last  = lv_first + lv_fit - 1
+                 font  = font
+                 kind  = kind ).
+      lv_first = lv_first + lv_fit.
+      table_page_break( lv_carry ).
+    ENDDO.
+
+    IF kind = cs_kind-data.
+      mv_data_rows = mv_data_rows + 1.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD row_piece.
+
+    DATA lv_x      TYPE f.
+    DATA lv_text_x TYPE f.
+    DATA lv_text_y TYPE f.
+    DATA lv_index  TYPE i.
+    DATA lv_align  TYPE string.
+    DATA lv_fill   TYPE string.
+    DATA lv_width  TYPE f.
+
+    DATA(lv_pad) = 3 / mv_scale.
+    DATA(lv_height) = line_height( ).
+    DATA(lv_row_height) = ( last - first + 1 ) * lv_height + lv_pad * 2.
+
+    DATA(lv_color) = ms_options-border_color.
+    IF lv_color IS INITIAL.
+      lv_color = c_line_color.
+    ENDIF.
+    mo_page->set_draw_color( lv_color ).
     mo_page->set_line_width( c_line_width ).
     mo_page->set_font( font = font
                        size = mv_size ).
     mo_page->set_text_color( mv_color ).
 
+    " the header row is grey, every second data row striped when asked
+    IF kind = cs_kind-header.
+      lv_fill = ms_options-header_fill.
+      IF lv_fill IS INITIAL.
+        lv_fill = `E8E8E8`.
+      ENDIF.
+    ELSEIF kind = cs_kind-data AND ms_options-zebra IS NOT INITIAL AND mv_data_rows MOD 2 = 1.
+      lv_fill = ms_options-zebra.
+    ENDIF.
+
     lv_x = mv_left.
-    LOOP AT mt_column ASSIGNING <column>.
+    LOOP AT mt_column ASSIGNING FIELD-SYMBOL(<column>).
       lv_index = sy-tabix.
 
-      IF is_header = abap_true.
-        mo_page->set_fill_color( `E8E8E8` ).
+      IF lv_fill IS NOT INITIAL.
+        mo_page->set_fill_color( lv_fill ).
+      ENDIF.
+      IF ms_options-border = cs_border-grid OR ms_options-border IS INITIAL.
         mo_page->rect( x     = lv_x
                        y     = mv_y
                        w     = <column>-width
                        h     = lv_row_height
-                       style = `DF` ).
-      ELSE.
-        mo_page->rect( x = lv_x
-                       y = mv_y
-                       w = <column>-width
-                       h = lv_row_height ).
+                       style = COND #( WHEN lv_fill IS INITIAL THEN `D` ELSE `DF` ) ).
+      ELSEIF lv_fill IS NOT INITIAL.
+        mo_page->rect( x     = lv_x
+                       y     = mv_y
+                       w     = <column>-width
+                       h     = lv_row_height
+                       style = `F` ).
       ENDIF.
 
       lv_align = to_upper( <column>-align ).
@@ -774,8 +1224,8 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
       ENDCASE.
 
       lv_text_y = mv_y + lv_pad + baseline( font ).
-      ASSIGN lt_wrapped[ lv_index ] TO FIELD-SYMBOL(<wrapped>).
-      LOOP AT <wrapped>-t_line INTO DATA(lv_line).
+      ASSIGN cells[ lv_index ] TO FIELD-SYMBOL(<wrapped>).
+      LOOP AT <wrapped>-t_line INTO DATA(lv_line) FROM first TO last.
         mo_page->text( x     = lv_text_x
                        y     = lv_text_y
                        val   = lv_line
@@ -784,7 +1234,15 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
       ENDLOOP.
 
       lv_x = lv_x + <column>-width.
+      lv_width = lv_width + <column>-width.
     ENDLOOP.
+
+    IF ms_options-border = cs_border-rows.
+      mo_page->line( x1 = mv_left
+                     y1 = mv_y + lv_row_height
+                     x2 = mv_left + lv_width
+                     y2 = mv_y + lv_row_height ).
+    ENDIF.
 
     mv_y = mv_y + lv_row_height.
 

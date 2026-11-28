@@ -127,6 +127,10 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         "! (and of the data, when the row has no component of that name);
         "! in an absolute form its y is from the top of the block
         block      TYPE string,
+        "! of a table: the components that are added up (a total row, a
+        "! subtotal row per group, a carry-over at a page break), zebra
+        "! stripes and the lines of the cells
+        options    TYPE zabaputil_cl_pdf_layout=>ty_s_table_options,
       END OF ty_s_element.
     TYPES ty_t_element TYPE STANDARD TABLE OF ty_s_element WITH EMPTY KEY.
 
@@ -1916,7 +1920,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
       layout->table( columns     = lt_column
                      rows        = <rows>
                      header_font = element_font_bold( pdf     = pdf
-                                                      element = element ) ).
+                                                      element = element )
+                     options     = element-options ).
       RETURN.
     ENDIF.
 
@@ -1930,7 +1935,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     layout->table_text( columns     = lt_column
                         rows        = lt_sample
                         header_font = element_font_bold( pdf     = pdf
-                                                         element = element ) ).
+                                                         element = element )
+                        options     = element-options ).
 
   ENDMETHOD.
 

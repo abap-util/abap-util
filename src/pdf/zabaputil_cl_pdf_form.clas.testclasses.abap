@@ -115,6 +115,7 @@ CLASS ltcl_form DEFINITION FINAL
     METHODS repeat_absolute         FOR TESTING.
     METHODS repeat_absolute_pages   FOR TESTING.
     METHODS check_block_and_condition FOR TESTING.
+    METHODS table_options           FOR TESTING.
 
     "! the table of the test data with as many rows as asked for
     METHODS items
@@ -1158,6 +1159,21 @@ CLASS ltcl_form IMPLEMENTATION.
                                         act = zabaputil_cl_pdf_form=>check( val  = ms_form
                                                                             data = ms_data ) ).
 
+  ENDMETHOD.
+
+  METHOD table_options.
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-table source = `T_ITEMS`
+          t_column = VALUE #( ( name = `TEXT` title = `Item` width = 40 )
+                              ( name = `POS`  title = `Pos`  width = 20 align = `R` ) )
+          options = VALUE #( t_sum = VALUE #( ( `POS` ) ) total_text = `Summe` zebra = `CCCCCC` ) ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                 data = ms_data ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 1 text = `30` ) ).
+    " the total row is in the bold cut, as the header row
+    cl_abap_unit_assert=>assert_true(
+        xsdbool( lo_pdf->page( 1 )->content( ) CS |{ lo_pdf->font( `Helvetica-Bold` )->encode( `Summe` ) } Tj| ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lo_pdf->page( 1 )->content( ) CS `0.8 0.8 0.8 rg` ) ).
   ENDMETHOD.
 
   METHOD absolute_pushed_over.
