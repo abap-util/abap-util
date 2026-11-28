@@ -328,18 +328,19 @@ CLASS zabaputil_cl_pdf_form DEFINITION
       RETURNING
         VALUE(result) TYPE string.
 
-    "! The name of the element that opens at or behind a position
-    "! @parameter pos   | where to look; behind the tag afterwards
+    "! The element that opens at or behind a position. No functional method:
+    "! one with a CHANGING parameter does not compile before release 7.40
+    "! @parameter name  | the name of the element
     "! @parameter empty | the element is written as <NAME/>
+    "! @parameter pos   | where to look; behind the tag afterwards
     CLASS-METHODS xml_open
       IMPORTING
-        xml           TYPE string
+        xml   TYPE string
       EXPORTING
-        empty         TYPE abap_bool
+        name  TYPE string
+        empty TYPE abap_bool
       CHANGING
-        pos           TYPE i
-      RETURNING
-        VALUE(result) TYPE string.
+        pos   TYPE i.
 
     "! What an element holds, into a structure, a table or a field
     "! @parameter pos  | behind the opening tag; behind the closing tag afterwards
@@ -1052,7 +1053,8 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
   METHOD parse.
 
-    DATA lv_pos TYPE i.
+    DATA lv_pos  TYPE i.
+    DATA lv_name TYPE string.
 
     " a class that has no form yet returns nothing: an empty page to start on
     DATA(lv_text) = condense( val ).
@@ -1061,8 +1063,9 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    DATA(lv_name) = xml_open( EXPORTING xml = lv_text
-                              CHANGING  pos = lv_pos ).
+    xml_open( EXPORTING xml  = lv_text
+              IMPORTING name = lv_name
+              CHANGING  pos  = lv_pos ).
     IF lv_name <> c_root.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
         EXPORTING
@@ -1092,23 +1095,23 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
           val = |PDF: the text is no form - no element at position { pos }|.
     ENDIF.
 
-    result = substring( val = xml
-                        off = lv_start + 1
-                        len = lv_end - lv_start - 1 ).
+    name = substring( val = xml
+                      off = lv_start + 1
+                      len = lv_end - lv_start - 1 ).
     pos = lv_end + 1.
     " <NAME/> is an element without content: nothing to read, nothing to close
-    empty = xsdbool( strlen( result ) > 0 AND substring( val = result
-                                                           off = strlen( result ) - 1 ) = `/` ).
+    empty = xsdbool( strlen( name ) > 0 AND substring( val = name
+                                                         off = strlen( name ) - 1 ) = `/` ).
     IF empty = abap_true.
-      result = substring( val = result
-                          len = strlen( result ) - 1 ).
+      name = substring( val = name
+                        len = strlen( name ) - 1 ).
     ENDIF.
     " attributes - the version of the form - are not part of the name
-    DATA(lv_blank) = find( val = result
+    DATA(lv_blank) = find( val = name
                            sub = ` ` ).
     IF lv_blank >= 0.
-      result = substring( val = result
-                          len = lv_blank ).
+      name = substring( val = name
+                        len = lv_blank ).
     ENDIF.
 
   ENDMETHOD.
@@ -1119,6 +1122,7 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     DATA lv_empty TYPE abap_bool.
     DATA lv_text  TYPE string.
     DATA lv_skip  TYPE string.
+    DATA lv_name  TYPE string.
 
     FIELD-SYMBOLS <component> TYPE any.
     FIELD-SYMBOLS <rows>      TYPE ANY TABLE.
@@ -1166,9 +1170,10 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
       ENDIF.
 
       " an element inside this one
-      DATA(lv_name) = xml_open( EXPORTING xml   = xml
-                                IMPORTING empty = lv_empty
-                                CHANGING  pos   = pos ).
+      xml_open( EXPORTING xml   = xml
+                IMPORTING name  = lv_name
+                          empty = lv_empty
+                CHANGING  pos   = pos ).
       CASE lv_kind.
 
         WHEN `u` OR `v`.
