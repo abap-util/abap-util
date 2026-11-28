@@ -639,6 +639,10 @@ DATA(lv_pdf) = zabaputil_cl_pdf_form=>render( val = ls_form data = ls_delivery )
 "   {BSTDK:date}  {UZEIT:time}  {RATE:number}  {RATE:number:2}
 "   {NETWR:amount:WAERS}  {MENGE:quantity:MEINS}  {NETWR:amount:EUR}
 
+" What the form names that the data does not have - placeholders, table and image
+" sources, table columns - with the element they are in (an editor marks them)
+DATA(lt_unknown) = zabaputil_cl_pdf_form=>check( val = ls_form data = ls_delivery ).
+
 " The data may be an object instead: its public attributes are what the form prints.
 " A class that implements zabaputil_if_pdf_data is a form's data class - an editor
 " reads its fields and creates a sample instance for its preview

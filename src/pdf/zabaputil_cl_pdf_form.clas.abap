@@ -165,6 +165,33 @@ CLASS zabaputil_cl_pdf_form DEFINITION
       END OF ty_s_field.
     TYPES ty_t_field TYPE STANDARD TABLE OF ty_s_field WITH EMPTY KEY.
 
+    CONSTANTS:
+      BEGIN OF cs_part,
+        "! a placeholder in the text of an element
+        text   TYPE string VALUE `TEXT`,
+        "! the source of a table or an image
+        source TYPE string VALUE `SOURCE`,
+        "! a column of a table: no component of its rows
+        column TYPE string VALUE `COLUMN`,
+        "! a placeholder in the header line
+        header TYPE string VALUE `HEADER`,
+        "! a placeholder in the footer line
+        footer TYPE string VALUE `FOOTER`,
+      END OF cs_part.
+
+    TYPES:
+      BEGIN OF ty_s_unknown,
+        "! what the form names, as it is written: NAME, NETWR:amount:WAERS, T_ITEMS
+        name    TYPE string,
+        "! one of cs_part
+        part    TYPE string,
+        "! the index of the element in t_element; 0 for the header and the footer
+        element TYPE i,
+        "! the name of the element, as an editor shows it
+        label   TYPE string,
+      END OF ty_s_unknown.
+    TYPES ty_t_unknown TYPE STANDARD TABLE OF ty_s_unknown WITH EMPTY KEY.
+
     "! An empty form: A4 portrait, 20 mm margins
     CLASS-METHODS new_form
       RETURNING
@@ -210,6 +237,26 @@ CLASS zabaputil_cl_pdf_form DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_if_pdf_data.
 
+    "! What a form names that the data does not have: placeholders, the
+    "! sources of tables and images, the columns of tables. A placeholder
+    "! with a format this class does not know is reported as well; {page}
+    "! and {pages} in the header and the footer are not
+    "! @parameter val  | the form
+    "! @parameter data | a structure or an object, as for render( )
+    CLASS-METHODS check
+      IMPORTING
+        val           TYPE ty_s_form
+        data          TYPE any
+      RETURNING
+        VALUE(result) TYPE ty_t_unknown.
+
+    "! The placeholders of a text, as they are written between the braces
+    CLASS-METHODS placeholders
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE string_table.
+
     "! A text with its placeholders replaced by the components of the data
     "! @parameter val  | the text, `Dear {NAME}`
     "! @parameter data | a structure or an object; without it the text comes
@@ -245,6 +292,25 @@ CLASS zabaputil_cl_pdf_form DEFINITION
       EXPORTING
         found  TYPE abap_bool
         text   TYPE string.
+
+    "! The placeholders of a text that the data does not have
+    CLASS-METHODS check_text
+      IMPORTING
+        text    TYPE string
+        data    TYPE any
+        part    TYPE string
+        element TYPE i
+        label   TYPE string
+      CHANGING
+        result  TYPE ty_t_unknown.
+
+    "! The data has a component of that path: NAME, HEAD-CITY
+    CLASS-METHODS has_component
+      IMPORTING
+        data          TYPE any
+        name          TYPE string
+      RETURNING
+        VALUE(result) TYPE abap_bool.
 
     "! The value is a number of exactly that many digits
     CLASS-METHODS is_digits
@@ -509,6 +575,181 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
         lv_number = lv_number + 1.
       ENDWHILE.
     ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD placeholders.
+
+    DATA lv_rest  TYPE string.
+    DATA lv_open  TYPE i.
+    DATA lv_close TYPE i.
+
+    lv_rest = val.
+    DO.
+      lv_open = find( val = lv_rest
+                      sub = `{` ).
+      IF lv_open < 0.
+        EXIT.
+      ENDIF.
+      lv_close = find( val = lv_rest
+                       sub = `}`
+                       off = lv_open ).
+      IF lv_close < 0.
+        EXIT.
+      ENDIF.
+      INSERT substring( val = lv_rest
+                        off = lv_open + 1
+                        len = lv_close - lv_open - 1 ) INTO TABLE result.
+      lv_rest = substring( val = lv_rest
+                           off = lv_close + 1 ).
+    ENDDO.
+
+  ENDMETHOD.
+
+  METHOD check.
+
+    DATA lv_index TYPE i.
+    DATA lt_name  TYPE string_table.
+
+    FIELD-SYMBOLS <rows> TYPE any.
+
+    check_text( EXPORTING text    = val-header
+                          data    = data
+                          part    = cs_part-header
+                          element = 0
+                          label   = ``
+                CHANGING  result  = result ).
+    check_text( EXPORTING text    = val-footer
+                          data    = data
+                          part    = cs_part-footer
+                          element = 0
+                          label   = ``
+                CHANGING  result  = result ).
+
+    LOOP AT val-t_element ASSIGNING FIELD-SYMBOL(<element>).
+      lv_index = sy-tabix.
+
+      CASE <element>-type.
+
+        WHEN cs_type-text.
+          check_text( EXPORTING text    = <element>-text
+                                data    = data
+                                part    = cs_part-text
+                                element = lv_index
+                                label   = <element>-name
+                      CHANGING  result  = result ).
+
+        WHEN cs_type-table.
+          " a component of the data itself, as flow_table looks for it
+          UNASSIGN <rows>.
+          DATA(lr_rows) = component_of( node = data
+                                        name = to_upper( <element>-source ) ).
+          IF lr_rows IS BOUND.
+            ASSIGN lr_rows->* TO <rows>.
+            IF zabaputil_cl_util_context=>rtti_get_type_kind( <rows> ) <> `h`.
+              UNASSIGN <rows>.
+            ENDIF.
+          ENDIF.
+          IF <rows> IS NOT ASSIGNED.
+            INSERT VALUE #( name    = <element>-source
+                            part    = cs_part-source
+                            element = lv_index
+                            label   = <element>-name ) INTO TABLE result.
+            CONTINUE.
+          ENDIF.
+          " the columns: components of the rows, also of a table without rows
+          lt_name = component_names( <rows> ).
+          LOOP AT <element>-t_column ASSIGNING FIELD-SYMBOL(<column>).
+            IF NOT line_exists( lt_name[ table_line = to_upper( condense( <column>-name ) ) ] ).
+              INSERT VALUE #( name    = <column>-name
+                              part    = cs_part-column
+                              element = lv_index
+                              label   = <element>-name ) INTO TABLE result.
+            ENDIF.
+          ENDLOOP.
+
+        WHEN cs_type-image.
+          " an image the form carries needs no source
+          IF <element>-source IS NOT INITIAL AND component_of( node = data
+                                                               name = to_upper( <element>-source ) ) IS NOT BOUND.
+            INSERT VALUE #( name    = <element>-source
+                            part    = cs_part-source
+                            element = lv_index
+                            label   = <element>-name ) INTO TABLE result.
+          ENDIF.
+
+      ENDCASE.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD check_text.
+
+    DATA lv_path   TYPE string.
+    DATA lv_format TYPE string.
+    DATA lv_option TYPE string.
+    DATA lv_found  TYPE abap_bool.
+
+    LOOP AT placeholders( text ) INTO DATA(lv_name).
+      " the page numbers are the layout's, in the header and the footer
+      IF ( part = cs_part-header OR part = cs_part-footer )
+          AND ( to_lower( condense( lv_name ) ) = `page` OR to_lower( condense( lv_name ) ) = `pages` ).
+        CONTINUE.
+      ENDIF.
+      CLEAR lv_path.
+      CLEAR lv_format.
+      CLEAR lv_option.
+      SPLIT lv_name AT `:` INTO lv_path lv_format lv_option.
+      component_text( EXPORTING path   = lv_path
+                                data   = data
+                                format = lv_format
+                                option = lv_option
+                      IMPORTING found  = lv_found ).
+      IF lv_found = abap_true.
+        CONTINUE.
+      ENDIF.
+      " a value that does not fit its format is no unknown name - a date
+      " field that is empty in this print is one all the same
+      lv_format = to_lower( condense( lv_format ) ).
+      IF ( lv_format = `date` OR lv_format = `time` OR lv_format = `number`
+          OR lv_format = `amount` OR lv_format = `quantity` )
+          AND has_component( data = data
+                             name = lv_path ) = abap_true.
+        CONTINUE.
+      ENDIF.
+      INSERT VALUE #( name    = lv_name
+                      part    = part
+                      element = element
+                      label   = label ) INTO TABLE result.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD has_component.
+
+    FIELD-SYMBOLS <node> TYPE any.
+
+    DATA(lv_path) = to_upper( condense( name ) ).
+    lv_path = replace( val  = lv_path
+                       sub  = `.`
+                       with = `-`
+                       occ  = 0 ).
+    IF lv_path IS INITIAL.
+      RETURN.
+    ENDIF.
+    SPLIT lv_path AT `-` INTO TABLE DATA(lt_part).
+
+    ASSIGN data TO <node>.
+    LOOP AT lt_part INTO DATA(lv_part).
+      DATA(lr_node) = component_of( node = <node>
+                                    name = lv_part ).
+      IF lr_node IS NOT BOUND.
+        RETURN.
+      ENDIF.
+      ASSIGN lr_node->* TO <node>.
+    ENDLOOP.
+
+    result = abap_true.
 
   ENDMETHOD.
 

@@ -68,6 +68,9 @@ CLASS ltcl_form DEFINITION FINAL
     METHODS resolve_without_data    FOR TESTING.
     METHODS resolve_formats         FOR TESTING.
     METHODS resolve_format_unknown  FOR TESTING.
+    METHODS placeholders_of_a_text  FOR TESTING.
+    METHODS check_consistent_form   FOR TESTING.
+    METHODS check_reports_unknown   FOR TESTING.
     METHODS empty_form_one_page     FOR TESTING.
     METHODS page_format             FOR TESTING.
     METHODS flow_text               FOR TESTING.
@@ -253,6 +256,67 @@ CLASS ltcl_form IMPLEMENTATION.
         exp = `{NAME:upper} {NUMBER:number:x} {NAME:date} {NONE:date}`
         act = zabaputil_cl_pdf_form=>resolve( val  = `{NAME:upper} {NUMBER:number:x} {NAME:date} {NONE:date}`
                                               data = ms_data ) ).
+  ENDMETHOD.
+
+  METHOD placeholders_of_a_text.
+    cl_abap_unit_assert=>assert_equals(
+        exp = VALUE string_table( ( `NAME` ) ( `NETWR:amount:WAERS` ) ( `` ) )
+        act = zabaputil_cl_pdf_form=>placeholders( `Dear {NAME}, {NETWR:amount:WAERS} {} {open` ) ).
+  ENDMETHOD.
+
+  METHOD check_consistent_form.
+    ms_form-header = `{NAME} {page} of {PAGES}`.
+    ms_form-footer = `{HEAD-CITY}`.
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text  text = `{NAME} {number:number:0} {HEAD.CITY}` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-table source = `t_items`
+          t_column = VALUE #( ( name = `POS` ) ( name = `text` ) ) )
+        ( type = zabaputil_cl_pdf_form=>cs_type-image source = `LOGO` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-image image = image_rgb( ) ) ).
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_pdf_form=>check( val  = ms_form
+                                                                       data = ms_data ) ).
+    " a table without rows has its columns all the same
+    CLEAR ms_data-t_items.
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_pdf_form=>check( val  = ms_form
+                                                                       data = ms_data ) ).
+  ENDMETHOD.
+
+  METHOD check_reports_unknown.
+
+    DATA lt_exp TYPE zabaputil_cl_pdf_form=>ty_t_unknown.
+
+    ms_form-header = `{NONE} {page}`.
+    ms_form-footer = `{page}`.
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text  name = `greeting` text = `{NAME} {NAMEX} {NAME:upper}` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-table name = `items` source = `T_ITEMS`
+          t_column = VALUE #( ( name = `POS` ) ( name = `PRICE` ) ) )
+        ( type = zabaputil_cl_pdf_form=>cs_type-table name = `no rows` source = `NAME` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-image name = `logo` source = `PICTURE` )
+        " the page numbers are the header's and the footer's only
+        ( type = zabaputil_cl_pdf_form=>cs_type-text  text = `{page}` ) ).
+
+    lt_exp = VALUE #(
+        ( name = `NONE`       part = zabaputil_cl_pdf_form=>cs_part-header element = 0 )
+        ( name = `NAMEX`      part = zabaputil_cl_pdf_form=>cs_part-text   element = 1 label = `greeting` )
+        ( name = `NAME:upper` part = zabaputil_cl_pdf_form=>cs_part-text   element = 1 label = `greeting` )
+        ( name = `PRICE`      part = zabaputil_cl_pdf_form=>cs_part-column element = 2 label = `items` )
+        ( name = `NAME`       part = zabaputil_cl_pdf_form=>cs_part-source element = 3 label = `no rows` )
+        ( name = `PICTURE`    part = zabaputil_cl_pdf_form=>cs_part-source element = 4 label = `logo` )
+        ( name = `page`       part = zabaputil_cl_pdf_form=>cs_part-text   element = 5 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = lt_exp
+                                        act = zabaputil_cl_pdf_form=>check( val  = ms_form
+                                                                            data = ms_data ) ).
+
+    " an object as the data: what it keeps to itself is unknown to a form
+    ms_form-header = ``.
+    ms_form-footer = ``.
+    ms_form-t_element = VALUE #( ( type = zabaputil_cl_pdf_form=>cs_type-text text = `{SHOWN} {HIDDEN}` ) ).
+    lt_exp = VALUE #( ( name = `HIDDEN` part = zabaputil_cl_pdf_form=>cs_part-text element = 1 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = lt_exp
+                                        act = zabaputil_cl_pdf_form=>check( val  = ms_form
+                                                                            data = NEW lcl_data( ) ) ).
+
   ENDMETHOD.
 
   METHOD resolve_without_data.
