@@ -602,6 +602,1163 @@ ENDCLASS.
 
 
 "! ================================================================
+"! WRITING A SHEET OF MORE THAN ONE TABLE: free cells, styles, links,
+"! validations, names, printing, properties
+"! ================================================================
+CLASS ltcl_write_sheet DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+
+    TYPES:
+      BEGIN OF ty_s_row,
+        text TYPE string,
+        num  TYPE i,
+        url  TYPE string,
+      END OF ty_s_row.
+    TYPES ty_t_row TYPE STANDARD TABLE OF ty_s_row WITH EMPTY KEY.
+
+    METHODS rows
+      RETURNING
+        VALUE(result) TYPE ty_t_row.
+
+    METHODS sheet
+      IMPORTING
+        file          TYPE xstring
+        index         TYPE i DEFAULT 1
+      RETURNING
+        VALUE(result) TYPE string.
+
+    METHODS title_table_footer   FOR TESTING RAISING cx_static_check.
+    METHODS two_tables           FOR TESTING RAISING cx_static_check.
+    METHODS cell_taken           FOR TESTING RAISING cx_static_check.
+    METHODS no_sheet             FOR TESTING RAISING cx_static_check.
+    METHODS cell_by_type         FOR TESTING RAISING cx_static_check.
+    METHODS rows_and_columns     FOR TESTING RAISING cx_static_check.
+    METHODS merged_cells         FOR TESTING RAISING cx_static_check.
+    METHODS styles               FOR TESTING RAISING cx_static_check.
+    METHODS style_invalid        FOR TESTING RAISING cx_static_check.
+    METHODS links                FOR TESTING RAISING cx_static_check.
+    METHODS validations          FOR TESTING RAISING cx_static_check.
+    METHODS names                FOR TESTING RAISING cx_static_check.
+    METHODS printing             FOR TESTING RAISING cx_static_check.
+    METHODS sheet_view           FOR TESTING RAISING cx_static_check.
+    METHODS all_hidden           FOR TESTING RAISING cx_static_check.
+    METHODS properties           FOR TESTING RAISING cx_static_check.
+    METHODS calculated_column    FOR TESTING RAISING cx_static_check.
+    METHODS read_under_a_title   FOR TESTING RAISING cx_static_check.
+    METHODS rules                FOR TESTING RAISING cx_static_check.
+    METHODS protection           FOR TESTING RAISING cx_static_check.
+    METHODS comments             FOR TESTING RAISING cx_static_check.
+    METHODS images               FOR TESTING RAISING cx_static_check.
+    METHODS shared_strings       FOR TESTING RAISING cx_static_check.
+    METHODS conversion_exit      FOR TESTING RAISING cx_static_check.
+    METHODS currency_and_unit    FOR TESTING RAISING cx_static_check.
+
+ENDCLASS.
+
+CLASS ltcl_write_sheet IMPLEMENTATION.
+
+  METHOD rows.
+    result = VALUE #( ( text = `a` num = 1 url = `https://example.com/a?x=1&y=2` )
+                      ( text = `b` num = 2 url = `https://example.com/a?x=1&y=2` )
+                      ( text = `c` num = 3 url = `#Data!A1` ) ).
+  ENDMETHOD.
+
+  METHOD sheet.
+    result = ltcl_file=>part( file = file
+                              name = |xl/worksheets/sheet{ index }.xml| ).
+  ENDMETHOD.
+
+  METHOD title_table_footer.
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>factory(
+        )->add_sheet( name = `Report`
+        )->set_cell( row   = 1
+                     col   = 1
+                     val   = `Orders 2024`
+                     style = VALUE #( bold = abap_true size = 14 )
+        )->add_table( val    = rows( )
+                      layout = VALUE #( start_cell = `A3` )
+        )->set_cell( row = 8
+                     col = 1
+                     val = `as of today`
+        )->get_xlsx( ).
+    DATA(lv_sheet) = sheet( lv_file ).
+
+    " the title in row 1, the table from row 3, the footer under it - each
+    " row once and in its order
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<sheetData><row r="1"><c r="A1" s="` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `>Orders 2024</t>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `</row><row r="3"><c r="A3"` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<row r="6"><c r="A6"` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `</row><row r="8"><c r="A8" t="inlineStr">` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<dimension ref="A1:C8"/>` ) ).
+    " the title does not widen the column, the table does
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<col min="1" max="1" width="9"` ) ).
+
+    DATA(lv_styles) = ltcl_file=>part( file = lv_file
+                                       name = `xl/styles.xml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_styles CS `<font><b/><sz val="14"/>` ) ).
+  ENDMETHOD.
+
+  METHOD two_tables.
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>factory(
+        )->add_sheet( val    = rows( )
+                      layout = VALUE #( table_style = `TableStyleLight9` )
+        )->add_table( val    = rows( )
+                      layout = VALUE #( start_cell  = `E1`
+                                        table_style = `TableStyleLight9` )
+        )->get_xlsx( ).
+    DATA(lv_sheet) = sheet( lv_file ).
+
+    " one row element, the cells of both tables in the order of their
+    " columns
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<v>1</v></c><c r="C2" t="inlineStr">` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `</c><c r="E2" t="inlineStr">` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<dimension ref="A1:G4"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS
+        `<tableParts count="2"><tablePart r:id="rId1"/><tablePart r:id="rId2"/></tableParts>` ) ).
+    DATA(lv_rels) = ltcl_file=>part( file = lv_file
+                                     name = `xl/worksheets/_rels/sheet1.xml.rels` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_rels CS `Id="rId2" Type=` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_rels CS `Target="../tables/table2.xml"` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ltcl_file=>part( file = lv_file
+                                                                name = `xl/tables/table2.xml` )
+                                               CS `name="Table2" displayName="Table2" ref="E1:G4"` ) ).
+  ENDMETHOD.
+
+  METHOD cell_taken.
+    DATA(lo_xlsx) = zabaputil_cl_util_xlsx=>factory( )->add_sheet( rows( ) ).
+    TRY.
+        lo_xlsx->set_cell( row = 2
+                           col = 2
+                           val = 5 ).
+        cl_abap_unit_assert=>fail( `a cell of the table has to raise` ).
+      CATCH zabaputil_cx_util_error INTO DATA(x).
+        cl_abap_unit_assert=>assert_true( xsdbool( x->get_text( ) CS `XLSX_CELL_TAKEN` ) ).
+    ENDTRY.
+    TRY.
+        lo_xlsx->add_table( val    = rows( )
+                            layout = VALUE #( start_cell = `C4` ) ).
+        cl_abap_unit_assert=>fail( `a table over a table has to raise` ).
+      CATCH zabaputil_cx_util_error INTO x.
+        cl_abap_unit_assert=>assert_true( xsdbool( x->get_text( ) CS `XLSX_CELL_TAKEN` ) ).
+    ENDTRY.
+    " right of it and under it is free
+    lo_xlsx->set_cell( row = 2
+                       col = 4
+                       val = 5 ).
+    lo_xlsx->add_table( val    = rows( )
+                        layout = VALUE #( start_cell = `A5` ) ).
+    TRY.
+        lo_xlsx->set_cell( row = 0
+                           col = 1
+                           val = 5 ).
+        cl_abap_unit_assert=>fail( `row 0 has to raise` ).
+      CATCH zabaputil_cx_util_error INTO x.
+        cl_abap_unit_assert=>assert_true( xsdbool( x->get_text( ) CS `XLSX_CELL` ) ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD no_sheet.
+    TRY.
+        zabaputil_cl_util_xlsx=>factory( )->set_cell( row = 1
+                                                      col = 1
+                                                      val = 1 ).
+        cl_abap_unit_assert=>fail( `a cell without a sheet has to raise` ).
+      CATCH zabaputil_cx_util_error INTO DATA(x).
+        cl_abap_unit_assert=>assert_true( xsdbool( x->get_text( ) CS `XLSX_NO_SHEET` ) ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD cell_by_type.
+    DATA lv_date   TYPE d VALUE '20240315'.
+    DATA lv_amount TYPE p LENGTH 8 DECIMALS 2 VALUE '-12.50'.
+
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>factory(
+        )->add_sheet(
+        )->set_cell( row = 1
+                     col = 1
+                     val = 42
+        )->set_cell( row    = 2
+                     col    = 1
+                     val    = lv_amount
+                     format = `#,##0.00`
+        )->set_cell( row = 3
+                     col = 1
+                     val = lv_date
+        )->set_cell( row = 4
+                     col = 1
+                     val = abap_true
+        )->set_cell( row     = 5
+                     col     = 1
+                     formula = `=SUM(A1:A2)`
+        )->set_cell( row   = 5
+                     col   = 2
+                     style = VALUE #( fill = `FFFF00` )
+        )->get_xlsx( ).
+    DATA(lv_sheet) = sheet( lv_file ).
+
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="A1"><v>42</v></c>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="A2" s="1"><v>-12.50</v></c>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="A3" s="2"><v>45366</v></c>` ) ).
+    " abap_true is of type abap_bool: a boolean
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="A4" t="b"><v>1</v></c>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="A5"><f>SUM(A1:A2)</f></c>` ) ).
+    " a cell without a value, with a fill
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="B5" s="3"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ltcl_file=>part( file = lv_file
+                                                                name = `xl/workbook.xml` ) CS `fullCalcOnLoad` ) ).
+  ENDMETHOD.
+
+  METHOD rows_and_columns.
+    DATA(lv_sheet) = sheet( zabaputil_cl_util_xlsx=>factory(
+        )->add_sheet( val    = rows( )
+                      layout = VALUE #( row_height    = 20
+                                        outline_level = 1
+                                        t_column      = VALUE #( ( name = `TEXT` )
+                                                                 ( name = `NUM` hidden = abap_true )
+                                                                 ( name = `URL` outline_level = 2 width = 40 ) ) )
+        )->set_row( row    = 10
+                    height = 30
+        )->set_row( row    = 2
+                    hidden = abap_true
+        )->set_column( col   = 6
+                       width = 12
+        )->get_xlsx( ) ).
+
+    " the data rows high and one level down, the header not
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<row r="1"><c` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<row r="3" ht="20" customHeight="1" outlineLevel="1">` ) ).
+    " set_row( ) decides for the row it names
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<row r="2" hidden="1">` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<row r="10" ht="30" customHeight="1"></row>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool(
+        lv_sheet CS `<sheetFormatPr defaultRowHeight="15" outlineLevelRow="1" outlineLevelCol="2"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<col min="2" max="2" width="8" customWidth="1" hidden="1"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<col min="3" max="3" width="40" customWidth="1" outlineLevel="2"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<col min="6" max="6" width="12" customWidth="1"/></cols>` ) ).
+  ENDMETHOD.
+
+  METHOD merged_cells.
+    DATA(lo_xlsx) = zabaputil_cl_util_xlsx=>factory(
+        )->add_sheet(
+        )->set_cell( row   = 1
+                     col   = 1
+                     val   = `Title`
+                     style = VALUE #( halign = `center` )
+        )->merge( `A1:D1`
+        )->merge( `$F$2:F$5` ).
+    TRY.
+        lo_xlsx->merge( `C1:C3` ).
+        cl_abap_unit_assert=>fail( `an overlap has to raise` ).
+      CATCH zabaputil_cx_util_error INTO DATA(x).
+        cl_abap_unit_assert=>assert_true( xsdbool( x->get_text( ) CS `XLSX_MERGE` ) ).
+    ENDTRY.
+    TRY.
+        lo_xlsx->merge( `B7` ).
+        cl_abap_unit_assert=>fail( `one cell has to raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+    TRY.
+        lo_xlsx->merge( `A1-D1` ).
+        cl_abap_unit_assert=>fail( `no range has to raise` ).
+      CATCH zabaputil_cx_util_error INTO x.
+        cl_abap_unit_assert=>assert_true( xsdbool( x->get_text( ) CS `XLSX_RANGE` ) ).
+    ENDTRY.
+
+    DATA(lv_sheet) = sheet( lo_xlsx->get_xlsx( ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS
+        `</sheetData><mergeCells count="2"><mergeCell ref="A1:D1"/><mergeCell ref="F2:F5"/></mergeCells>` ) ).
+  ENDMETHOD.
+
+  METHOD styles.
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>factory(
+        )->add_sheet( val    = rows( )
+                      layout = VALUE #(
+                          header_style = VALUE #( fill = `1F4E78` color = `ffffff` border_bottom = `medium` )
+                          t_column     = VALUE #( ( name  = `TEXT`
+                                                    style = VALUE #( wrap = abap_true valign = `top` ) )
+                                                  ( name   = `NUM`
+                                                    format = `0.0`
+                                                    style  = VALUE #( fill = `#C6EFCE` italic = abap_true
+                                                                      border = `thin` border_color = `808080` ) ) ) )
+        )->get_xlsx( ).
+    DATA(lv_styles) = ltcl_file=>part( file = lv_file
+                                       name = `xl/styles.xml` ).
+
+    " the header bold, white on blue, a line under it
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_styles CS `<font><b/><sz val="11"/><color rgb="FFFFFFFF"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_styles CS `<fgColor rgb="FF1F4E78"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_styles CS `<bottom style="medium"></bottom>` ) ).
+    " a column that wraps, one green, italic, framed, with its format
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_styles CS `<alignment vertical="top" wrapText="1"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_styles CS `<fgColor rgb="FFC6EFCE"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_styles CS `<font><i/><sz val="11"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_styles CS `<left style="thin"><color rgb="FF808080"/></left>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_styles CS `<fills count="4">` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_styles CS `<borders count="3">` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_styles CS `fontId="2" fillId="2" borderId="1"` ) ).
+
+    " equal styles share one format
+    DATA(lv_sheet) = sheet( lv_file ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="A2" s="1" t="inlineStr">` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="A3" s="1" t="inlineStr">` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="B3" s="2"><v>2</v></c>` ) ).
+  ENDMETHOD.
+
+  METHOD style_invalid.
+    TRY.
+        zabaputil_cl_util_xlsx=>factory( )->add_sheet( )->set_cell( row   = 1
+                                                                    col   = 1
+                                                                    val   = 1
+                                                                    style = VALUE #( fill = `red` ) ).
+        cl_abap_unit_assert=>fail( `a colour by name has to raise` ).
+      CATCH zabaputil_cx_util_error INTO DATA(x).
+        cl_abap_unit_assert=>assert_true( xsdbool( x->get_text( ) CS `XLSX_STYLE` ) ).
+    ENDTRY.
+    TRY.
+        zabaputil_cl_util_xlsx=>factory( )->add_sheet( )->set_cell( row   = 1
+                                                                    col   = 1
+                                                                    val   = 1
+                                                                    style = VALUE #( border = `bold` ) ).
+        cl_abap_unit_assert=>fail( `a border that is none has to raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD links.
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>factory(
+        )->add_sheet( val    = rows( )
+                      name   = `Data`
+                      layout = VALUE #( t_column = VALUE #( ( name = `TEXT` link = `URL` )
+                                                            ( name = `URL` link = `url` ) ) )
+        )->set_cell( row  = 6
+                     col  = 1
+                     val  = `docs`
+                     link = `https://abap-util.github.io/docs/`
+        )->get_xlsx( ).
+    DATA(lv_sheet) = sheet( lv_file ).
+
+    " a URL by a relationship - each one once -, a place in the workbook
+    " by its location
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<hyperlinks><hyperlink ref="A2" r:id="rId1"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<hyperlink ref="A3" r:id="rId1"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<hyperlink ref="A4" location="Data!A1"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<hyperlink ref="A6" r:id="rId2"/></hyperlinks>` ) ).
+    DATA(lv_rels) = ltcl_file=>part( file = lv_file
+                                     name = `xl/worksheets/_rels/sheet1.xml.rels` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_rels CS
+        `Target="https://example.com/a?x=1&amp;y=2" TargetMode="External"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_rels CS `Id="rId2"` ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( lv_rels CS `Id="rId3"` ) ).
+    " blue and underlined
+    cl_abap_unit_assert=>assert_true( xsdbool( ltcl_file=>part( file = lv_file
+                                                                name = `xl/styles.xml` )
+                                               CS `<font><u/><sz val="11"/><color rgb="FF0563C1"/>` ) ).
+
+    TRY.
+        zabaputil_cl_util_xlsx=>xlsx_by_itab( val    = rows( )
+                                              layout = VALUE #( t_column = VALUE #( ( name = `TEXT` link = `NOPE` ) ) ) ).
+        cl_abap_unit_assert=>fail( `a link component the row does not have has to raise` ).
+      CATCH zabaputil_cx_util_error INTO DATA(x).
+        cl_abap_unit_assert=>assert_true( xsdbool( x->get_text( ) CS `XLSX_COLUMN_UNKNOWN` ) ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD validations.
+    DATA(lv_sheet) = sheet( zabaputil_cl_util_xlsx=>factory(
+        )->add_sheet( val    = rows( )
+                      layout = VALUE #( t_column = VALUE #(
+                          ( name       = `TEXT`
+                            validation = VALUE #( type    = `list`
+                                                  t_value = VALUE #( ( `a` ) ( `b` ) ( `c & d` ) )
+                                                  error   = `a, b or c & d` ) )
+                          ( name = `NUM` ) ) )
+        )->add_validation( range      = `B2:B4`
+                           validation = VALUE #( type         = `whole`
+                                                 formula1     = `1`
+                                                 formula2     = `10`
+                                                 no_blank     = abap_true
+                                                 error_style  = `warning`
+                                                 prompt_title = `Quantity`
+                                                 prompt       = `1 to 10` )
+        )->get_xlsx( ) ).
+
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<dataValidations count="2">` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS
+        `<dataValidation type="list" allowBlank="1" showErrorMessage="1" error="a, b or c &amp; d" sqref="A2:A4">` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<formula1>&quot;a,b,c &amp; d&quot;</formula1>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<dataValidation type="whole" errorStyle="warning"` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `promptTitle="Quantity" prompt="1 to 10" sqref="B2:B4">` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<formula1>1</formula1><formula2>10</formula2>` ) ).
+
+    TRY.
+        zabaputil_cl_util_xlsx=>factory( )->add_sheet( )->add_validation(
+            range      = `A1`
+            validation = VALUE #( type    = `list`
+                                  t_value = VALUE #( ( `a,b` ) ) ) )->get_xlsx( ).
+        cl_abap_unit_assert=>fail( `a comma in a value of a list has to raise` ).
+      CATCH zabaputil_cx_util_error INTO DATA(x).
+        cl_abap_unit_assert=>assert_true( xsdbool( x->get_text( ) CS `XLSX_VALIDATION` ) ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD names.
+    DATA(lo_xlsx) = zabaputil_cl_util_xlsx=>factory(
+        )->add_sheet( val  = rows( )
+                      name = `It's data`
+        )->add_name( name = `Texts`
+                     ref  = `'It''s data'!$A$2:$A$4`
+        )->add_name( name  = `Local`
+                     ref   = `=$B$2`
+                     local = abap_true ).
+    TRY.
+        lo_xlsx->add_name( name = `texts`
+                           ref  = `$A$1` ).
+        cl_abap_unit_assert=>fail( `a name the workbook has has to raise` ).
+      CATCH zabaputil_cx_util_error INTO DATA(x).
+        cl_abap_unit_assert=>assert_true( xsdbool( x->get_text( ) CS `XLSX_NAME` ) ).
+    ENDTRY.
+    TRY.
+        lo_xlsx->add_name( name = `AB12`
+                           ref  = `$A$1` ).
+        cl_abap_unit_assert=>fail( `a name that reads as a cell has to raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+    TRY.
+        lo_xlsx->add_name( name = `a b`
+                           ref  = `$A$1` ).
+        cl_abap_unit_assert=>fail( `a blank in a name has to raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+
+    DATA(lv_book) = ltcl_file=>part( file = lo_xlsx->get_xlsx( )
+                                     name = `xl/workbook.xml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_book CS
+        `</sheets><definedNames><definedName name="Texts">'It''s data'!$A$2:$A$4</definedName>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_book CS `<definedName name="Local" localSheetId="0">$B$2</definedName>` ) ).
+  ENDMETHOD.
+
+  METHOD printing.
+    DATA(lo_xlsx) = zabaputil_cl_util_xlsx=>factory(
+        )->add_sheet( val  = rows( )
+                      name = `First`
+        )->add_sheet( val    = rows( )
+                      name   = `Q1 2024`
+                      layout = VALUE #( start_cell    = `B2`
+                                        landscape     = abap_true
+                                        paper_size    = 9
+                                        fit_width     = 1
+                                        margin        = 10
+                                        print_area    = `b2:d5`
+                                        repeat_header = abap_true
+                                        header_text   = `Orders & more`
+                                        footer_text   = `&LPage &P of &N` ) ).
+    DATA(lv_file) = lo_xlsx->get_xlsx( ).
+    DATA(lv_sheet) = sheet( file  = lv_file
+                            index = 2 ).
+
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS
+        `<pageMargins left="0.3937" right="0.3937" top="0.3937" bottom="0.3937" header="0.3" footer="0.3"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS
+        `<pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS
+        `<headerFooter><oddHeader>&amp;COrders &amp; more</oddHeader><oddFooter>&amp;LPage &amp;P of &amp;N</oddFooter>` ) ).
+
+    DATA(lv_book) = ltcl_file=>part( file = lv_file
+                                     name = `xl/workbook.xml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_book CS
+        `<definedName name="_xlnm.Print_Area" localSheetId="1">'Q1 2024'!$B$2:$D$5</definedName>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_book CS
+        `<definedName name="_xlnm.Print_Titles" localSheetId="1">'Q1 2024'!$2:$2</definedName>` ) ).
+  ENDMETHOD.
+
+  METHOD sheet_view.
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>factory(
+        )->add_sheet( val    = rows( )
+                      name   = `Hidden`
+                      layout = VALUE #( hidden = abap_true )
+        )->add_sheet( val    = rows( )
+                      name   = `Shown`
+                      layout = VALUE #( tab_color    = `00B050`
+                                        no_gridlines = abap_true
+                                        zoom         = 85
+                                        freeze_cell  = `B2` )
+        )->add_sheet( val    = rows( )
+                      layout = VALUE #( freeze_cell = `C1` )
+        )->get_xlsx( ).
+
+    DATA(lv_book) = ltcl_file=>part( file = lv_file
+                                     name = `xl/workbook.xml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_book CS `<workbookView activeTab="1"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_book CS `<sheet name="Hidden" sheetId="1" state="hidden" r:id="rId1"/>` ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( sheet( lv_file ) CS `tabSelected` ) ).
+
+    DATA(lv_sheet) = sheet( file  = lv_file
+                            index = 2 ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<sheetPr><tabColor rgb="FF00B050"/></sheetPr>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS
+        `<sheetView workbookViewId="0" tabSelected="1" showGridLines="0" zoomScale="85" zoomScaleNormal="85">` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS
+        `<pane xSplit="1" ySplit="1" topLeftCell="B2" activePane="bottomRight" state="frozen"/>` ) ).
+    lv_sheet = sheet( file  = lv_file
+                      index = 3 ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS
+        `<pane xSplit="2" topLeftCell="C1" activePane="topRight" state="frozen"/>` ) ).
+  ENDMETHOD.
+
+  METHOD all_hidden.
+    TRY.
+        zabaputil_cl_util_xlsx=>factory( )->add_sheet( val    = rows( )
+                                                       layout = VALUE #( hidden = abap_true ) )->get_xlsx( ).
+        cl_abap_unit_assert=>fail( `every sheet hidden has to raise` ).
+      CATCH zabaputil_cx_util_error INTO DATA(x).
+        cl_abap_unit_assert=>assert_true( xsdbool( x->get_text( ) CS `XLSX_ALL_HIDDEN` ) ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD properties.
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>factory(
+        )->set_properties( VALUE #( title   = `Orders <2024>`
+                                    creator = `Jane`
+                                    company = `ACME`
+                                    created = '20240315103000' )
+        )->add_sheet( rows( )
+        )->get_xlsx( ).
+
+    DATA(lv_core) = ltcl_file=>part( file = lv_file
+                                     name = `docProps/core.xml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_core CS `<dc:title>Orders &lt;2024&gt;</dc:title>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_core CS `<dc:creator>Jane</dc:creator>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_core CS
+        `<dcterms:created xsi:type="dcterms:W3CDTF">2024-03-15T10:30:00Z</dcterms:created>` ) ).
+    DATA(lv_app) = ltcl_file=>part( file = lv_file
+                                    name = `docProps/app.xml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_app CS `<Application>abap-util</Application><Company>ACME</Company>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ltcl_file=>part( file = lv_file
+                                                                name = `_rels/.rels` )
+                                               CS `Target="docProps/core.xml"` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ltcl_file=>part( file = lv_file
+                                                                name = `[Content_Types].xml` )
+                                               CS `PartName="/docProps/app.xml"` ) ).
+    " without, no part
+    cl_abap_unit_assert=>assert_false( ltcl_file=>has_part( file = zabaputil_cl_util_xlsx=>xlsx_by_itab( rows( ) )
+                                                            name = `docProps/core.xml` ) ).
+  ENDMETHOD.
+
+  METHOD calculated_column.
+    DATA(lv_table) = ltcl_file=>part(
+        file = zabaputil_cl_util_xlsx=>xlsx_by_itab(
+                   val    = rows( )
+                   layout = VALUE #( table_style = `TableStyleMedium2`
+                                     start_cell  = `A3`
+                                     t_column    = VALUE #( ( name = `NUM` )
+                                                            ( header = `Double` formula = `A{row}*2` ) ) ) )
+        name = `xl/tables/table1.xml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_table CS
+        `<tableColumn id="2" name="Double"><calculatedColumnFormula>A4*2</calculatedColumnFormula></tableColumn>` ) ).
+  ENDMETHOD.
+
+  METHOD rules.
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>factory(
+        )->add_sheet( val    = rows( )
+                      layout = VALUE #( t_column = VALUE #( ( name = `TEXT` )
+                                                            ( name = `NUM`
+                                                              rule = VALUE #( type     = `cellIs`
+                                                                              operator = `greaterThan`
+                                                                              formula1 = `1`
+                                                                              style    = VALUE #( color = `9C0006`
+                                                                                                  fill  = `FFC7CE` ) ) ) ) )
+        )->add_rule( range = `A2:A4`
+                     rule  = VALUE #( type  = `containsText`
+                                      text  = `b`
+                                      style = VALUE #( bold = abap_true ) )
+        )->add_rule( range = `B2:B4`
+                     rule  = VALUE #( type      = `colorScale`
+                                      color_min = `F8696B`
+                                      color_mid = `FFEB84`
+                                      color_max = `63BE7B` )
+        )->add_rule( range = `B2:B4`
+                     rule  = VALUE #( type     = `iconSet`
+                                      icon_set = `3Arrows` )
+        )->get_xlsx( ).
+    DATA(lv_sheet) = sheet( lv_file ).
+
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS
+        `<conditionalFormatting sqref="A2:A4"><cfRule type="containsText" priority="2" dxfId="1" operator="containsText" text="b">` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<formula>NOT(ISERROR(SEARCH(&quot;b&quot;,A2)))</formula>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS
+        `<conditionalFormatting sqref="B2:B4"><cfRule type="cellIs" priority="1" dxfId="0" operator="greaterThan"><formula>1</formula>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS
+        `<cfvo type="percentile" val="50"/><cfvo type="max"/><color rgb="FFF8696B"/><color rgb="FFFFEB84"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS
+        `<iconSet iconSet="3Arrows"><cfvo type="percent" val="0"/><cfvo type="percent" val="33"/><cfvo type="percent" val="66"/>` ) ).
+    DATA(lv_styles) = ltcl_file=>part( file = lv_file
+                                       name = `xl/styles.xml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_styles CS
+        `<dxfs count="2"><dxf><font><color rgb="FF9C0006"/></font><fill><patternFill><bgColor rgb="FFFFC7CE"/>` ) ).
+
+    TRY.
+        zabaputil_cl_util_xlsx=>factory( )->add_sheet( )->add_rule( range = `A1`
+                                                                    rule  = VALUE #( type = `sparkle` ) ).
+        cl_abap_unit_assert=>fail( `a rule that is none has to raise` ).
+      CATCH zabaputil_cx_util_error INTO DATA(x).
+        cl_abap_unit_assert=>assert_true( xsdbool( x->get_text( ) CS `XLSX_RULE` ) ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD protection.
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>factory(
+        )->protect_workbook( `abc`
+        )->add_sheet( val    = rows( )
+                      layout = VALUE #( protect     = abap_true
+                                        password    = `password`
+                                        auto_filter = abap_true
+                                        t_column    = VALUE #( ( name = `TEXT` style = VALUE #( unlocked = abap_true ) ) ) )
+        )->get_xlsx( ).
+
+    " the legacy hash, as openpyxl and Excel work it out
+    cl_abap_unit_assert=>assert_true( xsdbool( sheet( lv_file ) CS
+        `</sheetData><sheetProtection sheet="1" objects="1" scenarios="1" password="83AF" autoFilter="0" sort="0"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ltcl_file=>part( file = lv_file
+                                                                name = `xl/workbook.xml` )
+                                               CS `<workbookProtection lockStructure="1" workbookPassword="CC1A"/><bookViews>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ltcl_file=>part( file = lv_file
+                                                                name = `xl/styles.xml` )
+                                               CS `applyProtection="1"><protection locked="0"/></xf>` ) ).
+    TRY.
+        zabaputil_cl_util_xlsx=>factory( )->protect_workbook( `a password longer than fifteen` ).
+        cl_abap_unit_assert=>fail( `a long password has to raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD comments.
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>factory(
+        )->add_sheet( rows( )
+        )->add_comment( row    = 2
+                        col    = 2
+                        text   = `checked <ok>`
+                        author = `Jane`
+        )->add_comment( row  = 3
+                        col  = 1
+                        text = `no author`
+        )->get_xlsx( ).
+
+    DATA(lv_comments) = ltcl_file=>part( file = lv_file
+                                         name = `xl/comments1.xml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_comments CS `<authors><author>Jane</author><author></author></authors>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_comments CS
+        `<comment ref="B2" authorId="0"><text><r><t xml:space="preserve">checked &lt;ok&gt;</t>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_comments CS `<comment ref="A3" authorId="1">` ) ).
+    DATA(lv_vml) = ltcl_file=>part( file = lv_file
+                                    name = `xl/drawings/vmlDrawing1.vml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_vml CS `<x:Row>1</x:Row><x:Column>1</x:Column>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( sheet( lv_file ) CS `<legacyDrawing r:id="rId2"/></worksheet>` ) ).
+    DATA(lv_rels) = ltcl_file=>part( file = lv_file
+                                     name = `xl/worksheets/_rels/sheet1.xml.rels` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_rels CS `Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"` ) ).
+    DATA(lv_types) = ltcl_file=>part( file = lv_file
+                                      name = `[Content_Types].xml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_types CS `<Default Extension="vml"` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_types CS `PartName="/xl/comments1.xml"` ) ).
+  ENDMETHOD.
+
+  METHOD images.
+    " a PNG of 4 x 2 pixels
+    DATA(lv_png) = CONV xstring( `89504E470D0A1A0A0000000D4948445200000004000000020802000000F0CAEA34`
+                              && `0000001049444154789C63F8CFC000470CC81C006FAA07F980DC00280000000049454E44AE426082` ).
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>factory(
+        )->add_sheet( rows( )
+        )->add_image( row   = 1
+                      col   = 5
+                      image = lv_png
+                      width = 40
+        )->get_xlsx( ).
+
+    " the size by the width asked for, the proportions kept
+    DATA(lv_drawing) = ltcl_file=>part( file = lv_file
+                                        name = `xl/drawings/drawing1.xml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_drawing CS `<xdr:col>4</xdr:col>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_drawing CS `<xdr:ext cx="381000" cy="190500"/>` ) ).
+    cl_abap_unit_assert=>assert_true( ltcl_file=>has_part( file = lv_file
+                                                           name = `xl/media/image1.png` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ltcl_file=>part( file = lv_file
+                                                                name = `xl/drawings/_rels/drawing1.xml.rels` )
+                                               CS `Target="../media/image1.png"` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( sheet( lv_file ) CS `<drawing r:id="rId1"/></worksheet>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ltcl_file=>part( file = lv_file
+                                                                name = `[Content_Types].xml` )
+                                               CS `<Default Extension="png" ContentType="image/png"/>` ) ).
+    TRY.
+        zabaputil_cl_util_xlsx=>factory( )->add_sheet( )->add_image( row   = 1
+                                                                     col   = 1
+                                                                     image = CONV xstring( `47494638` ) ).
+        cl_abap_unit_assert=>fail( `a GIF has to raise` ).
+      CATCH zabaputil_cx_util_error INTO DATA(x).
+        cl_abap_unit_assert=>assert_true( xsdbool( x->get_text( ) CS `XLSX_IMAGE` ) ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD shared_strings.
+    DATA lt_back TYPE ty_t_row.
+
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>factory( abap_true
+        )->add_sheet( VALUE ty_t_row( ( text = `same` ) ( text = `same` ) ( text = `a & b` ) )
+        )->get_xlsx( ).
+
+    DATA(lv_sheet) = sheet( lv_file ).
+    " the header texts first, then each text once
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="A1" s="1" t="s"><v>0</v></c>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="A2" t="s"><v>3</v></c>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sheet CS `<c r="A3" t="s"><v>3</v></c>` ) ).
+    DATA(lv_sst) = ltcl_file=>part( file = lv_file
+                                    name = `xl/sharedStrings.xml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sst CS `count="5" uniqueCount="5"` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sst CS `<si><t xml:space="preserve">a &amp; b</t></si>` ) ).
+
+    zabaputil_cl_util_xlsx=>itab_by_xlsx( EXPORTING val    = lv_file
+                                          IMPORTING result = lt_back ).
+    cl_abap_unit_assert=>assert_equals( exp = `a & b`
+                                        act = lt_back[ 3 ]-text ).
+  ENDMETHOD.
+
+  METHOD currency_and_unit.
+    TYPES:
+      BEGIN OF ty_s_amount,
+        amount   TYPE p LENGTH 8 DECIMALS 2,
+        currency TYPE c LENGTH 5,
+        qty      TYPE p LENGTH 8 DECIMALS 3,
+        unit     TYPE c LENGTH 3,
+      END OF ty_s_amount.
+    DATA lt_amount TYPE STANDARD TABLE OF ty_s_amount WITH EMPTY KEY.
+
+    lt_amount = VALUE #( ( amount = `12.50` currency = `EUR` qty = `1.5` unit = `KG` ) ).
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>xlsx_by_itab(
+        val    = lt_amount
+        layout = VALUE #( t_column = VALUE #( ( name = `AMOUNT` currency = `currency` )
+                                              ( name = `QTY` unit = `UNIT` ) ) ) ).
+    " a currency the system does not list has two decimals; a unit it does
+    " not list the decimals of the field
+    cl_abap_unit_assert=>assert_true( xsdbool( sheet( lv_file ) CS `<c r="A2" s="2"><v>12.5</v></c>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( sheet( lv_file ) CS `<c r="B2" s="3"><v>1.5</v></c>` ) ).
+    DATA(lv_styles) = ltcl_file=>part( file = lv_file
+                                       name = `xl/styles.xml` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_styles CS `formatCode="#,##0.00"/>` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_styles CS `formatCode="#,##0.000"/>` ) ).
+
+    TRY.
+        zabaputil_cl_util_xlsx=>xlsx_by_itab( val    = lt_amount
+                                              layout = VALUE #( t_column = VALUE #( ( name = `AMOUNT` currency = `WAERS` ) ) ) ).
+        cl_abap_unit_assert=>fail( `a currency component the row does not have has to raise` ).
+      CATCH zabaputil_cx_util_error INTO DATA(x).
+        cl_abap_unit_assert=>assert_true( xsdbool( x->get_text( ) CS `XLSX_COLUMN_UNKNOWN` ) ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD conversion_exit.
+    TYPES:
+      BEGIN OF ty_s_doc,
+        doc TYPE c LENGTH 10,
+      END OF ty_s_doc.
+    DATA lt_doc  TYPE STANDARD TABLE OF ty_s_doc WITH EMPTY KEY.
+    DATA lt_back TYPE STANDARD TABLE OF ty_s_doc WITH EMPTY KEY.
+
+    lt_doc = VALUE #( ( doc = `0000004711` ) ).
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>xlsx_by_itab(
+        val    = lt_doc
+        layout = VALUE #( t_column = VALUE #( ( name = `DOC` conv_exit = `ALPHA` ) ) ) ).
+    " written without its zeros, read back with them
+    cl_abap_unit_assert=>assert_true( xsdbool( sheet( lv_file ) CS `<t xml:space="preserve">4711</t>` ) ).
+    zabaputil_cl_util_xlsx=>factory_by_xlsx( lv_file )->get_table(
+        EXPORTING t_column = VALUE #( ( name = `DOC` conv_exit = `alpha` ) )
+        IMPORTING result   = lt_back ).
+    cl_abap_unit_assert=>assert_equals( exp = `0000004711`
+                                        act = lt_back[ 1 ]-doc ).
+  ENDMETHOD.
+
+  METHOD read_under_a_title.
+    DATA lt_back TYPE ty_t_row.
+
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>factory(
+        )->add_sheet(
+        )->set_cell( row = 1
+                     col = 1
+                     val = `Title`
+        )->merge( `A1:C1`
+        )->add_table( val    = rows( )
+                      layout = VALUE #( start_cell = `A3` )
+        )->get_xlsx( ).
+    zabaputil_cl_util_xlsx=>factory_by_xlsx( lv_file )->get_table( EXPORTING header_row = 3
+                                                                   IMPORTING result     = lt_back ).
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lines( lt_back ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `c`
+                                        act = lt_back[ 3 ]-text ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+"! ================================================================
+"! READING: formulas, ranges, row by row, errors, merged cells, links,
+"! names and Excel tables, hidden rows and columns, text notations
+"! ================================================================
+CLASS ltcl_read_more DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+
+    TYPES:
+      BEGIN OF ty_s_row,
+        text TYPE string,
+        num  TYPE i,
+        date TYPE d,
+      END OF ty_s_row.
+    TYPES ty_t_row TYPE STANDARD TABLE OF ty_s_row WITH EMPTY KEY.
+
+    TYPES:
+      BEGIN OF ty_s_amount,
+        amount TYPE p LENGTH 10 DECIMALS 3,
+        date   TYPE d,
+      END OF ty_s_amount.
+    TYPES ty_t_amount TYPE STANDARD TABLE OF ty_s_amount WITH EMPTY KEY.
+
+    METHODS rows
+      RETURNING
+        VALUE(result) TYPE ty_t_row.
+
+    "! a workbook of three sheets: a title and a table, a hidden one, an
+    "! Excel table - with names, links, merged and hidden cells
+    METHODS book
+      RETURNING
+        VALUE(result) TYPE xstring.
+
+    METHODS formulas             FOR TESTING RAISING cx_static_check.
+    METHODS range_and_max_rows   FOR TESTING RAISING cx_static_check.
+    METHODS row_by_row           FOR TESTING RAISING cx_static_check.
+    METHODS errors_collected     FOR TESTING RAISING cx_static_check.
+    METHODS merged_and_links     FOR TESTING RAISING cx_static_check.
+    METHODS hidden_parts         FOR TESTING RAISING cx_static_check.
+    METHODS names_and_tables     FOR TESTING RAISING cx_static_check.
+    METHODS table_by_name        FOR TESTING RAISING cx_static_check.
+    METHODS text_notations       FOR TESTING RAISING cx_static_check.
+    METHODS cell_formats         FOR TESTING RAISING cx_static_check.
+
+ENDCLASS.
+
+CLASS ltcl_read_more IMPLEMENTATION.
+
+  METHOD rows.
+    result = VALUE #( ( text = `a` num = 1 date = `20240315` )
+                      ( text = `b` num = 2 date = `20240316` )
+                      ( text = `c` num = 3 date = `20240317` ) ).
+  ENDMETHOD.
+
+  METHOD book.
+    result = zabaputil_cl_util_xlsx=>factory(
+        )->add_sheet( name = `Report`
+        )->set_cell( row  = 1
+                     col  = 1
+                     val  = `Title`
+                     link = `https://example.com`
+        )->merge( `A1:C1`
+        )->add_table( val    = rows( )
+                      layout = VALUE #( start_cell = `A3` )
+        )->set_row( row    = 5
+                    hidden = abap_true
+        )->set_column( col    = 2
+                       hidden = abap_true
+        )->add_name( name = `Block`
+                     ref  = `Report!$A$3:$C$6`
+        )->add_sheet( val    = rows( )
+                      name   = `Secret`
+                      layout = VALUE #( hidden = abap_true )
+        )->add_sheet( val    = rows( )
+                      name   = `Tab`
+                      layout = VALUE #( table_style = `TableStyleLight9`
+                                        table_name  = `Orders`
+                                        start_cell  = `B2`
+                                        t_column    = VALUE #( ( name = `TEXT` total = `Total` )
+                                                               ( name = `NUM` total = `sum` )
+                                                               ( name = `DATE` ) ) )
+        )->get_xlsx( ).
+  ENDMETHOD.
+
+  METHOD formulas.
+    " a formula with its value, and a shared one: the cells after the
+    " first move its references without a $
+    DATA(lt_cell) = zabaputil_cl_util_xlsx=>factory_by_xlsx( ltcl_file=>pack(
+        `<row r="1"><c r="A1"><v>2</v></c><c r="B1"><f t="shared" ref="B1:B3" si="0">A1*$C$1+SUM(A$1:A1)</f><v>4</v></c>`
+     && `<c r="C1"><v>1</v></c><c r="D1" t="str"><f>"A1"&amp;Sheet2!A1</f><v>x</v></c></row>`
+     && `<row r="2"><c r="A2"><v>3</v></c><c r="B2"><f t="shared" si="0"/><v>8</v></c></row>`
+     && `<row r="3"><c r="A3"><v>4</v></c><c r="B3"><f t="shared" si="0"/><v>13</v></c></row>` ) )->get_cells( ).
+
+    cl_abap_unit_assert=>assert_equals( exp = `A1*$C$1+SUM(A$1:A1)`
+                                        act = lt_cell[ row = 1 col = 2 ]-formula ).
+    cl_abap_unit_assert=>assert_equals( exp = `A2*$C$1+SUM(A$1:A2)`
+                                        act = lt_cell[ row = 2 col = 2 ]-formula ).
+    cl_abap_unit_assert=>assert_equals( exp = `A3*$C$1+SUM(A$1:A3)`
+                                        act = lt_cell[ row = 3 col = 2 ]-formula ).
+    cl_abap_unit_assert=>assert_equals( exp = `13`
+                                        act = lt_cell[ row = 3 col = 2 ]-value ).
+    cl_abap_unit_assert=>assert_equals( exp = `"A1"&Sheet2!A1`
+                                        act = lt_cell[ row = 1 col = 4 ]-formula ).
+    cl_abap_unit_assert=>assert_initial( lt_cell[ row = 1 col = 1 ]-formula ).
+  ENDMETHOD.
+
+  METHOD range_and_max_rows.
+    DATA lt_back TYPE ty_t_row.
+
+    DATA(lo_xlsx) = zabaputil_cl_util_xlsx=>factory_by_xlsx( book( ) ).
+    DATA(lt_cell) = lo_xlsx->get_cells( range = `A4:A6` ).
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lines( lt_cell ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `a`
+                                        act = lt_cell[ 1 ]-value ).
+    lt_cell = lo_xlsx->get_cells( max_rows = 2 ).
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lt_cell[ lines( lt_cell ) ]-row ).
+
+    " a range: the header in its first row
+    lo_xlsx->get_table( EXPORTING range    = `A3:C6`
+                                  max_rows = 2
+                        IMPORTING result   = lt_back ).
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = lines( lt_back ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `20240316`
+                                        act = lt_back[ 2 ]-date ).
+
+    DATA(lr_any) = lo_xlsx->get_table_ref( range    = `B3:C6`
+                                           max_rows = 1 ).
+    FIELD-SYMBOLS <tab> TYPE STANDARD TABLE.
+    ASSIGN lr_any->* TO <tab>.
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = lines( <tab> ) ).
+    " a component of a table expression is assigned in two steps: the
+    " 7.02 downport reads the whole row into the field symbol otherwise
+    FIELD-SYMBOLS <line> TYPE any.
+    FIELD-SYMBOLS <num>  TYPE any.
+    LOOP AT <tab> ASSIGNING <line>.
+      EXIT.
+    ENDLOOP.
+    ASSIGN COMPONENT `NUM` OF STRUCTURE <line> TO <num>.
+    cl_abap_unit_assert=>assert_equals( exp = `1`
+                                        act = <num> ).
+  ENDMETHOD.
+
+  METHOD row_by_row.
+    DATA lt_cell TYPE zabaputil_cl_util_xlsx=>ty_t_cell.
+    DATA lv_eof  TYPE abap_bool.
+    DATA lv_rows TYPE i.
+
+    DATA(lo_xlsx) = zabaputil_cl_util_xlsx=>factory_by_xlsx( book( ) ).
+    lo_xlsx->rows_open( sheet = `Tab` ).
+    DO.
+      lo_xlsx->rows_next( IMPORTING t_cell = lt_cell
+                                    eof    = lv_eof ).
+      IF lv_eof = abap_true.
+        EXIT.
+      ENDIF.
+      lv_rows = lv_rows + 1.
+    ENDDO.
+    " the header, three rows, the totals row
+    cl_abap_unit_assert=>assert_equals( exp = 5
+                                        act = lv_rows ).
+    TRY.
+        zabaputil_cl_util_xlsx=>factory_by_xlsx( book( ) )->rows_next( IMPORTING t_cell = lt_cell
+                                                                                 eof    = lv_eof ).
+        cl_abap_unit_assert=>fail( `rows_next( ) without rows_open( ) has to raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD errors_collected.
+    DATA lt_back  TYPE ty_t_row.
+    DATA lt_error TYPE zabaputil_cl_util_xlsx=>ty_t_error.
+
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>factory( )->add_sheet(
+        VALUE string_table( ( `num` ) ( `1` ) ( `x` ) ( `3` ) ( `y` ) ) )->get_xlsx( ).
+    zabaputil_cl_util_xlsx=>factory_by_xlsx( lv_file )->get_table( EXPORTING header_row = 2
+                                                                   IMPORTING result     = lt_back
+                                                                             t_error    = lt_error ).
+    " every row read, every cell that does not fit listed
+    cl_abap_unit_assert=>assert_equals( exp = 4
+                                        act = lines( lt_back ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = lines( lt_error ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `A4`
+                                        act = lt_error[ 1 ]-cell ).
+    cl_abap_unit_assert=>assert_equals( exp = `x`
+                                        act = lt_error[ 1 ]-value ).
+    cl_abap_unit_assert=>assert_equals( exp = `NUM`
+                                        act = lt_error[ 1 ]-component ).
+    cl_abap_unit_assert=>assert_equals( exp = `Sheet1`
+                                        act = lt_error[ 1 ]-sheet ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lt_error[ 2 ]-message CS `XLSX_CELL_TYPE` ) ).
+
+    " without t_error the first one raises
+    TRY.
+        zabaputil_cl_util_xlsx=>factory_by_xlsx( lv_file )->get_table( EXPORTING header_row = 2
+                                                                       IMPORTING result     = lt_back ).
+        cl_abap_unit_assert=>fail( `a cell that does not fit has to raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD merged_and_links.
+    DATA(lo_xlsx) = zabaputil_cl_util_xlsx=>factory_by_xlsx( book( ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = VALUE string_table( ( `A1:C1` ) )
+                                        act = lo_xlsx->get_merged( ) ).
+    DATA(lt_link) = lo_xlsx->get_hyperlinks( ).
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = lines( lt_link ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `A1`
+                                        act = lt_link[ 1 ]-cell ).
+    cl_abap_unit_assert=>assert_equals( exp = `https://example.com`
+                                        act = lt_link[ 1 ]-target ).
+
+    " the first cell of a merged range in every cell of it
+    DATA(lt_cell) = lo_xlsx->get_cells( range       = `A1:C1`
+                                        fill_merged = abap_true ).
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lines( lt_cell ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `Title`
+                                        act = lt_cell[ 3 ]-value ).
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lt_cell[ 3 ]-col ).
+  ENDMETHOD.
+
+  METHOD hidden_parts.
+    DATA(lo_xlsx) = zabaputil_cl_util_xlsx=>factory_by_xlsx( book( ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = VALUE string_table( ( `Report` ) ( `Tab` ) )
+                                        act = lo_xlsx->get_sheet_names( no_hidden = abap_true ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lines( lo_xlsx->get_sheet_names( ) ) ).
+
+    " row 5 and column B are hidden
+    DATA(lt_cell) = lo_xlsx->get_cells( range       = `A3:C6`
+                                        skip_hidden = abap_true ).
+    cl_abap_unit_assert=>assert_false( xsdbool( line_exists( lt_cell[ row = 5 ] ) ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( line_exists( lt_cell[ col = 2 ] ) ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 6
+                                        act = lines( lt_cell ) ).
+  ENDMETHOD.
+
+  METHOD names_and_tables.
+    DATA(lo_xlsx) = zabaputil_cl_util_xlsx=>factory_by_xlsx( book( ) ).
+
+    DATA(lt_name) = lo_xlsx->get_defined_names( ).
+    cl_abap_unit_assert=>assert_equals( exp = `Report!$A$3:$C$6`
+                                        act = lt_name[ name = `Block` ]-ref ).
+    DATA(lt_table) = lo_xlsx->get_excel_tables( ).
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = lines( lt_table ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `Orders`
+                                        act = lt_table[ 1 ]-name ).
+    cl_abap_unit_assert=>assert_equals( exp = `Tab`
+                                        act = lt_table[ 1 ]-sheet ).
+    cl_abap_unit_assert=>assert_equals( exp = `B2:D6`
+                                        act = lt_table[ 1 ]-ref ).
+    cl_abap_unit_assert=>assert_equals( exp = 1
+                                        act = lt_table[ 1 ]-totals_rows ).
+  ENDMETHOD.
+
+  METHOD table_by_name.
+    DATA lt_back TYPE ty_t_row.
+
+    DATA(lo_xlsx) = zabaputil_cl_util_xlsx=>factory_by_xlsx( book( ) ).
+    " an Excel table: its rows, without the totals row
+    lo_xlsx->get_table( EXPORTING table_name = `orders`
+                        IMPORTING result     = lt_back ).
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lines( lt_back ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lt_back[ 3 ]-num ).
+    " a defined name: its range, the header in its first row
+    lo_xlsx->get_table( EXPORTING table_name = `Block`
+                        IMPORTING result     = lt_back ).
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lines( lt_back ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `c`
+                                        act = lt_back[ 3 ]-text ).
+    DATA(lr_any) = lo_xlsx->get_table_ref( table_name = `Orders` ).
+    FIELD-SYMBOLS <tab> TYPE STANDARD TABLE.
+    ASSIGN lr_any->* TO <tab>.
+    cl_abap_unit_assert=>assert_equals( exp = 3
+                                        act = lines( <tab> ) ).
+    TRY.
+        lo_xlsx->get_table( EXPORTING table_name = `nope`
+                            IMPORTING result     = lt_back ).
+        cl_abap_unit_assert=>fail( `a name the workbook does not have has to raise` ).
+      CATCH zabaputil_cx_util_error INTO DATA(x).
+        cl_abap_unit_assert=>assert_true( xsdbool( x->get_text( ) CS `XLSX_NAME_UNKNOWN` ) ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD cell_formats.
+    DATA(lv_file) = zabaputil_cl_util_xlsx=>xlsx_by_itab(
+        val    = rows( )
+        layout = VALUE #( header_style = VALUE #( fill = `1F4E78` color = `FFFFFF` )
+                          t_column     = VALUE #( ( name = `TEXT` style = VALUE #( wrap = abap_true halign = `center` ) )
+                                                  ( name = `NUM` format = `#,##0.00` ) ) ) ).
+    DATA(lt_format) = zabaputil_cl_util_xlsx=>factory_by_xlsx( lv_file )->get_cell_formats( ).
+
+    DATA(ls_head) = lt_format[ row = 1 col = 1 ].
+    cl_abap_unit_assert=>assert_equals( exp = abap_true
+                                        act = ls_head-bold ).
+    cl_abap_unit_assert=>assert_equals( exp = `FFFFFF`
+                                        act = ls_head-color ).
+    cl_abap_unit_assert=>assert_equals( exp = `1F4E78`
+                                        act = ls_head-fill ).
+    DATA(ls_text) = lt_format[ row = 2 col = 1 ].
+    cl_abap_unit_assert=>assert_equals( exp = abap_true
+                                        act = ls_text-wrap ).
+    cl_abap_unit_assert=>assert_equals( exp = `center`
+                                        act = ls_text-halign ).
+    cl_abap_unit_assert=>assert_equals( exp = `#,##0.00`
+                                        act = lt_format[ row = 3 col = 2 ]-format ).
+    " the two header cells and the cells of the two columns of three rows
+    cl_abap_unit_assert=>assert_equals( exp = 8
+                                        act = lines( lt_format ) ).
+  ENDMETHOD.
+
+  METHOD text_notations.
+    DATA lt_back TYPE ty_t_amount.
+
+    DATA(lv_file) = ltcl_file=>pack(
+        `<row r="1"><c r="A1" t="inlineStr"><is><t>amount</t></is></c><c r="B1" t="inlineStr"><is><t>date</t></is></c></row>`
+     && `<row r="2"><c r="A2" t="inlineStr"><is><t>1.234,56-</t></is></c><c r="B2" t="inlineStr"><is><t>03/15/2024</t></is></c></row>`
+     && `<row r="3"><c r="A3" t="inlineStr"><is><t>EUR 12.50</t></is></c><c r="B3" t="inlineStr"><is><t>3/1/24</t></is></c></row>`
+     && `<row r="4"><c r="A4" t="inlineStr"><is><t>12,5 %</t></is></c><c r="B4" t="inlineStr"><is><t>2024-12-01</t></is></c></row>` ).
+    zabaputil_cl_util_xlsx=>factory_by_xlsx( lv_file )->get_table( EXPORTING date_order = `MDY`
+                                                                   IMPORTING result     = lt_back ).
+    cl_abap_unit_assert=>assert_equals( exp = `-1234.56`
+                                        act = lt_back[ 1 ]-amount ).
+    cl_abap_unit_assert=>assert_equals( exp = `12.5`
+                                        act = lt_back[ 2 ]-amount ).
+    cl_abap_unit_assert=>assert_equals( exp = `0.125`
+                                        act = lt_back[ 3 ]-amount ).
+    cl_abap_unit_assert=>assert_equals( exp = `20240315`
+                                        act = lt_back[ 1 ]-date ).
+    cl_abap_unit_assert=>assert_equals( exp = `20240301`
+                                        act = lt_back[ 2 ]-date ).
+    cl_abap_unit_assert=>assert_equals( exp = `20241201`
+                                        act = lt_back[ 3 ]-date ).
+    " day first by default
+    zabaputil_cl_util_xlsx=>factory_by_xlsx( lv_file )->get_table( IMPORTING result = lt_back ).
+    cl_abap_unit_assert=>assert_equals( exp = `20240103`
+                                        act = lt_back[ 2 ]-date ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+"! ================================================================
 "! WRITING AND READING BACK
 "! ================================================================
 CLASS ltcl_roundtrip DEFINITION FINAL
