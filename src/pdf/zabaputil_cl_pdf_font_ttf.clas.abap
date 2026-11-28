@@ -14,21 +14,27 @@ CLASS zabaputil_cl_pdf_font_ttf DEFINITION
     " composite ones among them (subset = abap_false embeds the whole
     " file). The glyph numbers stay what they are: the glyphs that are not
     " used are empty, and tables a PDF viewer does not read (GSUB, GPOS,
-    " kern, ...) are left out. Not supported: OpenType fonts with
-    " PostScript outlines (CFF, the usual .otf), font collections (.ttc),
-    " and everything a shaping engine does - ligatures, kerning, Arabic
+    " kern, ...) are left out.
+    "
+    " An OpenType font with PostScript outlines (CFF, the usual .otf) is
+    " embedded whole, as an OpenType font program (FontFile3) - it is not
+    " subset. Of a font collection (.ttc) one font is embedded, the first
+    " or the one of index, as a TrueType file of its own. Not supported:
+    " everything a shaping engine does - ligatures, kerning, Arabic
     " joining, right-to-left.
 
     INTERFACES zabaputil_if_pdf_font.
 
     "! @parameter content  | the bytes of the .ttf file
     "! @parameter resource | the name in the resource dictionary, `F1`
-    "! @parameter subset   | embed the glyphs in use only
+    "! @parameter subset   | embed the glyphs in use only (TrueType outlines)
+    "! @parameter index    | of a collection (.ttc): the font, from 0
     METHODS constructor
       IMPORTING
         content  TYPE xstring
         resource TYPE clike
-        subset   TYPE abap_bool DEFAULT abap_true.
+        subset   TYPE abap_bool DEFAULT abap_true
+        index    TYPE i DEFAULT 0.
 
     "! The font file as it is embedded: the glyphs used so far, or the
     "! whole file without subsetting
@@ -74,6 +80,12 @@ CLASS zabaputil_cl_pdf_font_ttf DEFINITION
 
     DATA mv_content       TYPE xstring.
     DATA mv_subset        TYPE abap_bool.
+    " where the font starts in the file: 0, or its offset in a collection
+    DATA mv_base          TYPE i.
+    DATA mv_index         TYPE i.
+    DATA mv_collection    TYPE abap_bool.
+    " PostScript outlines (CFF) instead of TrueType ones
+    DATA mv_cff           TYPE abap_bool.
     DATA mv_resource      TYPE string.
     DATA mv_name          TYPE string.
     DATA mt_table         TYPE HASHED TABLE OF ty_s_table WITH UNIQUE KEY tag.
@@ -156,8 +168,11 @@ CLASS zabaputil_cl_pdf_font_ttf DEFINITION
       RETURNING
         VALUE(result) TYPE ty_s_glyph.
 
-    "! The file with the glyphs in use only
+    "! A TrueType file of the glyphs in use only - or of all glyphs, for a
+    "! font of a collection
     METHODS subset
+      IMPORTING
+        all           TYPE abap_bool DEFAULT abap_false
       RETURNING
         VALUE(result) TYPE xstring.
 
@@ -205,6 +220,7 @@ CLASS zabaputil_cl_pdf_font_ttf IMPLEMENTATION.
     mv_content = content.
     mv_resource = resource.
     mv_subset = subset.
+    mv_index = index.
 
     read_directory( ).
     read_metrics( ).
@@ -285,17 +301,42 @@ CLASS zabaputil_cl_pdf_font_ttf IMPLEMENTATION.
           val = `PDF: not a TrueType font file`.
     ENDIF.
 
-    " 00010000 or `true`: TrueType outlines. `OTTO` has PostScript
-    " outlines, `ttcf` is a collection of several fonts
+    " `ttcf` is a collection of several fonts: the offset of each of them
+    " follows the number of fonts
     lv_version = mv_content(4).
-    IF lv_version <> `00010000` AND lv_version <> `74727565`.
-      RAISE EXCEPTION TYPE zabaputil_cx_util_error
-        EXPORTING
-          val = `PDF: only TrueType fonts (.ttf) can be embedded, not OpenType/CFF (.otf) or collections (.ttc)`.
+    IF lv_version = `74746366`.
+      mv_collection = abap_true.
+      IF mv_index < 0 OR mv_index >= u32( 8 ).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |PDF: the font collection has no font { mv_index } - it has { u32( 8 ) }|.
+      ENDIF.
+      mv_base = u32( 12 + mv_index * 4 ).
+      IF mv_base + 12 > xstrlen( mv_content ).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = `PDF: the font file is damaged (a font of the collection is behind its end)`.
+      ENDIF.
+      lv_version = mv_content+mv_base(4).
     ENDIF.
 
-    DATA(lv_count) = u16( 4 ).
-    lv_off = 12.
+    " 00010000 or `true`: TrueType outlines; `OTTO`: PostScript outlines
+    IF lv_version = `4F54544F`.
+      mv_cff = abap_true.
+      IF mv_collection = abap_true.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = `PDF: a collection of fonts with PostScript outlines (.otc) cannot be embedded`.
+      ENDIF.
+    ELSEIF lv_version <> `00010000` AND lv_version <> `74727565`.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = `PDF: not a TrueType or OpenType font file (.ttf, .otf, .ttc)`.
+    ENDIF.
+
+    " the table offsets are from the start of the file, in a collection too
+    DATA(lv_count) = u16( mv_base + 4 ).
+    lv_off = mv_base + 12.
     DO lv_count TIMES.
       IF lv_off + 16 > xstrlen( mv_content ).
         EXIT.
@@ -667,7 +708,7 @@ CLASS zabaputil_cl_pdf_font_ttf IMPLEMENTATION.
 
     " a subset is named after its glyphs: six capitals and a plus sign
     DATA(lv_name) = mv_name.
-    IF mv_subset = abap_true.
+    IF mv_subset = abap_true AND mv_cff = abap_false.
       DATA lv_hash TYPE i.
       DATA lv_tag TYPE string.
       LOOP AT lt_sorted ASSIGNING <glyph>.
@@ -682,19 +723,35 @@ CLASS zabaputil_cl_pdf_font_ttf IMPLEMENTATION.
       lv_name = |{ lv_tag }+{ mv_name }|.
     ENDIF.
 
+    " TrueType outlines: FontFile2 and a CIDFontType2 with CID = glyph.
+    " PostScript outlines: the OpenType file as FontFile3 and a
+    " CIDFontType0 - a CFF that is not CID-keyed takes the CIDs as glyphs
     DATA(lv_content) = file( ).
-    DATA(lv_file) = writer->add_stream( dict    = |/Length1 { xstrlen( lv_content ) }|
-                                        content = lv_content ).
+    DATA lv_font_file TYPE string.
+    DATA lv_subtype   TYPE string.
+    DATA lv_gid_map   TYPE string.
+    IF mv_cff = abap_true.
+      DATA(lv_file) = writer->add_stream( dict    = `/Subtype /OpenType`
+                                          content = lv_content ).
+      lv_font_file = |/FontFile3 { lv_file } 0 R|.
+      lv_subtype = `CIDFontType0`.
+    ELSE.
+      lv_file = writer->add_stream( dict    = |/Length1 { xstrlen( lv_content ) }|
+                                    content = lv_content ).
+      lv_font_file = |/FontFile2 { lv_file } 0 R|.
+      lv_subtype = `CIDFontType2`.
+      lv_gid_map = ` /CIDToGIDMap /Identity`.
+    ENDIF.
 
     DATA(lv_descriptor) = writer->add_object(
         |<< /Type /FontDescriptor /FontName /{ lv_name } /Flags { lv_flags } /FontBBox [{ mv_bbox }] | &&
         |/ItalicAngle { mv_italic_angle } /Ascent { mv_ascent } /Descent { mv_descent * -1 } | &&
-        |/CapHeight { mv_cap_height } /StemV 80 /FontFile2 { lv_file } 0 R >>| ).
+        |/CapHeight { mv_cap_height } /StemV 80 { lv_font_file } >>| ).
 
     DATA(lv_cid_font) = writer->add_object(
-        |<< /Type /Font /Subtype /CIDFontType2 /BaseFont /{ lv_name } | &&
+        |<< /Type /Font /Subtype /{ lv_subtype } /BaseFont /{ lv_name } | &&
         |/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> | &&
-        |/FontDescriptor { lv_descriptor } 0 R /DW 1000 /W [{ lv_widths } ] /CIDToGIDMap /Identity >>| ).
+        |/FontDescriptor { lv_descriptor } 0 R /DW 1000 /W [{ lv_widths } ]{ lv_gid_map } >>| ).
 
     DATA(lv_to_unicode) = writer->add_stream(
         zabaputil_cl_util_context=>conv_get_xstring_by_string( to_unicode( ) ) ).
@@ -716,8 +773,12 @@ CLASS zabaputil_cl_pdf_font_ttf IMPLEMENTATION.
 
   METHOD file.
 
-    IF mv_subset = abap_true.
+    IF mv_cff = abap_true.
+      result = mv_content.
+    ELSEIF mv_subset = abap_true.
       result = subset( ).
+    ELSEIF mv_collection = abap_true.
+      result = subset( abap_true ).
     ELSE.
       result = mv_content.
     ENDIF.
@@ -860,6 +921,14 @@ CLASS zabaputil_cl_pdf_font_ttf IMPLEMENTATION.
     LOOP AT mt_glyph ASSIGNING FIELD-SYMBOL(<glyph>).
       INSERT <glyph>-glyph INTO TABLE lt_queue.
     ENDLOOP.
+    IF all = abap_true.
+      lv_glyph = 0.
+      WHILE lv_glyph < mv_num_glyphs.
+        INSERT lv_glyph INTO TABLE lt_used.
+        lv_glyph = lv_glyph + 1.
+      ENDWHILE.
+      CLEAR lt_queue.
+    ENDIF.
     WHILE lt_queue IS NOT INITIAL.
       lv_glyph = lt_queue[ 1 ].
       DELETE lt_queue INDEX 1.

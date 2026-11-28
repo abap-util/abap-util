@@ -20,6 +20,7 @@ CLASS ltcl_font_ttf DEFINITION FINAL
     METHODS not_a_font              FOR TESTING.
     METHODS postscript_outlines     FOR TESTING.
     METHODS collection              FOR TESTING.
+    METHODS collection_font         FOR TESTING.
     METHODS truncated               FOR TESTING.
 
     " two fonts built by hand for this test, 1000 units per em, ascender
@@ -331,12 +332,74 @@ CLASS ltcl_font_ttf IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD postscript_outlines.
-    " OTTO: an OpenType font with CFF outlines
+    " OTTO: an OpenType font with CFF outlines - here the test font under
+    " that name. It is embedded whole, as an OpenType font program
+    DATA lv_hex TYPE string.
+    lv_hex = font_format_4( ).
+    lv_hex = `4F54544F` && substring( val = lv_hex
+                                      off = 8 ).
+    DATA lv_otf TYPE xstring.
+    lv_otf = lv_hex.
+    DATA lo_ttf TYPE REF TO zabaputil_cl_pdf_font_ttf.
+    lo_ttf ?= font( content = lv_otf
+                    subset  = abap_true ).
+    lo_ttf->zabaputil_if_pdf_font~encode( `A` ).
+    cl_abap_unit_assert=>assert_equals( exp = lv_otf act = lo_ttf->file( ) ).
+    DATA(lv_rendered) = rendered( lo_ttf ).
+    cl_abap_unit_assert=>assert_true(
+        xsdbool( lv_rendered CS zabaputil_cl_pdf_writer=>hex( `<< /Subtype /OpenType /Length` ) ) ).
+    cl_abap_unit_assert=>assert_true(
+        xsdbool( lv_rendered CS zabaputil_cl_pdf_writer=>hex( `/StemV 80 /FontFile3 1 0 R >>` ) ) ).
+    cl_abap_unit_assert=>assert_true(
+        xsdbool( lv_rendered CS zabaputil_cl_pdf_writer=>hex( `/Subtype /CIDFontType0 /BaseFont /TestFont ` ) ) ).
+    cl_abap_unit_assert=>assert_false(
+        xsdbool( lv_rendered CS zabaputil_cl_pdf_writer=>hex( `CIDToGIDMap` ) ) ).
+  ENDMETHOD.
+
+  METHOD collection_font.
+    " a collection of one font: the header, then the font, every table
+    " offset 16 bytes further
+    DATA lv_font TYPE string.
+    DATA lv_x4   TYPE x LENGTH 4.
+    DATA lv_off  TYPE i.
+    DATA lv_value TYPE i.
+    lv_font = font_format_4( ).
+    DATA(lv_tables) = 10.
+    DO lv_tables TIMES.
+      lv_off = ( 12 + ( sy-index - 1 ) * 16 + 8 ) * 2.
+      lv_x4 = substring( val = lv_font
+                         off = lv_off
+                         len = 8 ).
+      lv_value = lv_x4.
+      lv_value = lv_value + 16.
+      lv_x4 = lv_value.
+      lv_font = substring( val = lv_font
+                           len = lv_off ) && lv_x4 && substring( val = lv_font
+                                                                 off = lv_off + 8 ).
+    ENDDO.
+    DATA lv_ttc TYPE xstring.
+    lv_ttc = `7474636600010000` && `00000001` && `00000010` && lv_font.
+
+    DATA lo_ttf TYPE REF TO zabaputil_cl_pdf_font_ttf.
+    lo_ttf ?= font( lv_ttc ).
+    cl_abap_unit_assert=>assert_equals( exp = `TestFont` act = lo_ttf->name( ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lo_ttf->glyph( 66 ) ).
+    " embedded: a TrueType file of its own, also without subsetting
+    DATA(lv_file) = lo_ttf->file( ).
+    cl_abap_unit_assert=>assert_equals( exp = `00010000` act = CONV string( lv_file(4) ) ).
+    DATA(lo_again) = NEW zabaputil_cl_pdf_font_ttf( content  = lv_file
+                                                    resource = `F2` ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lo_again->glyph( 65 ) ).
+
+    " a font the collection does not have
+    DATA lo_none TYPE REF TO zabaputil_cl_pdf_font_ttf.
     TRY.
-        font( CONV xstring( `4F54544F000A008000030020` ) ).
+        lo_none = NEW #( content  = lv_ttc
+                         resource = `F1`
+                         index    = 1 ).
         cl_abap_unit_assert=>fail( ).
       CATCH zabaputil_cx_util_error INTO DATA(lx).
-        cl_abap_unit_assert=>assert_true( xsdbool( lx->get_text( ) CS `.otf` ) ).
+        cl_abap_unit_assert=>assert_true( xsdbool( lx->get_text( ) CS `no font 1` ) ).
     ENDTRY.
   ENDMETHOD.
 

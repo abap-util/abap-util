@@ -73,14 +73,17 @@ CLASS zabaputil_cl_pdf DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_if_pdf_font.
 
-    "! A TrueType font, embedded into the file: every script the font has
-    "! @parameter content | the bytes of the .ttf file
+    "! A TrueType or OpenType font, embedded into the file: every script
+    "! the font has
+    "! @parameter content | the bytes of the .ttf, .otf or .ttc file
     "! @parameter subset  | only the glyphs the document uses; abap_false
     "!                      embeds the whole file
+    "! @parameter index   | of a collection (.ttc): the font, from 0
     METHODS font_ttf
       IMPORTING
         content       TYPE xstring
         subset        TYPE abap_bool DEFAULT abap_true
+        index         TYPE i DEFAULT 0
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_if_pdf_font.
 
@@ -371,7 +374,8 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
 
     ls_font-font = NEW zabaputil_cl_pdf_font_ttf( content  = content
                                                   resource = |F{ lines( mt_font ) + 1 }|
-                                                  subset   = subset ).
+                                                  subset   = subset
+                                                  index    = index ).
     INSERT ls_font INTO TABLE mt_font.
     result = ls_font-font.
 
