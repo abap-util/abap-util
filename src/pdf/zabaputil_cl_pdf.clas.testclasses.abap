@@ -25,6 +25,7 @@ CLASS ltcl_pdf DEFINITION FINAL
     METHODS bookmarks_outline       FOR TESTING.
     METHODS link_to_page            FOR TESTING.
     METHODS attachments             FOR TESTING.
+    METHODS invoice                 FOR TESTING.
 
     " a font and an image made for the tests of their classes
     METHODS font_format_4
@@ -516,6 +517,45 @@ CLASS ltcl_pdf IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( exp = 1
                                         act = count( val = lv_hex
                                                      sub = lv_octets ) ).
+  ENDMETHOD.
+
+  METHOD invoice.
+    " PDF/A-3 with the XML and the metadata of Factur-X; a page without
+    " text needs no font
+    DATA lv_hex TYPE string.
+    DATA(lo_pdf) = zabaputil_cl_pdf=>create( compress = abap_false ).
+    lo_pdf->add_page( ).
+    lo_pdf->attach_invoice( zabaputil_cl_util_context=>conv_get_xstring_by_string( `<rsm:CrossIndustryInvoice/>` ) ).
+    lv_hex = lo_pdf->render( ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( `<pdfaid:part>3</pdfaid:part>` ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex(
+        `<fx:DocumentFileName>factur-x.xml</fx:DocumentFileName><fx:Version>1.0</fx:Version>` &&
+        `<fx:ConformanceLevel>EN 16931</fx:ConformanceLevel>` ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex(
+        `<pdfaSchema:prefix>fx</pdfaSchema:prefix>` ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( `/AFRelationship /Alternative` ) ) ).
+
+    " XRechnung: its own file name; MINIMUM: data beside the document
+    lo_pdf = zabaputil_cl_pdf=>create( compress = abap_false ).
+    lo_pdf->add_page( ).
+    lo_pdf->attach_invoice( xml   = zabaputil_cl_util_context=>conv_get_xstring_by_string( `<x/>` )
+                            level = `xrechnung` ).
+    lv_hex = lo_pdf->render( ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex(
+        `<fx:DocumentFileName>xrechnung.xml</fx:DocumentFileName>` ) ) ).
+    lo_pdf = zabaputil_cl_pdf=>create( compress = abap_false ).
+    lo_pdf->add_page( ).
+    lo_pdf->attach_invoice( xml   = zabaputil_cl_util_context=>conv_get_xstring_by_string( `<x/>` )
+                            level = `MINIMUM` ).
+    lv_hex = lo_pdf->render( ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( `/AFRelationship /Data` ) ) ).
+
+    TRY.
+        lo_pdf->attach_invoice( xml   = zabaputil_cl_util_context=>conv_get_xstring_by_string( `<x/>` )
+                                level = `COMFORT` ).
+        cl_abap_unit_assert=>fail( ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
   ENDMETHOD.
 
 ENDCLASS.

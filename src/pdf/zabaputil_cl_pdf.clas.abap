@@ -165,6 +165,20 @@ CLASS zabaputil_cl_pdf DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_cl_pdf.
 
+    "! An e-invoice: the document becomes PDF/A-3b with the invoice XML
+    "! (CII) attached, and the metadata say what it is - ZUGFeRD 2 /
+    "! Factur-X 1.0. The XML is as the caller made it; nothing checks it
+    "! @parameter xml       | the bytes of the invoice XML
+    "! @parameter level     | MINIMUM, BASIC WL, BASIC, EN 16931, EXTENDED or XRECHNUNG
+    "! @parameter file_name | factur-x.xml - xrechnung.xml for XRECHNUNG
+    METHODS attach_invoice
+      IMPORTING
+        xml           TYPE xstring
+        level         TYPE clike DEFAULT `EN 16931`
+        file_name     TYPE clike OPTIONAL
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf.
+
     METHODS set_info
       IMPORTING
         title         TYPE clike OPTIONAL
@@ -526,6 +540,65 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
                                 val2 = mt_bookmark[ lines( mt_bookmark ) ]-level + 1 ).
     ENDIF.
     INSERT ls_bookmark INTO TABLE mt_bookmark.
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD attach_invoice.
+
+    DATA lv_relationship TYPE string.
+
+    DATA(lv_level) = to_upper( condense( level ) ).
+    IF lv_level <> `MINIMUM` AND lv_level <> `BASIC WL` AND lv_level <> `BASIC` AND lv_level <> `EN 16931`
+        AND lv_level <> `EXTENDED` AND lv_level <> `XRECHNUNG`.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |PDF: { level } is no level of Factur-X (MINIMUM, BASIC WL, BASIC, EN 16931, EXTENDED, XRECHNUNG)|.
+    ENDIF.
+    DATA(lv_name) = CONV string( file_name ).
+    IF lv_name IS INITIAL.
+      lv_name = COND #( WHEN lv_level = `XRECHNUNG` THEN `xrechnung.xml` ELSE `factur-x.xml` ).
+    ENDIF.
+    " MINIMUM and BASIC WL are no full invoice: the XML is data beside the
+    " document, from BASIC on it is the same invoice once more
+    lv_relationship = COND #( WHEN lv_level = `MINIMUM` OR lv_level = `BASIC WL` THEN `Data` ELSE `Alternative` ).
+
+    set_pdfa( ).
+    attach( name         = lv_name
+            content      = xml
+            mime         = `text/xml`
+            description  = `Factur-X invoice`
+            relationship = lv_relationship ).
+
+    " the properties of Factur-X, and the PDF/A extension schema that
+    " describes them
+    DATA(lv_fx) = `urn:factur-x:pdfa:CrossIndustryDocument:invoice:1p0#`.
+    add_xmp( |<rdf:Description rdf:about="" xmlns:fx="{ lv_fx }">| &&
+             |<fx:DocumentType>INVOICE</fx:DocumentType>| &&
+             |<fx:DocumentFileName>{ zabaputil_cl_util_context=>c_escape_xml( lv_name ) }</fx:DocumentFileName>| &&
+             |<fx:Version>1.0</fx:Version>| &&
+             |<fx:ConformanceLevel>{ lv_level }</fx:ConformanceLevel>| &&
+             |</rdf:Description>| ).
+    DATA(lv_properties) = ``.
+    DATA(lt_property) = VALUE string_table( ( `DocumentFileName:The name of the embedded XML document` )
+                                            ( `DocumentType:The type of the hybrid document in capital letters, e.g. INVOICE or ORDER` )
+                                            ( `Version:The actual version of the standard applying to the embedded XML document` )
+                                            ( `ConformanceLevel:The conformance level of the embedded XML document` ) ).
+    LOOP AT lt_property INTO DATA(lv_property).
+      SPLIT lv_property AT `:` INTO DATA(lv_property_name) DATA(lv_description).
+      lv_properties = lv_properties &&
+          |<rdf:li rdf:parseType="Resource"><pdfaProperty:name>{ lv_property_name }</pdfaProperty:name>| &&
+          |<pdfaProperty:valueType>Text</pdfaProperty:valueType><pdfaProperty:category>external</pdfaProperty:category>| &&
+          |<pdfaProperty:description>{ lv_description }</pdfaProperty:description></rdf:li>|.
+    ENDLOOP.
+    add_xmp( |<rdf:Description rdf:about="" xmlns:pdfaExtension="http://www.aiim.org/pdfa/ns/extension/" | &&
+             |xmlns:pdfaSchema="http://www.aiim.org/pdfa/ns/schema#" xmlns:pdfaProperty="http://www.aiim.org/pdfa/ns/property#">| &&
+             |<pdfaExtension:schemas><rdf:Bag><rdf:li rdf:parseType="Resource">| &&
+             |<pdfaSchema:schema>Factur-X PDFA Extension Schema</pdfaSchema:schema>| &&
+             |<pdfaSchema:namespaceURI>{ lv_fx }</pdfaSchema:namespaceURI>| &&
+             |<pdfaSchema:prefix>fx</pdfaSchema:prefix>| &&
+             |<pdfaSchema:property><rdf:Seq>{ lv_properties }</rdf:Seq></pdfaSchema:property>| &&
+             |</rdf:li></rdf:Bag></pdfaExtension:schemas></rdf:Description>| ).
     result = me.
 
   ENDMETHOD.

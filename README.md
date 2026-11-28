@@ -632,6 +632,9 @@ lo_pdf->attach( name = `delivery.csv` content = lv_csv mime = `text/csv` descrip
 " PDF/A-3b for archiving: XMP metadata, sRGB output intent, file identifier - with
 " embedded fonts only (font_ttf); render( ) raises for a standard font or a missing glyph
 lo_pdf->set_pdfa( ).
+" An e-invoice (ZUGFeRD 2 / Factur-X 1.0): PDF/A-3b with the CII XML attached and the
+" Factur-X metadata - the XML is the caller's, nothing checks it
+lo_pdf->attach_invoice( xml = lv_cii_xml level = `EN 16931` ).
 DATA(lv_file) = lo_pdf->render( ). " => xstring
 
 " Flow text and tables over pages
