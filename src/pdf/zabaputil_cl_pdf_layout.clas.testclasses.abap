@@ -50,6 +50,9 @@ CLASS ltcl_layout DEFINITION FINAL
     METHODS table_zebra             FOR TESTING.
     METHODS table_border_none       FOR TESTING.
     METHODS table_border_rows       FOR TESTING.
+    METHODS area_lines_and_parts    FOR TESTING.
+    METHODS area_first_page         FOR TESTING.
+    METHODS area_image              FOR TESTING.
     METHODS finish_page_numbers     FOR TESTING.
     METHODS finish_header           FOR TESTING.
     METHODS finish_once             FOR TESTING.
@@ -644,6 +647,56 @@ CLASS ltcl_layout IMPLEMENTATION.
     cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS `1 0 0 RG` ) ).
     cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS `50 773.39 m 150 773.39 l S` ) ).
     cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS `50 754.89 m 150 754.89 l S` ) ).
+  ENDMETHOD.
+
+  METHOD area_lines_and_parts.
+    mo_layout->set_header_area( VALUE #( left  = |A\nB|
+                                         right = `C{page}` ) ).
+    mo_layout->text( `a` ).
+    mo_layout->finish( ).
+    " 8 points, a line every 10: two lines around the middle of the top
+    " margin, at 20 and 30 from the top; one line in the middle at 25
+    DATA(lv_content) = mo_pdf->page( 1 )->content( ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS `BT /F1 8 Tf 50 821.89 Td <41> Tj ET` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS `BT /F1 8 Tf 50 811.89 Td <42> Tj ET` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_content CS `BT /F1 8 Tf 535.68 816.89 Td <4331> Tj ET` ) ).
+  ENDMETHOD.
+
+  METHOD area_first_page.
+    mo_layout->set_footer_area( VALUE #( center = `other` ) ).
+    mo_layout->set_footer_area( val        = VALUE #( center = `first` )
+                                first_page = abap_true ).
+    mo_layout->set_header( `header` ).
+    " the first page without a header
+    mo_layout->set_header_area( val        = VALUE #( )
+                                first_page = abap_true ).
+    mo_layout->text( `a` ).
+    mo_layout->page_break( ).
+    mo_layout->text( `b` ).
+    mo_layout->finish( ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 1 text = `first` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = shown( page = 1 text = `other` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = shown( page = 1 text = `header` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = shown( page = 2 text = `first` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 2 text = `other` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( page = 2 text = `header` ) ).
+  ENDMETHOD.
+
+  METHOD area_image.
+    " a PNG of 2 x 2 pixels, 20 high: 20 wide, at the right margin, centred
+    " in the top margin - from 15 to 35 from the top
+    DATA lv_hex TYPE string.
+    lv_hex = `89504E470D0A1A0A0000000D4948445200000002000000020802000000FDD49A73000000054944415478DA63F8CF51E86AD7` &&
+             `0000000D49444154C0C000C20CFF8100001FEE05FB61FE8DCC0000000049454E44AE426082`.
+    DATA lv_png TYPE xstring.
+    lv_png = lv_hex.
+    mo_layout->set_header_area( VALUE #( image       = mo_pdf->image( lv_png )
+                                         image_align = `R`
+                                         image_h     = 20 ) ).
+    mo_layout->text( `a` ).
+    mo_layout->finish( ).
+    cl_abap_unit_assert=>assert_true(
+        xsdbool( mo_pdf->page( 1 )->content( ) CS `q 20 0 0 20 525.28 806.89 cm /I1 Do Q` ) ).
   ENDMETHOD.
 
 ENDCLASS.

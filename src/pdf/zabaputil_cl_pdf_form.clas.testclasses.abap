@@ -116,6 +116,7 @@ CLASS ltcl_form DEFINITION FINAL
     METHODS repeat_absolute_pages   FOR TESTING.
     METHODS check_block_and_condition FOR TESTING.
     METHODS table_options           FOR TESTING.
+    METHODS header_footer_areas     FOR TESTING.
 
     "! the table of the test data with as many rows as asked for
     METHODS items
@@ -1174,6 +1175,34 @@ CLASS ltcl_form IMPLEMENTATION.
     cl_abap_unit_assert=>assert_true(
         xsdbool( lo_pdf->page( 1 )->content( ) CS |{ lo_pdf->font( `Helvetica-Bold` )->encode( `Summe` ) } Tj| ) ).
     cl_abap_unit_assert=>assert_true( xsdbool( lo_pdf->page( 1 )->content( ) CS `0.8 0.8 0.8 rg` ) ).
+  ENDMETHOD.
+
+  METHOD header_footer_areas.
+    DATA lt_exp TYPE zabaputil_cl_pdf_form=>ty_t_unknown.
+
+    ms_form-header_area = VALUE #( left = |{ `{NAME}` }\n{ `{HEAD-CITY}` }| right = `Page {page}` ).
+    ms_form-footer_area = VALUE #( center = `{page}/{pages}` ).
+    " the letterhead of the first page: a logo, no page number
+    ms_form-first_page = abap_true.
+    ms_form-header_first = VALUE #( image = image_rgb( ) image_align = `R` image_h = 10 ).
+    ms_form-footer_first = VALUE #( left = `Bank {NONE}` ).
+    ms_form-t_element = VALUE #( ( type = zabaputil_cl_pdf_form=>cs_type-page_break ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                 data = ms_data ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lo_pdf->page_count( ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = shown( pdf = lo_pdf page = 1 text = `Ada` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 1 text = `Bank {NONE}` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lo_pdf->page( 1 )->content( ) CS `/I1 Do` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 2 text = `Ada` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 2 text = `Bonn` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 2 text = `Page 2` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = shown( pdf = lo_pdf page = 2 text = `2/2` ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( lo_pdf->page( 2 )->content( ) CS `/I1 Do` ) ).
+
+    lt_exp = VALUE #( ( name = `NONE` part = zabaputil_cl_pdf_form=>cs_part-footer ) ).
+    cl_abap_unit_assert=>assert_equals( exp = lt_exp
+                                        act = zabaputil_cl_pdf_form=>check( val  = ms_form
+                                                                            data = ms_data ) ).
   ENDMETHOD.
 
   METHOD absolute_pushed_over.

@@ -47,6 +47,28 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
         none TYPE string VALUE `NONE`,
       END OF cs_border.
 
+    "! A header or a footer: texts at the left margin, in the middle and at
+    "! the right margin, and an image. A line feed in a text starts another
+    "! line; the lines are centred in the margin. {page} is the number of
+    "! the page, {pages} their count
+    TYPES:
+      BEGIN OF ty_s_area,
+        left        TYPE string,
+        center      TYPE string,
+        right       TYPE string,
+        "! the font size in points; 0 for 8
+        size        TYPE f,
+        "! an image, centred in the margin
+        image       TYPE REF TO zabaputil_cl_pdf_image,
+        "! L, C or R; L without it
+        image_align TYPE string,
+        "! the width of the image; 0 for what its height makes of it
+        image_w     TYPE f,
+        "! the height of the image; 0 for what its width makes of it, or
+        "! the image at 72 dpi without both
+        image_h     TYPE f,
+      END OF ty_s_area.
+
     "! How a table looks and what it adds up - all of it off by default
     TYPES:
       BEGIN OF ty_s_table_options,
@@ -206,6 +228,29 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_cl_pdf_layout.
 
+    "! A header of several lines and parts, with an image, in the top margin
+    "! of every page - or of the first page only. It replaces what
+    "! set_header( ) set
+    "! @parameter val        | the texts and the image
+    "! @parameter first_page | for the first page, which then has this one
+    "!                         instead of the header of the others - an
+    "!                         empty one for none
+    METHODS set_header_area
+      IMPORTING
+        val           TYPE ty_s_area
+        first_page    TYPE abap_bool DEFAULT abap_false
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_layout.
+
+    "! A footer of several lines and parts, with an image, in the bottom
+    "! margin, as set_header_area( )
+    METHODS set_footer_area
+      IMPORTING
+        val           TYPE ty_s_area
+        first_page    TYPE abap_bool DEFAULT abap_false
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_layout.
+
     "! Write header and footer onto every page - call it once, after the
     "! last content, when the number of pages is known
     METHODS finish.
@@ -286,12 +331,12 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
     DATA mv_size         TYPE f.
     DATA mv_factor       TYPE f.
     DATA mv_color        TYPE string.
-    DATA mv_header       TYPE string.
-    DATA mv_header_align TYPE string.
-    DATA mv_header_size  TYPE f.
-    DATA mv_footer       TYPE string.
-    DATA mv_footer_align TYPE string.
-    DATA mv_footer_size  TYPE f.
+    DATA ms_header       TYPE ty_s_area.
+    DATA ms_footer       TYPE ty_s_area.
+    DATA ms_header_first TYPE ty_s_area.
+    DATA ms_footer_first TYPE ty_s_area.
+    DATA mv_header_first TYPE abap_bool.
+    DATA mv_footer_first TYPE abap_bool.
     DATA mv_finished     TYPE abap_bool.
     " the table that is being written: its columns with their final
     " widths, and the font of its header row - a page break inside the
@@ -397,6 +442,21 @@ CLASS zabaputil_cl_pdf_layout DEFINITION
         align TYPE string
         size  TYPE f
         y     TYPE f.
+
+    "! A header or a footer on a page
+    "! @parameter middle | the middle of the margin, from the top of the page
+    METHODS margin_area
+      IMPORTING
+        page   TYPE REF TO zabaputil_cl_pdf_page
+        area   TYPE ty_s_area
+        number TYPE i
+        middle TYPE f.
+
+    CLASS-METHODS area_is_empty
+      IMPORTING
+        area          TYPE ty_s_area
+      RETURNING
+        VALUE(result) TYPE abap_bool.
 
 ENDCLASS.
 
@@ -1250,33 +1310,83 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
 
   METHOD set_header.
 
-    mv_header = val.
-    mv_header_align = to_upper( align ).
-    mv_header_size = size.
+    " one line in one place: a header area of one part
+    CLEAR ms_header.
+    DATA(lv_align) = to_upper( align ).
+    CASE lv_align.
+      WHEN `R`.
+        ms_header-right = val.
+      WHEN `C`.
+        ms_header-center = val.
+      WHEN OTHERS.
+        ms_header-left = val.
+    ENDCASE.
+    ms_header-size = size.
     result = me.
 
   ENDMETHOD.
 
   METHOD set_footer.
 
-    mv_footer = val.
-    mv_footer_align = to_upper( align ).
-    mv_footer_size = size.
+    CLEAR ms_footer.
+    DATA(lv_align) = to_upper( align ).
+    CASE lv_align.
+      WHEN `R`.
+        ms_footer-right = val.
+      WHEN `C`.
+        ms_footer-center = val.
+      WHEN OTHERS.
+        ms_footer-left = val.
+    ENDCASE.
+    ms_footer-size = size.
     result = me.
+
+  ENDMETHOD.
+
+  METHOD set_header_area.
+
+    IF first_page = abap_true.
+      ms_header_first = val.
+      mv_header_first = abap_true.
+    ELSE.
+      ms_header = val.
+    ENDIF.
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD set_footer_area.
+
+    IF first_page = abap_true.
+      ms_footer_first = val.
+      mv_footer_first = abap_true.
+    ELSE.
+      ms_footer = val.
+    ENDIF.
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD area_is_empty.
+
+    result = xsdbool( area-left IS INITIAL AND area-center IS INITIAL AND area-right IS INITIAL
+                      AND area-image IS NOT BOUND ).
 
   ENDMETHOD.
 
   METHOD finish.
 
     DATA lv_number TYPE i.
-    DATA lv_text   TYPE string.
+    DATA ls_header TYPE ty_s_area.
+    DATA ls_footer TYPE ty_s_area.
 
     IF mv_finished = abap_true.
       RETURN.
     ENDIF.
     mv_finished = abap_true.
 
-    IF mv_header IS INITIAL AND mv_footer IS INITIAL.
+    IF area_is_empty( ms_header ) = abap_true AND area_is_empty( ms_footer ) = abap_true
+        AND area_is_empty( ms_header_first ) = abap_true AND area_is_empty( ms_footer_first ) = abap_true.
       RETURN.
     ENDIF.
     font_check( ).
@@ -1284,39 +1394,118 @@ CLASS zabaputil_cl_pdf_layout IMPLEMENTATION.
     LOOP AT mt_page INTO DATA(lo_page).
       lv_number = sy-tabix.
 
-      IF mv_header IS NOT INITIAL.
-        lv_text = replace( val  = mv_header
-                           sub  = `{pages}`
-                           with = |{ lines( mt_page ) }|
-                           occ  = 0 ).
-        lv_text = replace( val  = lv_text
-                           sub  = `{page}`
-                           with = |{ lv_number }|
-                           occ  = 0 ).
-        margin_line( page  = lo_page
-                     val   = lv_text
-                     align = mv_header_align
-                     size  = mv_header_size
-                     y     = mv_top / 2 ).
+      ls_header = ms_header.
+      ls_footer = ms_footer.
+      IF lv_number = 1 AND mv_header_first = abap_true.
+        ls_header = ms_header_first.
+      ENDIF.
+      IF lv_number = 1 AND mv_footer_first = abap_true.
+        ls_footer = ms_footer_first.
       ENDIF.
 
-      IF mv_footer IS NOT INITIAL.
-        lv_text = replace( val  = mv_footer
-                           sub  = `{pages}`
-                           with = |{ lines( mt_page ) }|
-                           occ  = 0 ).
-        lv_text = replace( val  = lv_text
-                           sub  = `{page}`
-                           with = |{ lv_number }|
-                           occ  = 0 ).
-        margin_line( page  = lo_page
-                     val   = lv_text
-                     align = mv_footer_align
-                     size  = mv_footer_size
-                     y     = lo_page->height( ) - mv_bottom / 2 ).
-      ENDIF.
+      margin_area( page   = lo_page
+                   area   = ls_header
+                   number = lv_number
+                   middle = mv_top / 2 ).
+      margin_area( page   = lo_page
+                   area   = ls_footer
+                   number = lv_number
+                   middle = lo_page->height( ) - mv_bottom / 2 ).
 
     ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD margin_area.
+
+    DATA lv_text   TYPE string.
+    DATA lv_y      TYPE f.
+    DATA lv_size   TYPE f.
+    DATA lv_height TYPE f.
+    DATA lv_w      TYPE f.
+    DATA lv_h      TYPE f.
+    DATA lv_x      TYPE f.
+    DATA lv_align  TYPE string.
+
+    IF area_is_empty( area ) = abap_true.
+      RETURN.
+    ENDIF.
+
+    lv_size = area-size.
+    IF lv_size <= 0.
+      lv_size = 8.
+    ENDIF.
+    lv_height = lv_size * mv_factor / mv_scale.
+
+    " the image first: the texts are written over it
+    IF area-image IS BOUND.
+      lv_w = area-image_w.
+      lv_h = area-image_h.
+      IF lv_w <= 0 AND lv_h <= 0.
+        lv_w = area-image->width( ) / mv_scale.
+        lv_h = area-image->height( ) / mv_scale.
+      ELSEIF lv_h <= 0.
+        lv_h = lv_w * area-image->height( ) / area-image->width( ).
+      ELSEIF lv_w <= 0.
+        lv_w = lv_h * area-image->width( ) / area-image->height( ).
+      ENDIF.
+      lv_align = to_upper( area-image_align ).
+      CASE lv_align.
+        WHEN `R`.
+          lv_x = page->width( ) - mv_right - lv_w.
+        WHEN `C`.
+          lv_x = ( mv_left + page->width( ) - mv_right - lv_w ) / 2.
+        WHEN OTHERS.
+          lv_x = mv_left.
+      ENDCASE.
+      page->image( image = area-image
+                   x     = lv_x
+                   y     = middle - lv_h / 2
+                   w     = lv_w
+                   h     = lv_h ).
+    ENDIF.
+
+    DO 3 TIMES.
+      CASE sy-index.
+        WHEN 1.
+          lv_text = area-left.
+          lv_align = `L`.
+        WHEN 2.
+          lv_text = area-center.
+          lv_align = `C`.
+        WHEN 3.
+          lv_text = area-right.
+          lv_align = `R`.
+      ENDCASE.
+      IF lv_text IS INITIAL.
+        CONTINUE.
+      ENDIF.
+      lv_text = replace( val  = lv_text
+                         sub  = `{pages}`
+                         with = |{ lines( mt_page ) }|
+                         occ  = 0 ).
+      lv_text = replace( val  = lv_text
+                         sub  = `{page}`
+                         with = |{ number }|
+                         occ  = 0 ).
+      lv_text = replace( val  = lv_text
+                         sub  = |\r\n|
+                         with = |\n|
+                         occ  = 0 ).
+      SPLIT lv_text AT |\n| INTO TABLE DATA(lt_line).
+
+      " the lines centred around the middle of the margin: one line has
+      " its baseline there
+      lv_y = middle - ( lines( lt_line ) - 1 ) * lv_height / 2.
+      LOOP AT lt_line INTO DATA(lv_line).
+        margin_line( page  = page
+                     val   = lv_line
+                     align = lv_align
+                     size  = lv_size
+                     y     = lv_y ).
+        lv_y = lv_y + lv_height.
+      ENDLOOP.
+    ENDDO.
 
   ENDMETHOD.
 

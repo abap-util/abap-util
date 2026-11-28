@@ -628,6 +628,10 @@ lo_layout->table( columns = lt_columns
                                      total_text = `Total` zebra = `F0F0F0`
                                      border = zabaputil_cl_pdf_layout=>cs_border-rows ) ).
 lo_layout->set_footer( `Page {page} of {pages}` ).
+" or in parts, of several lines, with an image - for every page or the first one
+lo_layout->set_header_area( VALUE #( left = |ACME Ltd\nMain Street 1| right = `{page}/{pages}`
+                                     image = lo_pdf->image( lv_logo_png ) image_align = `C` image_h = 12 ) ).
+lo_layout->set_header_area( val = VALUE #( ) first_page = abap_true ). " no header on page 1
 lo_layout->finish( ).
 ```
 
@@ -652,6 +656,12 @@ ls_form-t_element = VALUE #( BASE ls_form-t_element
     ( type = zabaputil_cl_pdf_form=>cs_type-text   text = `Remark: {REMARK}` condition = `REMARK` )
     ( type = zabaputil_cl_pdf_form=>cs_type-repeat name = `item` source = `T_ITEMS` )
     ( type = zabaputil_cl_pdf_form=>cs_type-text   block = `item` text = `{POSNR} {MATNR} {MENGE:quantity:MEINS}` ) ).
+
+" Header and footer in parts (left, center, right), of several lines, with a logo,
+" and a first page of its own - a letterhead
+ls_form-header_area  = VALUE #( left = |{ `{COMPANY}` }\n{ `{STREET}` }| right = `Page {page} of {pages}` ).
+ls_form-first_page   = abap_true.
+ls_form-header_first = VALUE #( image = lv_logo_png image_align = `R` image_h = 15 ).
 
 " What the form names that the data does not have - placeholders, table and image
 " sources, table columns - with the element they are in (an editor marks them)

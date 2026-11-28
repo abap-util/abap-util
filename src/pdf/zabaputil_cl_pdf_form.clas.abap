@@ -134,6 +134,26 @@ CLASS zabaputil_cl_pdf_form DEFINITION
       END OF ty_s_element.
     TYPES ty_t_element TYPE STANDARD TABLE OF ty_s_element WITH EMPTY KEY.
 
+    "! A header or a footer in parts: texts at the left margin, in the
+    "! middle and at the right margin - a line feed starts another line,
+    "! {page} and {pages} are the page numbers - and an image (a logo)
+    TYPES:
+      BEGIN OF ty_s_area,
+        left        TYPE string,
+        center      TYPE string,
+        right       TYPE string,
+        "! the font size in points; 0 for 8
+        size        TYPE ty_length,
+        "! a JPEG or PNG file
+        image       TYPE xstring,
+        "! L, C or R
+        image_align TYPE string,
+        "! the width of the image in mm; 0 for what its height makes of it
+        image_w     TYPE ty_length,
+        "! the height of the image in mm; 0 for what its width makes of it
+        image_h     TYPE ty_length,
+      END OF ty_s_area.
+
     TYPES:
       BEGIN OF ty_s_form,
         name          TYPE string,
@@ -151,6 +171,15 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         header        TYPE string,
         "! a line in the bottom margin of every page
         footer        TYPE string,
+        "! the header in parts, of several lines, with an image - instead of header
+        header_area   TYPE ty_s_area,
+        "! the footer in parts - instead of footer
+        footer_area   TYPE ty_s_area,
+        "! the first page has header_first and footer_first instead - an
+        "! empty one for none, a letter's first page has a letterhead of its own
+        first_page    TYPE abap_bool,
+        header_first  TYPE ty_s_area,
+        footer_first  TYPE ty_s_area,
         "! the class whose public attributes the form prints - it implements
         "! zabaputil_if_pdf_data; empty for a form that is printed from a structure
         data_class    TYPE string,
@@ -419,6 +448,17 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         name          TYPE string
       RETURNING
         VALUE(result) TYPE abap_bool.
+
+    "! A header or a footer of the form for the layout, its placeholders
+    "! resolved
+    CLASS-METHODS layout_area
+      IMPORTING
+        pdf           TYPE REF TO zabaputil_cl_pdf
+        area          TYPE ty_s_area
+        data          TYPE any
+        with_data     TYPE abap_bool
+      RETURNING
+        VALUE(result) TYPE zabaputil_cl_pdf_layout=>ty_s_area.
 
     "! The value is a number of exactly that many digits
     CLASS-METHODS is_digits
@@ -715,6 +755,30 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     IF lv_footer IS NOT INITIAL.
       lo_layout->set_footer( lv_footer ).
     ENDIF.
+    IF val-header_area IS NOT INITIAL.
+      lo_layout->set_header_area( layout_area( pdf       = result
+                                               area      = val-header_area
+                                               data      = <data>
+                                               with_data = lv_with_data ) ).
+    ENDIF.
+    IF val-footer_area IS NOT INITIAL.
+      lo_layout->set_footer_area( layout_area( pdf       = result
+                                               area      = val-footer_area
+                                               data      = <data>
+                                               with_data = lv_with_data ) ).
+    ENDIF.
+    IF val-first_page = abap_true.
+      lo_layout->set_header_area( val        = layout_area( pdf       = result
+                                                            area      = val-header_first
+                                                            data      = <data>
+                                                            with_data = lv_with_data )
+                                  first_page = abap_true ).
+      lo_layout->set_footer_area( val        = layout_area( pdf       = result
+                                                            area      = val-footer_first
+                                                            data      = <data>
+                                                            with_data = lv_with_data )
+                                  first_page = abap_true ).
+    ENDIF.
     lo_layout->finish( ).
 
     " the fixed elements go over the flow, on the first or on every page.
@@ -804,6 +868,30 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
                           element = 0
                           label   = ``
                 CHANGING  result  = result ).
+
+    " the parts of the header and footer areas
+    DATA(lt_area) = VALUE string_table( ( val-header_area-left ) ( val-header_area-center ) ( val-header_area-right )
+                                        ( val-header_first-left ) ( val-header_first-center ) ( val-header_first-right ) ).
+    LOOP AT lt_area INTO DATA(lv_area).
+      check_text( EXPORTING text    = lv_area
+                            data    = data
+                            outer   = data
+                            part    = cs_part-header
+                            element = 0
+                            label   = ``
+                  CHANGING  result  = result ).
+    ENDLOOP.
+    lt_area = VALUE #( ( val-footer_area-left ) ( val-footer_area-center ) ( val-footer_area-right )
+                       ( val-footer_first-left ) ( val-footer_first-center ) ( val-footer_first-right ) ).
+    LOOP AT lt_area INTO lv_area.
+      check_text( EXPORTING text    = lv_area
+                            data    = data
+                            outer   = data
+                            part    = cs_part-footer
+                            element = 0
+                            label   = ``
+                  CHANGING  result  = result ).
+    ENDLOOP.
 
     LOOP AT val-t_element ASSIGNING FIELD-SYMBOL(<element>).
       lv_index = sy-tabix.
@@ -1367,6 +1455,29 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
     ENDCASE.
     found = abap_true.
+
+  ENDMETHOD.
+
+  METHOD layout_area.
+
+    result-left = area-left.
+    result-center = area-center.
+    result-right = area-right.
+    IF with_data = abap_true.
+      result-left = resolve( val  = area-left
+                             data = data ).
+      result-center = resolve( val  = area-center
+                               data = data ).
+      result-right = resolve( val  = area-right
+                              data = data ).
+    ENDIF.
+    result-size = area-size.
+    result-image_align = area-image_align.
+    result-image_w = area-image_w.
+    result-image_h = area-image_h.
+    IF area-image IS NOT INITIAL.
+      result-image = pdf->image( area-image ).
+    ENDIF.
 
   ENDMETHOD.
 
