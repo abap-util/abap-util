@@ -14,7 +14,7 @@ Utility functions for ABAP Cloud and Standard ABAP
 #### Key Features
 * Simplified SAP APIs as class-based methods — one façade class, no function modules to remember
 * One source for ABAP Cloud, Standard ABAP and NetWeaver 7.02 — release differences are hidden behind the methods
-* Strings, JSON/XML/CSV/XLSX, RTTI, messages, logging, locks, calendar, transports, persistence, GS1 and custom barcodes, parallel processing, RFC, attachments and more
+* Strings, JSON/XML/CSV/XLSX, PDF, RTTI, messages, logging, locks, calendar, transports, persistence, GS1 and custom barcodes, parallel processing, RFC, attachments and more
 * Unit-tested without an SAP system — the tests run transpiled to JavaScript on every pull request
 
 #### Compatibility
@@ -538,6 +538,58 @@ DATA(lv_zip) = zabaputil_cl_util_context=>zip_pack( VALUE #(
 " Unpack a ZIP archive
 DATA(lt_files) = zabaputil_cl_util_context=>zip_unpack( lv_zip ). " => name + content per file
 ```
+
+###### Compression (DEFLATE / zlib)
+```abap
+" Raw DEFLATE (RFC 1951), as CL_ABAP_GZIP writes it
+DATA(lv_deflated) = zabaputil_cl_util_context=>gzip_compress( lv_bytes ).
+DATA(lv_bytes2)   = zabaputil_cl_util_context=>gzip_decompress( lv_deflated ).
+
+" A zlib stream (RFC 1950): header, DEFLATE data, Adler-32 - what PDF and PNG use
+DATA(lv_zlib)   = zabaputil_cl_util_context=>zlib_compress( lv_bytes ).
+DATA(lv_bytes3) = zabaputil_cl_util_context=>zlib_decompress( lv_zlib ).
+DATA(lv_adler)  = zabaputil_cl_util_context=>hash_adler32( lv_bytes ). " => 4 bytes
+
+" The Unicode code points of a text
+DATA(lt_codepoints) = zabaputil_cl_util_context=>c_get_codepoints( `A` ). " => 65
+```
+
+###### PDF
+PDF files written in plain ABAP (`src/pdf/`): no Adobe Document Services, no spool, no form. The only system calls are the byte conversion and the deflate of the context class, so the same source runs on NW 7.02, Standard ABAP and ABAP Cloud.
+
+```abap
+" Draw at fixed positions - coordinates in mm from the top left corner
+DATA(lo_pdf)  = zabaputil_cl_pdf=>create( unit = `mm` ).
+DATA(lo_page) = lo_pdf->add_page( ).
+lo_page->set_font( font = lo_pdf->font( `Helvetica-Bold` ) size = 16 ).
+lo_page->text( x = 20 y = 30 val = `Delivery note 4711` ).
+lo_page->set_fill_color( `E8E8E8` )->rect( x = 20 y = 35 w = 170 h = 10 style = `DF` ).
+lo_page->image( image = lo_pdf->image( lv_logo_png ) x = 150 y = 10 w = 40 ).
+DATA(lv_file) = lo_pdf->render( ). " => xstring
+
+" Flow text and tables over pages
+DATA(lo_layout) = NEW zabaputil_cl_pdf_layout( lo_pdf ).
+lo_layout->set_font( font = lo_pdf->font( ) size = 10 ).
+lo_layout->text( `A paragraph that wraps at the right margin ...` ).
+lo_layout->table( columns = VALUE #( ( name = `MATNR` title = `Material`    width = 40 align = `L` )
+                                     ( name = `MAKTX` title = `Description` width = 0  align = `L` )
+                                     ( name = `MENGE` title = `Quantity`    width = 25 align = `R` ) )
+                  rows    = lt_items ). " the header row is repeated on every page
+lo_layout->set_footer( `Page {page} of {pages}` ).
+lo_layout->finish( ).
+```
+
+| Class | Purpose |
+|---|---|
+| `zabaputil_cl_pdf` | the document: pages, fonts, images, properties, `render( )` |
+| `zabaputil_cl_pdf_page` | one page: text, lines, rectangles, ellipses, images, links at fixed positions |
+| `zabaputil_cl_pdf_layout` | flowing content: wrapped paragraphs, tables over several pages, header and footer |
+| `zabaputil_cl_pdf_font_std` | the standard fonts (Helvetica, Times, Courier) with their metrics - Western European text, nothing embedded |
+| `zabaputil_cl_pdf_font_ttf` | an embedded TrueType font (`lo_pdf->font_ttf( lv_ttf )`) - any script the font has glyphs for |
+| `zabaputil_cl_pdf_image` | JPEG and PNG images, PNG with transparency |
+| `zabaputil_cl_pdf_writer` | the file format: objects, streams, cross-reference table |
+
+Not there yet: font subsetting (a TrueType font is embedded whole), OpenType/CFF fonts, text shaping (ligatures, right-to-left scripts), several fonts within one line, interlaced PNG files.
 
 ###### Transport Requests
 ```abap
