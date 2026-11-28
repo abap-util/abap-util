@@ -30,18 +30,119 @@
 "!     DATA(lt_cell) = lo_xlsx->get_cells( ).
 "!
 "! The layout of a sheet also places it (start_cell), names and styles its
-"! Excel table, and gives it formula columns and a totals row - see
-"! ty_s_layout and ty_s_column.
+"! Excel table, gives it formula columns, a totals row, styles, links and
+"! validations by column, and sets the sheet up for the screen and for
+"! printing - see ty_s_layout and ty_s_column.
 "!
-"! Not in it: formatting cell by cell, a formula in a single cell (a formula
-"! cell is read with its last value), merged cells, charts, images, an .xls
-"! file of Excel 97-2003, a workbook with a password, changing a workbook
-"! that was read.
+"! Around the tables - a title, a second table, a footer, a sheet without a
+"! table - the sheet added last takes single cells, merged ranges, rows and
+"! columns of their own, validations and names:
+"!
+"!     zabaputil_cl_util_xlsx=>factory(
+"!         )->add_sheet( name = `Report`
+"!         )->set_cell( row   = 1
+"!                      col   = 1
+"!                      val   = `Orders 2024`
+"!                      style = VALUE #( bold = abap_true size = 14 )
+"!         )->merge( `A1:F1`
+"!         )->add_table( val    = lt_orders
+"!                       layout = VALUE #( start_cell = `A3` ) ).
+"!
+"! A sheet stays open until the next add_sheet( ) or get_xlsx( ) and is
+"! kept until then as its rows, rendered to text - not as the tables.
+"!
+"! Not in it: conditional formatting, comments, images, charts, a
+"! protected sheet, an .xls file of Excel 97-2003, a workbook with a
+"! password, changing a workbook that was read.
 CLASS zabaputil_cl_util_xlsx DEFINITION
   PUBLIC FINAL
   CREATE PROTECTED.
 
   PUBLIC SECTION.
+
+    TYPES:
+      "! how a cell looks - initial: as Excel shows a cell. A colour is RGB
+      "! in six hex digits (`C00000`); a border is thin, medium, thick,
+      "! dashed, dotted, double or hair
+      BEGIN OF ty_s_style,
+        bold          TYPE abap_bool,
+        italic        TYPE abap_bool,
+        underline     TYPE abap_bool,
+        strike        TYPE abap_bool,
+        "! the font size in points - 0: 11
+        size          TYPE i,
+        "! the font - empty: Calibri
+        font          TYPE string,
+        "! the colour of the text
+        color         TYPE string,
+        "! the colour of the background
+        fill          TYPE string,
+        "! the border on all four sides
+        border        TYPE string,
+        "! the border on one side - instead of border there
+        border_top    TYPE string,
+        border_bottom TYPE string,
+        border_left   TYPE string,
+        border_right  TYPE string,
+        border_color  TYPE string,
+        "! left, center, right, fill, justify or centerContinuous
+        halign        TYPE string,
+        "! top, center or bottom
+        valign        TYPE string,
+        "! the text wraps in the width of the column
+        wrap          TYPE abap_bool,
+        indent        TYPE i,
+        "! the text turned by degrees: 1 to 90 upwards, 91 to 180 downwards
+        "! (91 is one degree down), 255 letters stacked
+        rotation      TYPE i,
+      END OF ty_s_style.
+
+    TYPES:
+      "! what a cell takes when it is typed in Excel (a data validation)
+      BEGIN OF ty_s_validation,
+        "! list, whole, decimal, date, time, textLength or custom
+        type        TYPE string,
+        "! between (initial), notBetween, equal, notEqual, greaterThan,
+        "! lessThan, greaterThanOrEqual or lessThanOrEqual - not for a list
+        "! or custom
+        operator    TYPE string,
+        "! the values of a list - together at most 255 characters
+        t_value     TYPE string_table,
+        "! a value or formula as Excel writes it: the cells of a list
+        "! (`Lists!$A$1:$A$9`), the bound of a number, a date as its
+        "! serial number or `DATE(2024,1,31)`, the formula of custom
+        formula1    TYPE string,
+        "! the upper bound of between and notBetween
+        formula2    TYPE string,
+        "! an empty cell is not taken
+        no_blank    TYPE abap_bool,
+        "! a list without its dropdown button
+        no_dropdown TYPE abap_bool,
+        "! the message shown while the cell is selected
+        prompt_title TYPE string,
+        prompt      TYPE string,
+        "! the message shown for a value that is not taken
+        error_title TYPE string,
+        error       TYPE string,
+        "! stop (initial: the value is refused), warning or information
+        error_style TYPE string,
+      END OF ty_s_validation.
+
+    TYPES:
+      "! the document properties of a workbook (File - Info in Excel)
+      BEGIN OF ty_s_properties,
+        title       TYPE string,
+        subject     TYPE string,
+        creator     TYPE string,
+        keywords    TYPE string,
+        description TYPE string,
+        category    TYPE string,
+        company     TYPE string,
+        "! empty: abap-util
+        application TYPE string,
+        "! a time stamp YYYYMMDDhhmmss in UTC - 0: now
+        created     TYPE p LENGTH 8 DECIMALS 0,
+      END OF ty_s_properties.
 
     TYPES:
       "! a column of a sheet that is written, or the header of a column that
@@ -66,6 +167,18 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
         "! any other text is a label (`Total`). One column with it gives
         "! the sheet the row
         total   TYPE string,
+        "! how the cells of the column look - a number format stays format
+        style   TYPE ty_s_style,
+        "! the column is hidden
+        hidden  TYPE abap_bool,
+        "! the column one level down in an outline (1 to 7), to be folded
+        outline_level TYPE i,
+        "! the component that holds the target of a link from the cell: a
+        "! URL (`https://...`, `mailto:...`) or a place in the workbook
+        "! (`#Sheet2!A1`). The column's own name makes the value its link
+        link    TYPE string,
+        "! what a cell of the column takes when it is typed in Excel
+        validation TYPE ty_s_validation,
       END OF ty_s_column.
     TYPES ty_t_column TYPE STANDARD TABLE OF ty_s_column WITH EMPTY KEY.
 
@@ -100,6 +213,53 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
         no_filter      TYPE abap_bool,
         "! the cell the header row starts in (`B3`) - empty: A1
         start_cell     TYPE string,
+        "! how the header row looks - bold where the sheet has no Excel table
+        header_style   TYPE ty_s_style,
+        "! the height of the rows in points - 0: as Excel sets it
+        row_height     TYPE i,
+        "! the rows one level down in an outline (1 to 7), to be folded
+        outline_level  TYPE i,
+        "! a timestamp is written in this time zone (an SAP key: `CET`,
+        "! `EST`) - empty: as it is stored, in UTC
+        time_zone      TYPE string,
+
+        " -- the sheet: of the layout add_sheet( ) gets, not add_table( )
+
+        "! the rows above and the columns left of this cell (`B2`) stay in
+        "! place while the sheet scrolls - instead of freeze_header
+        freeze_cell    TYPE string,
+        "! the sheet is hidden
+        hidden         TYPE abap_bool,
+        "! the colour of the sheet's tab, RGB in six hex digits
+        tab_color      TYPE string,
+        "! no gridlines on the screen
+        no_gridlines   TYPE abap_bool,
+        "! the zoom in percent, 10 to 400 - 0: 100
+        zoom           TYPE i,
+        "! printed across the page
+        landscape      TYPE abap_bool,
+        "! the paper as Excel numbers it: 9 A4, 8 A3, 1 Letter, 5 Legal -
+        "! 0: the printer's
+        paper_size     TYPE i,
+        "! printed on this many pages across - 0 with fit_height set: as many
+        "! as it takes
+        fit_width      TYPE i,
+        "! printed on this many pages down - 0 with fit_width set: as many
+        "! as it takes
+        fit_height     TYPE i,
+        "! the margin on all four sides in millimetres - 0: Excel's
+        margin         TYPE i,
+        "! what is printed (`A1:F40`) - empty: every cell that has a value
+        print_area     TYPE string,
+        "! the header row of the table is printed on top of every page
+        repeat_header  TYPE abap_bool,
+        "! the text on top of every printed page, with Excel's codes: &L,
+        "! &C and &R in front of the left, centre and right part, &P the
+        "! page, &N the pages, &D the date, &A the sheet. Without one of
+        "! &L &C &R it stands in the centre
+        header_text    TYPE string,
+        "! the text at the bottom of every printed page - as header_text
+        footer_text    TYPE string,
       END OF ty_s_layout.
 
     TYPES:
@@ -159,15 +319,116 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
       EXPORTING
         result TYPE ANY TABLE.
 
-    "! One more sheet with the rows of val - rendered at once, so val is
-    "! not kept. A name Excel does not take (longer than 31 characters,
-    "! one of \ / ? * [ ] :, a name the workbook has) is made valid.
+    "! One more sheet, with the rows of val where it is given - rendered
+    "! at once, so val is not kept. The methods below (add_table( ),
+    "! set_cell( ), merge( ), ...) write to the sheet added last. A name
+    "! Excel does not take (longer than 31 characters, one of \ / ? * [ ] :,
+    "! a name the workbook has) is made valid.
+    "! @parameter val | the rows - not given: a sheet without a table
     "! @parameter name | empty: Sheet1, Sheet2, ...
+    "! @parameter layout | the table and the sheet (the fields below "the sheet")
     METHODS add_sheet
       IMPORTING
-        val           TYPE ANY TABLE
+        val           TYPE ANY TABLE   OPTIONAL
         name          TYPE clike       OPTIONAL
         layout        TYPE ty_s_layout OPTIONAL
+      PREFERRED PARAMETER val
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_util_xlsx.
+
+    "! One more table on the sheet added last, at layout-start_cell (A1
+    "! when it is empty): a second table, or one under a title. The fields
+    "! of the layout below "the sheet" are taken from add_sheet( ) only; the
+    "! first table with a header is the one freeze_header and repeat_header
+    "! go by, and a sheet has one filter - an auto_filter on a second table
+    "! raises, as does a cell of the table that is taken already.
+    METHODS add_table
+      IMPORTING
+        val           TYPE ANY TABLE
+        layout        TYPE ty_s_layout OPTIONAL
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_util_xlsx.
+
+    "! One cell of the sheet added last - a title, a label, a note under a
+    "! table. The value is written by its type like a cell of a table (a
+    "! number, a date, a flag); raises when the cell is taken already.
+    "! @parameter row | 1 to 1048576
+    "! @parameter col | 1 (A) to 16384 (XFD) - column_to_number( `C` ) gives it
+    "! @parameter val | the value - not given: an empty cell with a style or a formula
+    "! @parameter formula | a formula instead of a value (`SUM(B2:B9)`), without =
+    "! @parameter format | a number format (`#,##0.00`)
+    "! @parameter link | a URL or a place in the workbook (`#Sheet2!A1`)
+    METHODS set_cell
+      IMPORTING
+        row           TYPE i
+        col           TYPE i
+        val           TYPE any         OPTIONAL
+        formula       TYPE clike       OPTIONAL
+        format        TYPE clike       OPTIONAL
+        style         TYPE ty_s_style  OPTIONAL
+        link          TYPE clike       OPTIONAL
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_util_xlsx.
+
+    "! The height, visibility or outline level of a row of the sheet added
+    "! last - instead of what its table set
+    "! @parameter height | in points - 0: as Excel sets it
+    METHODS set_row
+      IMPORTING
+        row           TYPE i
+        height        TYPE i         OPTIONAL
+        hidden        TYPE abap_bool OPTIONAL
+        outline_level TYPE i         OPTIONAL
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_util_xlsx.
+
+    "! The width, visibility or outline level of a column of the sheet
+    "! added last - instead of what its table set
+    "! @parameter width | in characters - 0: as the table set it, or Excel's
+    METHODS set_column
+      IMPORTING
+        col           TYPE i
+        width         TYPE i         OPTIONAL
+        hidden        TYPE abap_bool OPTIONAL
+        outline_level TYPE i         OPTIONAL
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_util_xlsx.
+
+    "! The cells of a range (`A1:D1`) as one cell of the sheet added last,
+    "! which shows the value of the first. Raises for a range that overlaps
+    "! one merged already
+    METHODS merge
+      IMPORTING
+        range         TYPE clike
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_util_xlsx.
+
+    "! What the cells of a range (`B2:B100`) of the sheet added last take
+    "! when they are typed in Excel
+    METHODS add_validation
+      IMPORTING
+        range         TYPE clike
+        validation    TYPE ty_s_validation
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_util_xlsx.
+
+    "! A name for a range, as a formula names it (`Rates` for
+    "! `'Rates'!$A$2:$B$20`). Raises for a name that is none, or one the
+    "! workbook has
+    "! @parameter ref | what the name stands for, as Excel writes it
+    "! @parameter local | the name holds on the sheet added last only
+    METHODS add_name
+      IMPORTING
+        name          TYPE clike
+        ref           TYPE clike
+        local         TYPE abap_bool OPTIONAL
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_util_xlsx.
+
+    "! the title, the author and the other document properties
+    METHODS set_properties
+      IMPORTING
+        val           TYPE ty_s_properties
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_cl_util_xlsx.
 
@@ -316,24 +577,142 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
         high        TYPE decfloat34,
         cells       TYPE i,
         numbers     TYPE i,
+        " the component with the target of a link, and the style of the
+        " cell that has one
+        link        TYPE string,
+        link_style  TYPE string,
+        " the style without a number format - of a count in the totals row
+        plain_style TYPE string,
+        hidden      TYPE abap_bool,
+        level       TYPE i,
+        validation  TYPE ty_s_validation,
       END OF ty_s_out_col.
     TYPES ty_t_out_col TYPE STANDARD TABLE OF ty_s_out_col WITH EMPTY KEY.
 
-    " a sheet that is written: its part, and the part of its table
+    " a part that belongs to a sheet (an Excel table)
+    TYPES:
+      BEGIN OF ty_s_out_part,
+        id  TYPE i,
+        xml TYPE xstring,
+      END OF ty_s_out_part.
+    TYPES ty_t_out_part TYPE STANDARD TABLE OF ty_s_out_part WITH EMPTY KEY.
+
+    " a sheet that is written: its part, its relationships and its tables
     TYPES:
       BEGIN OF ty_s_out_sheet,
-        name      TYPE string,
-        xml       TYPE xstring,
-        table_xml TYPE xstring,
+        name    TYPE string,
+        hidden  TYPE abap_bool,
+        xml     TYPE xstring,
+        rels    TYPE xstring,
+        t_table TYPE ty_t_out_part,
       END OF ty_s_out_sheet.
 
+    " the cells of one row of the open sheet that stand together - the
+    " rows of a table, one free cell - rendered already. The rows of a
+    " sheet are kept as these strings until it is closed
+    TYPES:
+      BEGIN OF ty_s_seg,
+        row    TYPE i,
+        col    TYPE i,
+        col_to TYPE i,
+        attr   TYPE string,
+        xml    TYPE string,
+      END OF ty_s_seg.
+    TYPES ty_t_seg TYPE SORTED TABLE OF ty_s_seg WITH UNIQUE KEY row col.
+
+    " a row or a column of the open sheet with what set_row( ),
+    " set_column( ) or a table set for it
+    TYPES:
+      BEGIN OF ty_s_line,
+        pos    TYPE i,
+        size   TYPE i,
+        len    TYPE i,
+        auto   TYPE abap_bool,
+        hidden TYPE abap_bool,
+        level  TYPE i,
+      END OF ty_s_line.
+    TYPES ty_t_line TYPE SORTED TABLE OF ty_s_line WITH UNIQUE KEY pos.
+
+    TYPES:
+      BEGIN OF ty_s_area,
+        row1 TYPE i,
+        col1 TYPE i,
+        row2 TYPE i,
+        col2 TYPE i,
+      END OF ty_s_area.
+    TYPES ty_t_area TYPE STANDARD TABLE OF ty_s_area WITH EMPTY KEY.
+
+    TYPES:
+      BEGIN OF ty_s_link,
+        ref    TYPE string,
+        target TYPE string,
+      END OF ty_s_link.
+    TYPES ty_t_link TYPE STANDARD TABLE OF ty_s_link WITH EMPTY KEY.
+
+    " the sheet that is written now
+    TYPES:
+      BEGIN OF ty_s_cur,
+        name        TYPE string,
+        layout      TYPE ty_s_layout,
+        t_seg       TYPE ty_t_seg,
+        t_row       TYPE ty_t_line,
+        t_col       TYPE ty_t_line,
+        col_min     TYPE i,
+        col_max     TYPE i,
+        pane        TYPE string,
+        filter      TYPE string,
+        t_merge     TYPE ty_t_area,
+        t_valid     TYPE string_table,
+        t_link      TYPE ty_t_link,
+        t_table     TYPE ty_t_out_part,
+        header_rows TYPE string,
+        row_level   TYPE i,
+        col_level   TYPE i,
+      END OF ty_s_cur.
+
+    " a defined name of the workbook - sheet 0: of the workbook
+    TYPES:
+      BEGIN OF ty_s_name,
+        name  TYPE string,
+        sheet TYPE i,
+        ref   TYPE string,
+      END OF ty_s_name.
+
     " a cell format of styles.xml - the row index less one is what a cell
-    " names in its s attribute
+    " names in its s attribute. font, fill and border are indexes of the
+    " lists behind them
     TYPES:
       BEGIN OF ty_s_xf,
-        numfmt TYPE i,
-        bold   TYPE abap_bool,
+        numfmt   TYPE i,
+        font     TYPE i,
+        fill     TYPE i,
+        border   TYPE i,
+        halign   TYPE string,
+        valign   TYPE string,
+        wrap     TYPE abap_bool,
+        indent   TYPE i,
+        rotation TYPE i,
       END OF ty_s_xf.
+
+    TYPES:
+      BEGIN OF ty_s_font,
+        bold      TYPE abap_bool,
+        italic    TYPE abap_bool,
+        underline TYPE abap_bool,
+        strike    TYPE abap_bool,
+        size      TYPE i,
+        name      TYPE string,
+        color     TYPE string,
+      END OF ty_s_font.
+
+    TYPES:
+      BEGIN OF ty_s_border,
+        top    TYPE string,
+        bottom TYPE string,
+        left   TYPE string,
+        right  TYPE string,
+        color  TYPE string,
+      END OF ty_s_border.
 
     TYPES:
       BEGIN OF ty_s_sheet,
@@ -352,10 +731,18 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
     " writing
     DATA mt_out_sheet TYPE STANDARD TABLE OF ty_s_out_sheet WITH EMPTY KEY.
     DATA mt_xf        TYPE STANDARD TABLE OF ty_s_xf WITH EMPTY KEY.
+    DATA mt_font      TYPE STANDARD TABLE OF ty_s_font WITH EMPTY KEY.
+    DATA mt_fill      TYPE string_table.
+    DATA mt_border    TYPE STANDARD TABLE OF ty_s_border WITH EMPTY KEY.
     DATA mt_numfmt    TYPE string_table.
     DATA mv_tables    TYPE i.
     DATA mt_table_name TYPE string_table.
     DATA mv_formulas  TYPE abap_bool.
+    DATA mv_open      TYPE abap_bool.
+    DATA ms_cur       TYPE ty_s_cur.
+    DATA mt_name      TYPE STANDARD TABLE OF ty_s_name WITH EMPTY KEY.
+    DATA mv_props     TYPE abap_bool.
+    DATA ms_props     TYPE ty_s_properties.
 
     " reading
     DATA mv_loaded     TYPE abap_bool.
@@ -429,11 +816,184 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
     "! the index of a cell format, added when the workbook has none like it
     METHODS style_get
       IMPORTING
-        id            TYPE i         OPTIONAL
-        code          TYPE string    OPTIONAL
-        bold          TYPE abap_bool OPTIONAL
+        id            TYPE i          OPTIONAL
+        code          TYPE string     OPTIONAL
+        style         TYPE ty_s_style OPTIONAL
       RETURNING
         VALUE(result) TYPE i.
+
+    "! the s attribute of a cell in that format - empty for format 0
+    METHODS style_attr
+      IMPORTING
+        id            TYPE i          OPTIONAL
+        code          TYPE string     OPTIONAL
+        style         TYPE ty_s_style OPTIONAL
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! the number format a cell of that category is shown in by default
+    CLASS-METHODS numfmt_by_cat
+      IMPORTING
+        cat           TYPE string
+      RETURNING
+        VALUE(result) TYPE i.
+
+    METHODS font_get
+      IMPORTING
+        val           TYPE ty_s_font
+      RETURNING
+        VALUE(result) TYPE i.
+
+    METHODS fill_get
+      IMPORTING
+        val           TYPE string
+      RETURNING
+        VALUE(result) TYPE i.
+
+    METHODS border_get
+      IMPORTING
+        val           TYPE ty_s_border
+      RETURNING
+        VALUE(result) TYPE i.
+
+    "! a colour as styles.xml names it (`FFC00000`) - raises for one that
+    "! is no six hex digits
+    CLASS-METHODS color_get
+      IMPORTING
+        val           TYPE string
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! a border style Excel knows - raises for another
+    CLASS-METHODS border_style
+      IMPORTING
+        val           TYPE string
+      RETURNING
+        VALUE(result) TYPE string.
+
+    " ----- the open sheet
+
+    METHODS sheet_open
+      IMPORTING
+        name   TYPE clike
+        layout TYPE ty_s_layout.
+
+    "! the open sheet rendered into mt_out_sheet
+    METHODS sheet_close.
+
+    "! raises when no sheet is open
+    METHODS sheet_check.
+
+    "! the rows of a table into the open sheet
+    METHODS table_write
+      IMPORTING
+        val    TYPE ANY TABLE
+        layout TYPE ty_s_layout.
+
+    "! the c element of a value by its category - xml empty for a value
+    "! that is no cell (an initial date). text is what the cell shows, for
+    "! the width of its column
+    METHODS cell_xml
+      IMPORTING
+        address   TYPE string
+        cat       TYPE string
+        style     TYPE string
+        val       TYPE any
+        time_zone TYPE string OPTIONAL
+      EXPORTING
+        xml       TYPE string
+        text      TYPE string.
+
+    "! cells of one row into the open sheet
+    METHODS seg_add
+      IMPORTING
+        row    TYPE i
+        col    TYPE i
+        col_to TYPE i
+        attr   TYPE string OPTIONAL
+        xml    TYPE string.
+
+    "! raises when a cell of the area holds a value of the open sheet
+    METHODS seg_check
+      IMPORTING
+        area TYPE ty_s_area.
+
+    "! the content width of a column of the open sheet, as a table sees it
+    METHODS col_len
+      IMPORTING
+        col  TYPE i
+        len  TYPE i
+        size TYPE i OPTIONAL.
+
+    "! a range (`A1:D5`, `$B$2`) as its corners - raises for one that is none
+    CLASS-METHODS area_parse
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE ty_s_area.
+
+    "! `A1:D5`, `A1` for a single cell, `$A$1:$D$5` absolute
+    CLASS-METHODS area_text
+      IMPORTING
+        val           TYPE ty_s_area
+        absolute      TYPE abap_bool OPTIONAL
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! a sheet name as a formula names it: `'Q1 2024'`
+    CLASS-METHODS sheet_quote
+      IMPORTING
+        val           TYPE string
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! the attributes of a row element: height, hidden, outline level
+    CLASS-METHODS line_attr
+      IMPORTING
+        val           TYPE ty_s_line
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! raises for a row or a column that is no row or column of a sheet
+    CLASS-METHODS cell_check
+      IMPORTING
+        row TYPE i
+        col TYPE i.
+
+    "! a validation as a dataValidation element over sqref
+    CLASS-METHODS validation_xml
+      IMPORTING
+        sqref         TYPE string
+        val           TYPE ty_s_validation
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! a name Excel takes for a defined name, raises for one it does not
+    METHODS name_check
+      IMPORTING
+        name          TYPE string
+        sheet         TYPE i.
+
+    "! the parts docProps/core.xml and docProps/app.xml
+    METHODS props_xml
+      EXPORTING
+        core TYPE xstring
+        app  TYPE xstring.
+
+    "! a time stamp YYYYMMDDhhmmss as W3CDTF: 2024-03-15T10:30:00Z
+    CLASS-METHODS iso_by_stamp
+      IMPORTING
+        val           TYPE p
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! a number of the layout in bounds - raises for one out of them
+    CLASS-METHODS bounds_check
+      IMPORTING
+        val  TYPE i
+        low  TYPE i
+        high TYPE i
+        name TYPE string.
 
     METHODS sheet_name_get
       IMPORTING
@@ -453,14 +1013,6 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
       RETURNING
         VALUE(result) TYPE string.
 
-    "! a relationships part with its one relationship, as the bytes of the file
-    CLASS-METHODS rels_xml
-      IMPORTING
-        kind          TYPE string
-        target        TYPE string
-      RETURNING
-        VALUE(result) TYPE xstring.
-
     METHODS table_xml
       IMPORTING
         id            TYPE i
@@ -470,6 +1022,7 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
         layout        TYPE ty_s_layout
         totals        TYPE abap_bool
         t_col         TYPE ty_t_out_col
+        first_row     TYPE i
       RETURNING
         VALUE(result) TYPE string.
 
@@ -682,36 +1235,337 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
 
   METHOD add_sheet.
 
-    DATA lr_line    TYPE REF TO data.
-    DATA lt_field   TYPE ty_t_field.
-    DATA lt_xml     TYPE string_table.
-    DATA lt_head    TYPE string_table.
-    DATA lv_cells   TYPE string.
-    DATA lv_text    TYPE string.
-    DATA lv_value   TYPE string.
-    DATA lv_ref     TYPE string.
-    DATA lv_row     TYPE i.
-    DATA lv_col0    TYPE i.
-    DATA lv_row0    TYPE i.
-    DATA lv_date    TYPE d.
-    DATA lv_time    TYPE t.
-    DATA lv_serial  TYPE i.
-    DATA lv_seconds TYPE i.
-    DATA lv_number  TYPE decfloat34.
-    DATA lv_elementary TYPE abap_bool.
-    DATA lv_totals  TYPE abap_bool.
-    DATA lv_table_name TYPE string.
-    DATA ls_sheet   TYPE ty_s_out_sheet.
-    FIELD-SYMBOLS <line> TYPE any.
-    FIELD-SYMBOLS <row>  TYPE any.
-    FIELD-SYMBOLS <cell> TYPE any.
-    FIELD-SYMBOLS <col>  TYPE ty_s_out_col.
-
     IF mv_loaded = abap_true.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
         EXPORTING
           val = `XLSX_READ_ONLY - a workbook that was read takes no sheet`.
     ENDIF.
+
+    sheet_close( ).
+    sheet_open( name   = name
+                layout = layout ).
+    IF val IS SUPPLIED.
+      table_write( val    = val
+                   layout = layout ).
+    ENDIF.
+
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD add_table.
+
+    sheet_check( ).
+    table_write( val    = val
+                 layout = layout ).
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD set_cell.
+
+    DATA lt_field TYPE ty_t_field.
+    DATA lv_xml   TYPE string.
+    DATA lv_cat   TYPE string.
+
+    sheet_check( ).
+    cell_check( row = row
+                col = col ).
+    seg_check( VALUE #( row1 = row
+                        col1 = col
+                        row2 = row
+                        col2 = col ) ).
+    DATA(lv_ref) = |{ column_to_letters( col ) }{ row }|.
+    DATA(ls_style) = style.
+    IF link IS NOT INITIAL AND ls_style-color IS INITIAL.
+      ls_style-color = `0563C1`.
+      ls_style-underline = abap_true.
+    ENDIF.
+    DATA(lv_code) = CONV string( format ).
+
+    IF formula IS NOT INITIAL.
+      DATA(lv_formula) = CONV string( formula ).
+      IF lv_formula(1) = `=`.
+        lv_formula = substring( val = lv_formula
+                                off = 1 ).
+      ENDIF.
+      lv_formula = zabaputil_cl_util_context=>c_escape_xml( lv_formula ).
+      DATA(lv_style) = style_attr( code  = lv_code
+                                   style = ls_style ).
+      lv_xml = |<c r="{ lv_ref }"{ lv_style }><f>{ lv_formula }</f></c>|.
+      mv_formulas = abap_true.
+    ELSEIF val IS SUPPLIED.
+      fields_get( EXPORTING row    = val
+                  IMPORTING result = lt_field ).
+      IF lt_field IS INITIAL.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |XLSX_CELL_VALUE - the value for { lv_ref } is no elementary value|.
+      ENDIF.
+      lv_cat = lt_field[ 1 ]-cat.
+      IF lv_cat <> cs_cat-number AND lv_cat <> cs_cat-date AND lv_cat <> cs_cat-time
+          AND lv_cat <> cs_cat-timestamp.
+        CLEAR lv_code.
+      ENDIF.
+      lv_style = style_attr( id    = numfmt_by_cat( lv_cat )
+                             code  = lv_code
+                             style = ls_style ).
+      cell_xml( EXPORTING address   = lv_ref
+                          cat       = lv_cat
+                          style     = lv_style
+                          val       = val
+                          time_zone = ms_cur-layout-time_zone
+                IMPORTING xml       = lv_xml ).
+    ENDIF.
+
+    " a cell without a value that still looks like something: a border, a
+    " fill in a merged title
+    IF lv_xml IS INITIAL AND ( ls_style IS NOT INITIAL OR lv_code IS NOT INITIAL ).
+      lv_style = style_attr( code  = lv_code
+                             style = ls_style ).
+      lv_xml = |<c r="{ lv_ref }"{ lv_style }/>|.
+    ENDIF.
+    IF link IS NOT INITIAL.
+      INSERT VALUE #( ref    = lv_ref
+                      target = link ) INTO TABLE ms_cur-t_link.
+    ENDIF.
+    IF lv_xml IS NOT INITIAL.
+      seg_add( row    = row
+               col    = col
+               col_to = col
+               xml    = lv_xml ).
+    ENDIF.
+
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD set_row.
+
+    FIELD-SYMBOLS <line> TYPE ty_s_line.
+
+    sheet_check( ).
+    cell_check( row = row
+                col = 1 ).
+    bounds_check( val  = height
+                  low  = 0
+                  high = 409
+                  name = `row height` ).
+    bounds_check( val  = outline_level
+                  low  = 0
+                  high = 7
+                  name = `outline level` ).
+
+    UNASSIGN <line>.
+    ASSIGN ms_cur-t_row[ pos = row ] TO <line>.
+    IF <line> IS NOT ASSIGNED.
+      INSERT VALUE #( pos = row ) INTO TABLE ms_cur-t_row ASSIGNING <line>.
+    ENDIF.
+    <line>-size = height.
+    <line>-hidden = hidden.
+    <line>-level = outline_level.
+    IF outline_level > ms_cur-row_level.
+      ms_cur-row_level = outline_level.
+    ENDIF.
+
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD set_column.
+
+    FIELD-SYMBOLS <line> TYPE ty_s_line.
+
+    sheet_check( ).
+    cell_check( row = 1
+                col = col ).
+    bounds_check( val  = width
+                  low  = 0
+                  high = 255
+                  name = `column width` ).
+    bounds_check( val  = outline_level
+                  low  = 0
+                  high = 7
+                  name = `outline level` ).
+
+    UNASSIGN <line>.
+    ASSIGN ms_cur-t_col[ pos = col ] TO <line>.
+    IF <line> IS NOT ASSIGNED.
+      INSERT VALUE #( pos = col ) INTO TABLE ms_cur-t_col ASSIGNING <line>.
+    ENDIF.
+    IF width > 0.
+      <line>-size = width.
+    ENDIF.
+    <line>-hidden = hidden.
+    <line>-level = outline_level.
+    IF outline_level > ms_cur-col_level.
+      ms_cur-col_level = outline_level.
+    ENDIF.
+
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD merge.
+
+    sheet_check( ).
+    DATA(ls_area) = area_parse( range ).
+    IF ls_area-row1 = ls_area-row2 AND ls_area-col1 = ls_area-col2.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |XLSX_MERGE - { range } is one cell, nothing to merge|.
+    ENDIF.
+    LOOP AT ms_cur-t_merge REFERENCE INTO DATA(lr_merge)
+         WHERE row1 <= ls_area-row2 AND row2 >= ls_area-row1
+           AND col1 <= ls_area-col2 AND col2 >= ls_area-col1.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |XLSX_MERGE - { range } overlaps { area_text( lr_merge->* ) }, merged already|.
+    ENDLOOP.
+    INSERT ls_area INTO TABLE ms_cur-t_merge.
+
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD add_validation.
+
+    sheet_check( ).
+    DATA(lv_ref) = area_text( area_parse( range ) ).
+    INSERT validation_xml( sqref = lv_ref
+                           val   = validation ) INTO TABLE ms_cur-t_valid.
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD add_name.
+
+    DATA ls_name TYPE ty_s_name.
+
+    IF local = abap_true.
+      sheet_check( ).
+      ls_name-sheet = lines( mt_out_sheet ) + 1.
+    ENDIF.
+    ls_name-name = zabaputil_cl_util_context=>c_trim( name ).
+    ls_name-ref = ref.
+    IF ls_name-ref IS NOT INITIAL AND ls_name-ref(1) = `=`.
+      ls_name-ref = substring( val = ls_name-ref
+                               off = 1 ).
+    ENDIF.
+    IF ls_name-ref IS INITIAL.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |XLSX_NAME - the name { ls_name-name } stands for nothing|.
+    ENDIF.
+    name_check( name  = ls_name-name
+                sheet = ls_name-sheet ).
+    INSERT ls_name INTO TABLE mt_name.
+
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD set_properties.
+
+    ms_props = val.
+    mv_props = abap_true.
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD sheet_check.
+
+    IF mv_open = abap_false.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = `XLSX_NO_SHEET - add_sheet( ) first: there is no sheet to write to`.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD sheet_open.
+
+    DATA ls_area TYPE ty_s_area.
+
+    CLEAR ms_cur.
+    ms_cur-name = sheet_name_get( name ).
+    ms_cur-layout = layout.
+    mv_open = abap_true.
+
+    bounds_check( val  = layout-zoom
+                  low  = 0
+                  high = 400
+                  name = `zoom` ).
+    IF layout-zoom > 0 AND layout-zoom < 10.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |XLSX_LAYOUT - a zoom of { layout-zoom } percent is none, Excel takes 10 to 400|.
+    ENDIF.
+    bounds_check( val  = layout-fit_width
+                  low  = 0
+                  high = 32767
+                  name = `fit_width` ).
+    bounds_check( val  = layout-fit_height
+                  low  = 0
+                  high = 32767
+                  name = `fit_height` ).
+    bounds_check( val  = layout-margin
+                  low  = 0
+                  high = 500
+                  name = `margin` ).
+    IF layout-tab_color IS NOT INITIAL.
+      color_get( layout-tab_color ).
+    ENDIF.
+
+    " frozen rows and columns: what lies above and left of the cell
+    IF layout-freeze_cell IS NOT INITIAL.
+      ls_area = area_parse( layout-freeze_cell ).
+      DATA(lv_x) = ls_area-col1 - 1.
+      DATA(lv_y) = ls_area-row1 - 1.
+      DATA(lv_cell) = area_text( ls_area ).
+      DATA(lv_split) = ``.
+      IF lv_x > 0.
+        lv_split = | xSplit="{ lv_x }"|.
+      ENDIF.
+      IF lv_y > 0.
+        lv_split = |{ lv_split } ySplit="{ lv_y }"|.
+      ENDIF.
+      DATA(lv_pane) = `bottomRight`.
+      IF lv_x = 0.
+        lv_pane = `bottomLeft`.
+      ENDIF.
+      IF lv_y = 0.
+        lv_pane = `topRight`.
+      ENDIF.
+      IF lv_split IS NOT INITIAL.
+        ms_cur-pane = |<pane{ lv_split } topLeftCell="{ lv_cell }" activePane="{ lv_pane }" state="frozen"/>|.
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD table_write.
+
+    DATA lr_line    TYPE REF TO data.
+    DATA lt_field   TYPE ty_t_field.
+    DATA lv_cells   TYPE string.
+    DATA lv_text    TYPE string.
+    DATA lv_value   TYPE string.
+    DATA lv_xml     TYPE string.
+    DATA lv_ref     TYPE string.
+    DATA lv_row     TYPE i.
+    DATA lv_col0    TYPE i.
+    DATA lv_row0    TYPE i.
+    DATA lv_number  TYPE decfloat34.
+    DATA lv_elementary TYPE abap_bool.
+    DATA lv_totals  TYPE abap_bool.
+    DATA lv_table_name TYPE string.
+    DATA ls_area    TYPE ty_s_area.
+    FIELD-SYMBOLS <line> TYPE any.
+    FIELD-SYMBOLS <row>  TYPE any.
+    FIELD-SYMBOLS <cell> TYPE any.
+    FIELD-SYMBOLS <link> TYPE any.
+    FIELD-SYMBOLS <col>  TYPE ty_s_out_col.
 
     " where the header row starts: A1, or the cell the layout names
     IF layout-start_cell IS NOT INITIAL.
@@ -736,6 +1590,14 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
         EXPORTING
           val = |XLSX_TOO_MANY_ROWS - a sheet holds { cv_max_row } rows, the table has { lines( val ) }|.
     ENDIF.
+    bounds_check( val  = layout-row_height
+                  low  = 0
+                  high = 409
+                  name = `row height` ).
+    bounds_check( val  = layout-outline_level
+                  low  = 0
+                  high = 7
+                  name = `outline level` ).
 
     CREATE DATA lr_line LIKE LINE OF val.
     ASSIGN lr_line->* TO <line>.
@@ -745,8 +1607,12 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     DATA(lt_col) = columns_get( t_field = lt_field
                                 layout  = layout
                                 offset  = lv_col0 ).
+    IF lt_col IS INITIAL.
+      RETURN.
+    ENDIF.
+
     DATA(lv_table) = xsdbool( layout-table_style IS NOT INITIAL AND layout-no_header = abap_false
-                              AND val IS NOT INITIAL AND lt_col IS NOT INITIAL ).
+                              AND val IS NOT INITIAL ).
     IF lv_table = abap_true.
       lv_table_name = table_name_get( layout-table_name ).
     ENDIF.
@@ -757,14 +1623,37 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
+    " the cells the table takes must be free - the totals row included
+    ls_area-row1 = lv_row0 + 1.
+    ls_area-col1 = lv_col0 + 1.
+    ls_area-row2 = lv_row0 + lines( val ).
+    IF layout-no_header = abap_false.
+      ls_area-row2 = ls_area-row2 + 1.
+    ENDIF.
+    IF lv_totals = abap_true.
+      ls_area-row2 = ls_area-row2 + 1.
+    ENDIF.
+    ls_area-col2 = lv_col0 + lines( lt_col ).
+    IF ls_area-row2 >= ls_area-row1.
+      seg_check( ls_area ).
+    ENDIF.
+
     " an Excel table formats its header and its totals row itself
-    DATA(lv_head_style) = ``.
+    DATA(ls_head) = layout-header_style.
     IF lv_table = abap_false.
-      lv_head_style = | s="{ style_get( bold = abap_true ) }"|.
+      ls_head-bold = abap_true.
+    ENDIF.
+    DATA(lv_head_style) = style_attr( style = ls_head ).
+
+    " the height and the outline level of the rows
+    DATA(lv_attr) = line_attr( VALUE #( size  = layout-row_height
+                                        level = layout-outline_level ) ).
+    IF layout-outline_level > ms_cur-row_level.
+      ms_cur-row_level = layout-outline_level.
     ENDIF.
 
     lv_row = lv_row0.
-    IF layout-no_header = abap_false AND lt_col IS NOT INITIAL.
+    IF layout-no_header = abap_false.
       lv_row = lv_row + 1.
       LOOP AT lt_col ASSIGNING <col>.
         lv_cells = lv_cells && cell_text( address = |{ <col>-letters }{ lv_row }|
@@ -773,7 +1662,10 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
         " the filter button takes its room in the header cell
         <col>-len = strlen( <col>-header ) + 3.
       ENDLOOP.
-      INSERT |<row r="{ lv_row }">{ lv_cells }</row>| INTO TABLE lt_xml.
+      seg_add( row    = lv_row
+               col    = ls_area-col1
+               col_to = ls_area-col2
+               xml    = lv_cells ).
     ENDIF.
     DATA(lv_first_data) = lv_row + 1.
 
@@ -804,100 +1696,43 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
             CONTINUE.
           ENDIF.
         ENDIF.
-        CLEAR lv_text.
 
-        CASE <col>-cat.
+        " a link from the cell, to what the row holds in the link component
+        DATA(lv_style) = <col>-style.
+        IF <col>-link IS NOT INITIAL.
+          UNASSIGN <link>.
+          IF lv_elementary = abap_true.
+            ASSIGN <row> TO <link>.
+          ELSE.
+            ASSIGN COMPONENT <col>-link OF STRUCTURE <row> TO <link>.
+          ENDIF.
+          IF <link> IS ASSIGNED AND <link> IS NOT INITIAL.
+            INSERT VALUE #( ref    = lv_ref
+                            target = |{ <link> }| ) INTO TABLE ms_cur-t_link.
+            lv_style = <col>-link_style.
+          ENDIF.
+        ENDIF.
 
-          WHEN cs_cat-number.
-            " a string template writes the sign in front and a period as
-            " decimal separator, whatever the user's settings
-            lv_text = |{ <cell> }|.
-            lv_cells = |{ lv_cells }<c r="{ lv_ref }"{ <col>-style }><v>{ lv_text }</v></c>|.
-            IF <col>-total_fn IS NOT INITIAL.
-              lv_number = <cell>.
-              <col>-sum = <col>-sum + lv_number.
-              IF <col>-numbers = 0 OR lv_number < <col>-low.
-                <col>-low = lv_number.
-              ENDIF.
-              IF <col>-numbers = 0 OR lv_number > <col>-high.
-                <col>-high = lv_number.
-              ENDIF.
-              <col>-numbers = <col>-numbers + 1.
-            ENDIF.
+        cell_xml( EXPORTING address   = lv_ref
+                            cat       = <col>-cat
+                            style     = lv_style
+                            val       = <cell>
+                            time_zone = layout-time_zone
+                  IMPORTING xml       = lv_xml
+                            text      = lv_text ).
+        lv_cells = lv_cells && lv_xml.
 
-          WHEN cs_cat-date.
-            lv_date = <cell>.
-            lv_serial = date_to_serial( lv_date ).
-            IF lv_serial > 0.
-              lv_text = `0000-00-00`.
-              lv_cells = |{ lv_cells }<c r="{ lv_ref }"{ <col>-style }><v>{ lv_serial }</v></c>|.
-            ELSEIF lv_date IS NOT INITIAL.
-              " a date Excel has no number for - before 1900, or none at
-              " all - stays readable as text
-              lv_text = |{ lv_date(4) }-{ lv_date+4(2) }-{ lv_date+6(2) }|.
-              lv_cells = lv_cells && cell_text( address = lv_ref
-                                                val     = lv_text ).
-            ENDIF.
-
-          WHEN cs_cat-time.
-            lv_time = <cell>.
-            lv_seconds = lv_time(2) * 3600 + lv_time+2(2) * 60 + lv_time+4(2).
-            " the fraction of a day with every digit the cell stores: cut
-            " shorter, 23:59:59 comes out a hair below itself, and a reader
-            " that cuts off the rest shows 23:59:58
-            lv_number = lv_seconds.
-            lv_number = round( val = lv_number / 86400
-                               dec = 18 ).
-            lv_value = number_plain( val    = |{ lv_number }|
-                                     digits = 17 ).
-            lv_text = `00:00:00`.
-            lv_cells = |{ lv_cells }<c r="{ lv_ref }"{ <col>-style }><v>{ lv_value }</v></c>|.
-
-          WHEN cs_cat-timestamp.
-            " YYYYMMDDHHMMSS, with or without a fraction of a second
-            lv_text = |{ <cell> }|.
-            IF lv_text CS `.`.
-              lv_text = substring_before( val = lv_text
-                                          sub = `.` ).
-            ENDIF.
-            IF strlen( lv_text ) = 14 AND lv_text CO cv_digits.
-              lv_date = lv_text(8).
-              lv_serial = date_to_serial( lv_date ).
-            ELSE.
-              lv_serial = 0.
-            ENDIF.
-            IF lv_serial > 0.
-              lv_seconds = lv_text+8(2) * 3600 + lv_text+10(2) * 60 + lv_text+12(2).
-              lv_number = lv_seconds.
-              lv_number = lv_serial + round( val = lv_number / 86400
-                                             dec = 18 ).
-              lv_value = number_plain( val    = |{ lv_number }|
-                                       digits = 17 ).
-              lv_text = `0000-00-00 00:00`.
-              lv_cells = |{ lv_cells }<c r="{ lv_ref }"{ <col>-style }><v>{ lv_value }</v></c>|.
-            ELSE.
-              CLEAR lv_text.
-            ENDIF.
-
-          WHEN cs_cat-boolean.
-            " a flag that is not set is an empty cell, not a FALSE in
-            " every row
-            IF <cell> IS NOT INITIAL.
-              lv_text = `TRUE`.
-              lv_cells = |{ lv_cells }<c r="{ lv_ref }" t="b"><v>1</v></c>|.
-            ENDIF.
-
-          WHEN OTHERS.
-            " text, and what is text in the file: a NUMC with its leading
-            " zeros, bytes as hex digits
-            IF <cell> IS NOT INITIAL OR <col>-cat = cs_cat-numc.
-              lv_text = |{ <cell> }|.
-              lv_cells = lv_cells && cell_text( address = lv_ref
-                                                val     = lv_text ).
-            ENDIF.
-
-        ENDCASE.
-
+        IF <col>-cat = cs_cat-number AND <col>-total_fn IS NOT INITIAL.
+          lv_number = <cell>.
+          <col>-sum = <col>-sum + lv_number.
+          IF <col>-numbers = 0 OR lv_number < <col>-low.
+            <col>-low = lv_number.
+          ENDIF.
+          IF <col>-numbers = 0 OR lv_number > <col>-high.
+            <col>-high = lv_number.
+          ENDIF.
+          <col>-numbers = <col>-numbers + 1.
+        ENDIF.
         IF lv_text IS NOT INITIAL.
           <col>-cells = <col>-cells + 1.
         ENDIF.
@@ -905,8 +1740,12 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
           <col>-len = strlen( lv_text ).
         ENDIF.
       ENDLOOP.
-      IF lv_cells IS NOT INITIAL.
-        INSERT |<row r="{ lv_row }">{ lv_cells }</row>| INTO TABLE lt_xml.
+      IF lv_cells IS NOT INITIAL OR lv_attr IS NOT INITIAL.
+        seg_add( row    = lv_row
+                 col    = ls_area-col1
+                 col_to = ls_area-col2
+                 attr   = lv_attr
+                 xml    = lv_cells ).
       ENDIF.
     ENDLOOP.
     DATA(lv_last_data) = lv_row.
@@ -947,7 +1786,7 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
           " a count is a number whatever the column holds
           DATA(lv_total_style) = <col>-style.
           IF <col>-total_fn = `count` OR <col>-total_fn = `countNums`.
-            CLEAR lv_total_style.
+            lv_total_style = <col>-plain_style.
           ENDIF.
           lv_text = total_value( <col> ).
           IF lv_text IS NOT INITIAL.
@@ -961,81 +1800,853 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
                                             style   = lv_head_style ).
         ENDIF.
       ENDLOOP.
-      INSERT |<row r="{ lv_row }">{ lv_cells }</row>| INTO TABLE lt_xml.
+      seg_add( row    = lv_row
+               col    = ls_area-col1
+               col_to = ls_area-col2
+               xml    = lv_cells ).
     ENDIF.
 
-    " what stands in front of the rows is known only now: the range of the
-    " sheet and the widths of its columns
-    DATA(lv_range) = `A1`.
-    DATA(lv_filter) = ``.
-    IF lt_col IS NOT INITIAL AND lv_row > lv_row0.
-      DATA(lv_left) = column_to_letters( lv_col0 + 1 ).
-      DATA(lv_right) = column_to_letters( lv_col0 + lines( lt_col ) ).
-      lv_range = |{ lv_left }{ lv_row0 + 1 }:{ lv_right }{ lv_row }|.
-      " the filter ends above the totals row
-      DATA(lv_filter_end) = nmax( val1 = lv_last_data
-                                  val2 = lv_row0 + 1 ).
-      lv_filter = |{ lv_left }{ lv_row0 + 1 }:{ lv_right }{ lv_filter_end }|.
+    " the range of the table, and of its filter, which ends above the
+    " totals row
+    ls_area-row2 = lv_row.
+    IF ls_area-row2 < ls_area-row1.
+      ls_area-row2 = ls_area-row1.
     ENDIF.
-    DATA(lv_tab_selected) = ``.
-    IF mt_out_sheet IS INITIAL.
-      lv_tab_selected = ` tabSelected="1"`.
-    ENDIF.
-    DATA(lv_pane) = ``.
-    IF layout-freeze_header = abap_true AND layout-no_header = abap_false.
-      lv_pane = |<pane ySplit="{ lv_row0 + 1 }" topLeftCell="A{ lv_row0 + 2 }" activePane="bottomLeft" state="frozen"/>|.
+    DATA(lv_range) = area_text( ls_area ).
+    DATA(ls_filter) = ls_area.
+    ls_filter-row2 = nmax( val1 = lv_last_data
+                           val2 = lv_row0 + 1 ).
+    DATA(lv_filter) = area_text( ls_filter ).
+
+    " the widths, and what the layout says of the columns
+    LOOP AT lt_col ASSIGNING <col>.
+      DATA(lv_index) = lv_col0 + sy-tabix.
+      col_len( col  = lv_index
+               len  = <col>-len
+               size = <col>-width ).
+      IF <col>-hidden = abap_true OR <col>-level > 0.
+        set_column( col           = lv_index
+                    hidden        = <col>-hidden
+                    outline_level = <col>-level ).
+      ENDIF.
+      IF <col>-validation IS NOT INITIAL AND lv_last_data >= lv_first_data.
+        lv_value = |{ <col>-letters }{ lv_first_data }:{ <col>-letters }{ lv_last_data }|.
+        INSERT validation_xml( sqref = lv_value
+                               val   = <col>-validation ) INTO TABLE ms_cur-t_valid.
+      ENDIF.
+    ENDLOOP.
+
+    " the first table with a header places the frozen pane and the rows
+    " printed on every page
+    IF layout-no_header = abap_false.
+      IF layout-freeze_header = abap_true AND ms_cur-pane IS INITIAL.
+        ms_cur-pane = |<pane ySplit="{ lv_row0 + 1 }" topLeftCell="A{ lv_row0 + 2 }" activePane="bottomLeft" state="frozen"/>|.
+      ENDIF.
+      IF ms_cur-header_rows IS INITIAL.
+        ms_cur-header_rows = |${ lv_row0 + 1 }:${ lv_row0 + 1 }|.
+      ENDIF.
     ENDIF.
 
-    INSERT |{ cv_xml_head }<worksheet xmlns="{ cs_ns-main }" xmlns:r="{ cs_ns-rel }">| INTO TABLE lt_head.
-    INSERT |<dimension ref="{ lv_range }"/>| INTO TABLE lt_head.
-    INSERT |<sheetViews><sheetView workbookViewId="0"{ lv_tab_selected }>{ lv_pane }</sheetView></sheetViews>|
-           INTO TABLE lt_head.
-    INSERT `<sheetFormatPr defaultRowHeight="15"/>` INTO TABLE lt_head.
-    IF lt_col IS NOT INITIAL.
-      INSERT `<cols>` INTO TABLE lt_head.
-      LOOP AT lt_col ASSIGNING <col>.
-        DATA(lv_index) = lv_col0 + sy-tabix.
-        DATA(lv_width) = <col>-width.
-        IF lv_width <= 0.
-          " by the longest content, in bounds: a long text does not push
-          " every other column off the screen
-          lv_width = nmin( val1 = nmax( val1 = <col>-len + 2
-                                        val2 = 6 )
-                           val2 = 60 ).
-        ENDIF.
-        INSERT |<col min="{ lv_index }" max="{ lv_index }" width="{ lv_width }" customWidth="1"/>|
-               INTO TABLE lt_head.
-      ENDLOOP.
-      INSERT `</cols>` INTO TABLE lt_head.
-    ENDIF.
-    INSERT `<sheetData>` INTO TABLE lt_head.
-
-    INSERT `</sheetData>` INTO TABLE lt_xml.
     IF lv_table = abap_true.
       mv_tables = mv_tables + 1.
       IF layout-no_filter = abap_true.
         CLEAR lv_filter.
       ENDIF.
-      ls_sheet-table_xml = zabaputil_cl_util_context=>conv_get_xstring_by_string(
-                               table_xml( id     = mv_tables
-                                          name   = lv_table_name
-                                          range  = lv_range
-                                          filter = lv_filter
-                                          layout = layout
-                                          totals = lv_totals
-                                          t_col  = lt_col ) ).
-      INSERT `<tableParts count="1"><tablePart r:id="rId1"/></tableParts>` INTO TABLE lt_xml.
-    ELSEIF layout-auto_filter = abap_true AND layout-no_header = abap_false AND lt_col IS NOT INITIAL.
-      INSERT |<autoFilter ref="{ lv_filter }"/>| INTO TABLE lt_xml.
+      lv_xml = table_xml( id        = mv_tables
+                          name      = lv_table_name
+                          range     = lv_range
+                          filter    = lv_filter
+                          layout    = layout
+                          totals    = lv_totals
+                          t_col     = lt_col
+                          first_row = lv_first_data ).
+      INSERT VALUE #( id  = mv_tables
+                      xml = zabaputil_cl_util_context=>conv_get_xstring_by_string( lv_xml ) )
+             INTO TABLE ms_cur-t_table.
+    ELSEIF layout-auto_filter = abap_true AND layout-no_header = abap_false.
+      IF ms_cur-filter IS NOT INITIAL.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |XLSX_FILTER - the sheet has a filter on { ms_cur-filter } already, it takes one|.
+      ENDIF.
+      ms_cur-filter = lv_filter.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD cell_xml.
+
+    DATA lv_date    TYPE d.
+    DATA lv_time    TYPE t.
+    DATA lv_serial  TYPE i.
+    DATA lv_seconds TYPE i.
+    DATA lv_number  TYPE decfloat34.
+    DATA lv_value   TYPE string.
+    DATA lv_stampl  TYPE timestampl.
+
+    CLEAR xml.
+    CLEAR text.
+
+    CASE cat.
+
+      WHEN cs_cat-number.
+        " a string template writes the sign in front and a period as
+        " decimal separator, whatever the user's settings
+        text = |{ val }|.
+        xml = |<c r="{ address }"{ style }><v>{ text }</v></c>|.
+
+      WHEN cs_cat-date.
+        lv_date = val.
+        lv_serial = date_to_serial( lv_date ).
+        IF lv_serial > 0.
+          text = `0000-00-00`.
+          xml = |<c r="{ address }"{ style }><v>{ lv_serial }</v></c>|.
+        ELSEIF lv_date IS NOT INITIAL.
+          " a date Excel has no number for - before 1900, or none at
+          " all - stays readable as text
+          text = |{ lv_date(4) }-{ lv_date+4(2) }-{ lv_date+6(2) }|.
+          xml = cell_text( address = address
+                           val     = text ).
+        ENDIF.
+
+      WHEN cs_cat-time.
+        lv_time = val.
+        lv_seconds = lv_time(2) * 3600 + lv_time+2(2) * 60 + lv_time+4(2).
+        " the fraction of a day with every digit the cell stores: cut
+        " shorter, 23:59:59 comes out a hair below itself, and a reader
+        " that cuts off the rest shows 23:59:58
+        lv_number = lv_seconds.
+        lv_number = round( val = lv_number / 86400
+                           dec = 18 ).
+        lv_value = number_plain( val    = |{ lv_number }|
+                                 digits = 17 ).
+        text = `00:00:00`.
+        xml = |<c r="{ address }"{ style }><v>{ lv_value }</v></c>|.
+
+      WHEN cs_cat-timestamp.
+        " YYYYMMDDHHMMSS, with or without a fraction of a second - in the
+        " time zone the layout names
+        text = |{ val }|.
+        IF time_zone IS NOT INITIAL AND val IS NOT INITIAL.
+          lv_stampl = val.
+          zabaputil_cl_util_context=>time_stampl_to_tz( EXPORTING val  = lv_stampl
+                                                                  tz   = time_zone
+                                                        IMPORTING date = lv_date
+                                                                  time = lv_time ).
+          text = |{ lv_date }{ lv_time }|.
+        ENDIF.
+        IF text CS `.`.
+          text = substring_before( val = text
+                                   sub = `.` ).
+        ENDIF.
+        IF strlen( text ) = 14 AND text CO cv_digits.
+          lv_date = text(8).
+          lv_serial = date_to_serial( lv_date ).
+        ELSE.
+          lv_serial = 0.
+        ENDIF.
+        IF lv_serial > 0.
+          lv_seconds = text+8(2) * 3600 + text+10(2) * 60 + text+12(2).
+          lv_number = lv_seconds.
+          lv_number = lv_serial + round( val = lv_number / 86400
+                                         dec = 18 ).
+          lv_value = number_plain( val    = |{ lv_number }|
+                                   digits = 17 ).
+          text = `0000-00-00 00:00`.
+          xml = |<c r="{ address }"{ style }><v>{ lv_value }</v></c>|.
+        ELSE.
+          CLEAR text.
+        ENDIF.
+
+      WHEN cs_cat-boolean.
+        " a flag that is not set is an empty cell, not a FALSE in every
+        " row
+        IF val IS NOT INITIAL.
+          text = `TRUE`.
+          xml = |<c r="{ address }"{ style } t="b"><v>1</v></c>|.
+        ENDIF.
+
+      WHEN OTHERS.
+        " text, and what is text in the file: a NUMC with its leading
+        " zeros, bytes as hex digits
+        IF val IS NOT INITIAL OR cat = cs_cat-numc.
+          text = |{ val }|.
+          xml = cell_text( address = address
+                           val     = text
+                           style   = style ).
+        ENDIF.
+
+    ENDCASE.
+
+  ENDMETHOD.
+
+  METHOD seg_add.
+
+    INSERT VALUE #( row    = row
+                    col    = col
+                    col_to = col_to
+                    attr   = attr
+                    xml    = xml ) INTO TABLE ms_cur-t_seg.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |XLSX_CELL_TAKEN - { column_to_letters( col ) }{ row } holds a value already|.
+    ENDIF.
+    IF ms_cur-col_min = 0 OR col < ms_cur-col_min.
+      ms_cur-col_min = col.
+    ENDIF.
+    IF col_to > ms_cur-col_max.
+      ms_cur-col_max = col_to.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD seg_check.
+
+    DATA lv_taken TYPE abap_bool.
+
+    IF ms_cur-t_seg IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    " one row by the key; the rows of a table in one pass
+    IF area-row1 = area-row2.
+      LOOP AT ms_cur-t_seg REFERENCE INTO DATA(lr_seg) WHERE row = area-row1.
+        IF lr_seg->col <= area-col2 AND lr_seg->col_to >= area-col1.
+          lv_taken = abap_true.
+          EXIT.
+        ENDIF.
+      ENDLOOP.
+    ELSE.
+      LOOP AT ms_cur-t_seg REFERENCE INTO lr_seg
+           WHERE row >= area-row1 AND row <= area-row2
+             AND col <= area-col2 AND col_to >= area-col1.
+        lv_taken = abap_true.
+        EXIT.
+      ENDLOOP.
+    ENDIF.
+    IF lv_taken = abap_true.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |XLSX_CELL_TAKEN - { area_text( area ) } overlaps cells that hold a value already|.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD col_len.
+
+    FIELD-SYMBOLS <line> TYPE ty_s_line.
+
+    UNASSIGN <line>.
+    ASSIGN ms_cur-t_col[ pos = col ] TO <line>.
+    IF <line> IS NOT ASSIGNED.
+      INSERT VALUE #( pos = col ) INTO TABLE ms_cur-t_col ASSIGNING <line>.
+    ENDIF.
+    <line>-auto = abap_true.
+    IF len > <line>-len.
+      <line>-len = len.
+    ENDIF.
+    IF size > 0 AND <line>-size = 0.
+      <line>-size = size.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD line_attr.
+
+    IF val-size > 0.
+      result = | ht="{ val-size }" customHeight="1"|.
+    ENDIF.
+    IF val-hidden = abap_true.
+      result = |{ result } hidden="1"|.
+    ENDIF.
+    IF val-level > 0.
+      result = |{ result } outlineLevel="{ val-level }"|.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD sheet_close.
+
+    DATA lt_head  TYPE string_table.
+    DATA lt_xml   TYPE string_table.
+    DATA lt_rels  TYPE string_table.
+    DATA lt_link  TYPE string_table.
+    DATA lt_cols  TYPE string_table.
+    DATA lv_cells TYPE string.
+    DATA lv_row   TYPE i.
+    DATA lv_rid   TYPE i.
+    DATA ls_sheet TYPE ty_s_out_sheet.
+    DATA ls_area  TYPE ty_s_area.
+
+    IF mv_open = abap_false.
+      RETURN.
+    ENDIF.
+    mv_open = abap_false.
+    DATA(ls_layout) = ms_cur-layout.
+    DATA(lv_index) = lines( mt_out_sheet ) + 1.
+
+    " a row with a height or an outline level and no cell is a row too
+    LOOP AT ms_cur-t_row INTO DATA(ls_line).
+      DATA(lv_found) = abap_false.
+      LOOP AT ms_cur-t_seg TRANSPORTING NO FIELDS WHERE row = ls_line-pos.
+        lv_found = abap_true.
+        EXIT.
+      ENDLOOP.
+      IF lv_found = abap_false.
+        INSERT VALUE #( row = ls_line-pos ) INTO TABLE ms_cur-t_seg.
+      ENDIF.
+    ENDLOOP.
+
+    " the rows, each with its cells in the order of their columns
+    LOOP AT ms_cur-t_seg REFERENCE INTO DATA(lr_seg).
+      IF lr_seg->row <> lv_row.
+        IF lv_row > 0.
+          INSERT |{ lv_cells }</row>| INTO TABLE lt_xml.
+        ENDIF.
+        lv_row = lr_seg->row.
+        DATA(lv_attr) = lr_seg->attr.
+        IF ms_cur-t_row IS NOT INITIAL AND line_exists( ms_cur-t_row[ pos = lv_row ] ).
+          lv_attr = line_attr( ms_cur-t_row[ pos = lv_row ] ).
+        ENDIF.
+        lv_cells = |<row r="{ lv_row }"{ lv_attr }>|.
+      ENDIF.
+      lv_cells = lv_cells && lr_seg->xml.
+    ENDLOOP.
+    IF lv_row > 0.
+      INSERT |{ lv_cells }</row>| INTO TABLE lt_xml.
+    ENDIF.
+    CLEAR lv_cells.
+
+    " the range of the sheet
+    DATA(lv_range) = `A1`.
+    IF ms_cur-col_max > 0.
+      ls_area-row1 = ms_cur-t_seg[ 1 ]-row.
+      ls_area-row2 = ms_cur-t_seg[ lines( ms_cur-t_seg ) ]-row.
+      ls_area-col1 = ms_cur-col_min.
+      ls_area-col2 = ms_cur-col_max.
+      lv_range = area_text( ls_area ).
+    ENDIF.
+
+    " the first sheet that is not hidden is the one Excel shows
+    DATA(lv_view) = ``.
+    IF ls_layout-hidden = abap_false.
+      lv_view = ` tabSelected="1"`.
+      LOOP AT mt_out_sheet TRANSPORTING NO FIELDS WHERE hidden = abap_false.
+        CLEAR lv_view.
+        EXIT.
+      ENDLOOP.
+    ENDIF.
+    IF ls_layout-no_gridlines = abap_true.
+      lv_view = |{ lv_view } showGridLines="0"|.
+    ENDIF.
+    IF ls_layout-zoom > 0.
+      lv_view = |{ lv_view } zoomScale="{ ls_layout-zoom }" zoomScaleNormal="{ ls_layout-zoom }"|.
+    ENDIF.
+
+    DATA(lv_pr) = ``.
+    IF ls_layout-tab_color IS NOT INITIAL.
+      lv_pr = |<tabColor rgb="{ color_get( ls_layout-tab_color ) }"/>|.
+    ENDIF.
+    IF ls_layout-fit_width > 0 OR ls_layout-fit_height > 0.
+      lv_pr = |{ lv_pr }<pageSetUpPr fitToPage="1"/>|.
+    ENDIF.
+
+    INSERT |{ cv_xml_head }<worksheet xmlns="{ cs_ns-main }" xmlns:r="{ cs_ns-rel }">| INTO TABLE lt_head.
+    IF lv_pr IS NOT INITIAL.
+      INSERT |<sheetPr>{ lv_pr }</sheetPr>| INTO TABLE lt_head.
+    ENDIF.
+    INSERT |<dimension ref="{ lv_range }"/>| INTO TABLE lt_head.
+    INSERT |<sheetViews><sheetView workbookViewId="0"{ lv_view }>{ ms_cur-pane }</sheetView></sheetViews>|
+           INTO TABLE lt_head.
+    DATA(lv_format) = ``.
+    IF ms_cur-row_level > 0.
+      lv_format = | outlineLevelRow="{ ms_cur-row_level }"|.
+    ENDIF.
+    IF ms_cur-col_level > 0.
+      lv_format = |{ lv_format } outlineLevelCol="{ ms_cur-col_level }"|.
+    ENDIF.
+    INSERT |<sheetFormatPr defaultRowHeight="15"{ lv_format }/>| INTO TABLE lt_head.
+
+    " the widths: by the longest content, in bounds - a long text does not
+    " push every other column off the screen
+    LOOP AT ms_cur-t_col INTO ls_line.
+      DATA(lv_width) = ls_line-size.
+      IF lv_width <= 0 AND ls_line-auto = abap_true.
+        lv_width = nmin( val1 = nmax( val1 = ls_line-len + 2
+                                      val2 = 6 )
+                         val2 = 60 ).
+      ELSEIF lv_width <= 0.
+        lv_width = 9.
+      ENDIF.
+      lv_attr = line_attr( VALUE #( hidden = ls_line-hidden
+                                    level  = ls_line-level ) ).
+      lv_cells = |<col min="{ ls_line-pos }" max="{ ls_line-pos }" width="{ lv_width }"|.
+      lv_cells = |{ lv_cells } customWidth="1"{ lv_attr }/>|.
+      INSERT lv_cells INTO TABLE lt_cols.
+    ENDLOOP.
+    CLEAR lv_cells.
+    IF lt_cols IS NOT INITIAL.
+      INSERT `<cols>` INTO TABLE lt_head.
+      INSERT LINES OF lt_cols INTO TABLE lt_head.
+      INSERT `</cols>` INTO TABLE lt_head.
+    ENDIF.
+    INSERT `<sheetData>` INTO TABLE lt_head.
+
+    INSERT `</sheetData>` INTO TABLE lt_xml.
+    IF ms_cur-filter IS NOT INITIAL.
+      INSERT |<autoFilter ref="{ ms_cur-filter }"/>| INTO TABLE lt_xml.
+    ENDIF.
+    IF ms_cur-t_merge IS NOT INITIAL.
+      INSERT |<mergeCells count="{ lines( ms_cur-t_merge ) }">| INTO TABLE lt_xml.
+      LOOP AT ms_cur-t_merge INTO ls_area.
+        INSERT |<mergeCell ref="{ area_text( ls_area ) }"/>| INTO TABLE lt_xml.
+      ENDLOOP.
+      INSERT `</mergeCells>` INTO TABLE lt_xml.
+    ENDIF.
+    IF ms_cur-t_valid IS NOT INITIAL.
+      INSERT |<dataValidations count="{ lines( ms_cur-t_valid ) }">| INTO TABLE lt_xml.
+      INSERT LINES OF ms_cur-t_valid INTO TABLE lt_xml.
+      INSERT `</dataValidations>` INTO TABLE lt_xml.
+    ENDIF.
+
+    " the relationships: the tables first, then the targets of the links -
+    " each target once
+    INSERT |{ cv_xml_head }<Relationships xmlns="{ cs_ns-pkg_rel }">| INTO TABLE lt_rels.
+    LOOP AT ms_cur-t_table REFERENCE INTO DATA(lr_table).
+      lv_rid = lv_rid + 1.
+      INSERT |<Relationship Id="rId{ lv_rid }" Type="{ cs_ns-rel }/table"| INTO TABLE lt_rels.
+      INSERT | Target="../tables/table{ lr_table->id }.xml"/>| INTO TABLE lt_rels.
+    ENDLOOP.
+    IF ms_cur-t_link IS NOT INITIAL.
+      INSERT `<hyperlinks>` INTO TABLE lt_xml.
+      LOOP AT ms_cur-t_link REFERENCE INTO DATA(lr_link).
+        IF lr_link->target(1) = `#`.
+          DATA(lv_target) = zabaputil_cl_util_context=>c_escape_xml(
+                                substring( val = lr_link->target
+                                           off = 1 ) ).
+          INSERT |<hyperlink ref="{ lr_link->ref }" location="{ lv_target }"/>| INTO TABLE lt_xml.
+          CONTINUE.
+        ENDIF.
+        DATA(lv_link) = 0.
+        LOOP AT lt_link INTO lv_target.
+          IF lv_target = lr_link->target.
+            lv_link = sy-tabix.
+            EXIT.
+          ENDIF.
+        ENDLOOP.
+        IF lv_link = 0.
+          INSERT lr_link->target INTO TABLE lt_link.
+          lv_link = lines( lt_link ).
+          lv_target = zabaputil_cl_util_context=>c_escape_xml( lr_link->target ).
+          INSERT |<Relationship Id="rId{ lv_rid + lv_link }" Type="{ cs_ns-rel }/hyperlink"| INTO TABLE lt_rels.
+          INSERT | Target="{ lv_target }" TargetMode="External"/>| INTO TABLE lt_rels.
+        ENDIF.
+        INSERT |<hyperlink ref="{ lr_link->ref }" r:id="rId{ lv_rid + lv_link }"/>| INTO TABLE lt_xml.
+      ENDLOOP.
+      INSERT `</hyperlinks>` INTO TABLE lt_xml.
+    ENDIF.
+    INSERT `</Relationships>` INTO TABLE lt_rels.
+
+    " printing
+    IF ls_layout-margin > 0.
+      " inches, as the file counts
+      DATA(lv_inch) = CONV decfloat34( ls_layout-margin ).
+      lv_inch = round( val = lv_inch * 10 / 254
+                       dec = 4 ).
+      DATA(lv_margin) = |{ lv_inch }|.
+      INSERT |<pageMargins left="{ lv_margin }" right="{ lv_margin }" top="{ lv_margin }"| INTO TABLE lt_xml.
+      INSERT | bottom="{ lv_margin }" header="0.3" footer="0.3"/>| INTO TABLE lt_xml.
+    ENDIF.
+    DATA(lv_setup) = ``.
+    IF ls_layout-paper_size > 0.
+      lv_setup = | paperSize="{ ls_layout-paper_size }"|.
+    ENDIF.
+    IF ls_layout-landscape = abap_true.
+      lv_setup = |{ lv_setup } orientation="landscape"|.
+    ENDIF.
+    IF ls_layout-fit_width > 0 OR ls_layout-fit_height > 0.
+      lv_setup = |{ lv_setup } fitToWidth="{ ls_layout-fit_width }" fitToHeight="{ ls_layout-fit_height }"|.
+    ENDIF.
+    IF lv_setup IS NOT INITIAL.
+      INSERT |<pageSetup{ lv_setup }/>| INTO TABLE lt_xml.
+    ENDIF.
+    IF ls_layout-header_text IS NOT INITIAL OR ls_layout-footer_text IS NOT INITIAL.
+      INSERT `<headerFooter>` INTO TABLE lt_xml.
+      IF ls_layout-header_text IS NOT INITIAL.
+        DATA(lv_text) = ls_layout-header_text.
+        IF lv_text NS `&L` AND lv_text NS `&C` AND lv_text NS `&R`.
+          lv_text = `&C` && lv_text.
+        ENDIF.
+        lv_text = zabaputil_cl_util_context=>c_escape_xml( lv_text ).
+        INSERT |<oddHeader>{ lv_text }</oddHeader>| INTO TABLE lt_xml.
+      ENDIF.
+      IF ls_layout-footer_text IS NOT INITIAL.
+        lv_text = ls_layout-footer_text.
+        IF lv_text NS `&L` AND lv_text NS `&C` AND lv_text NS `&R`.
+          lv_text = `&C` && lv_text.
+        ENDIF.
+        lv_text = zabaputil_cl_util_context=>c_escape_xml( lv_text ).
+        INSERT |<oddFooter>{ lv_text }</oddFooter>| INTO TABLE lt_xml.
+      ENDIF.
+      INSERT `</headerFooter>` INTO TABLE lt_xml.
+    ENDIF.
+    IF ms_cur-t_table IS NOT INITIAL.
+      INSERT |<tableParts count="{ lines( ms_cur-t_table ) }">| INTO TABLE lt_xml.
+      DO lines( ms_cur-t_table ) TIMES.
+        INSERT |<tablePart r:id="rId{ sy-index }"/>| INTO TABLE lt_xml.
+      ENDDO.
+      INSERT `</tableParts>` INTO TABLE lt_xml.
     ENDIF.
     INSERT `</worksheet>` INTO TABLE lt_xml.
 
-    ls_sheet-name = sheet_name_get( name ).
+    " the names of the sheet: what is printed, and the rows on every page
+    DATA(lv_sheet) = sheet_quote( ms_cur-name ).
+    IF ls_layout-print_area IS NOT INITIAL.
+      INSERT VALUE #( name  = `_xlnm.Print_Area`
+                      sheet = lv_index
+                      ref   = |{ lv_sheet }!{ area_text( val      = area_parse( ls_layout-print_area )
+                                                         absolute = abap_true ) }| ) INTO TABLE mt_name.
+    ENDIF.
+    IF ls_layout-repeat_header = abap_true AND ms_cur-header_rows IS NOT INITIAL.
+      INSERT VALUE #( name  = `_xlnm.Print_Titles`
+                      sheet = lv_index
+                      ref   = |{ lv_sheet }!{ ms_cur-header_rows }| ) INTO TABLE mt_name.
+    ENDIF.
+
+    ls_sheet-name = ms_cur-name.
+    ls_sheet-hidden = ls_layout-hidden.
+    ls_sheet-t_table = ms_cur-t_table.
+    IF lv_rid > 0 OR lt_link IS NOT INITIAL.
+      ls_sheet-rels = zabaputil_cl_util_context=>conv_get_xstring_by_string( concat_lines_of( lt_rels ) ).
+    ENDIF.
+    CLEAR lt_rels.
+    CLEAR ms_cur.
     ls_sheet-xml = zabaputil_cl_util_context=>conv_get_xstring_by_string(
                        concat_lines_of( lt_head ) && concat_lines_of( lt_xml ) ).
     INSERT ls_sheet INTO TABLE mt_out_sheet.
 
-    result = me.
+  ENDMETHOD.
+
+  METHOD area_parse.
+
+    DATA lt_part TYPE string_table.
+    DATA lv_row  TYPE i.
+    DATA lv_col  TYPE i.
+
+    DATA(lv_text) = to_upper( zabaputil_cl_util_context=>c_trim( val ) ).
+    lv_text = replace( val  = lv_text
+                       sub  = `$`
+                       with = ``
+                       occ  = 0 ).
+    SPLIT lv_text AT `:` INTO TABLE lt_part.
+    IF lines( lt_part ) = 1.
+      INSERT lt_part[ 1 ] INTO TABLE lt_part.
+    ENDIF.
+    IF lines( lt_part ) <> 2.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |XLSX_RANGE - { val } is no range of cells (A1:D5)|.
+    ENDIF.
+
+    LOOP AT lt_part INTO DATA(lv_part).
+      DATA(lv_digits) = digits_only( lv_part ).
+      lv_col = column_to_number( lv_part ).
+      DATA(lv_letters) = column_to_letters( lv_col ).
+      DATA(lv_cell) = |{ lv_letters }{ lv_digits }|.
+      IF lv_digits IS INITIAL OR strlen( lv_digits ) > 7 OR lv_cell <> lv_part.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |XLSX_RANGE - { val } is no range of cells (A1:D5)|.
+      ENDIF.
+      lv_row = lv_digits.
+      IF lv_row < 1 OR lv_row > cv_max_row OR lv_col > cv_max_col.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |XLSX_RANGE - { val } lies outside of a sheet|.
+      ENDIF.
+      IF sy-tabix = 1.
+        result-row1 = lv_row.
+        result-col1 = lv_col.
+      ELSE.
+        result-row2 = nmax( val1 = lv_row
+                            val2 = result-row1 ).
+        result-col2 = nmax( val1 = lv_col
+                            val2 = result-col1 ).
+        result-row1 = nmin( val1 = lv_row
+                            val2 = result-row1 ).
+        result-col1 = nmin( val1 = lv_col
+                            val2 = result-col1 ).
+      ENDIF.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD area_text.
+
+    DATA(lv_mark) = ``.
+    IF absolute = abap_true.
+      lv_mark = `$`.
+    ENDIF.
+    result = |{ lv_mark }{ column_to_letters( val-col1 ) }{ lv_mark }{ val-row1 }|.
+    IF val-row2 <> val-row1 OR val-col2 <> val-col1.
+      result = |{ result }:{ lv_mark }{ column_to_letters( val-col2 ) }{ lv_mark }{ val-row2 }|.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD sheet_quote.
+
+    result = replace( val  = val
+                      sub  = `'`
+                      with = `''`
+                      occ  = 0 ).
+    result = |'{ result }'|.
+
+  ENDMETHOD.
+
+  METHOD cell_check.
+
+    IF row < 1 OR row > cv_max_row OR col < 1 OR col > cv_max_col.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |XLSX_CELL - row { row }, column { col } is no cell of a sheet|.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD bounds_check.
+
+    IF val < low OR val > high.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |XLSX_LAYOUT - { name } { val } is out of bounds, Excel takes { low } to { high }|.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD validation_xml.
+
+    DATA lv_list TYPE string.
+
+    CASE val-type.
+      WHEN `list` OR `whole` OR `decimal` OR `date` OR `time` OR `textLength` OR `custom`.
+      WHEN OTHERS.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |XLSX_VALIDATION - { val-type } is no type of a validation|.
+    ENDCASE.
+
+    result = |<dataValidation type="{ val-type }"|.
+    IF val-operator IS NOT INITIAL AND val-type <> `list` AND val-type <> `custom`.
+      CASE val-operator.
+        WHEN `between` OR `notBetween` OR `equal` OR `notEqual` OR `greaterThan` OR `lessThan`.
+        WHEN `greaterThanOrEqual` OR `lessThanOrEqual`.
+        WHEN OTHERS.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |XLSX_VALIDATION - { val-operator } is no operator of a validation|.
+      ENDCASE.
+      result = |{ result } operator="{ val-operator }"|.
+    ENDIF.
+    CASE val-error_style.
+      WHEN ``.
+      WHEN `stop` OR `warning` OR `information`.
+        result = |{ result } errorStyle="{ val-error_style }"|.
+      WHEN OTHERS.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |XLSX_VALIDATION - { val-error_style } is no error style of a validation|.
+    ENDCASE.
+    IF val-no_blank = abap_false.
+      result = |{ result } allowBlank="1"|.
+    ENDIF.
+    " the attribute hides the button - its name says the opposite
+    IF val-no_dropdown = abap_true.
+      result = |{ result } showDropDown="1"|.
+    ENDIF.
+    IF val-prompt IS NOT INITIAL OR val-prompt_title IS NOT INITIAL.
+      result = |{ result } showInputMessage="1"|.
+    ENDIF.
+    result = |{ result } showErrorMessage="1"|.
+    " Excel takes a title of 32 characters and a message of 255
+    IF val-prompt_title IS NOT INITIAL.
+      DATA(lv_text) = val-prompt_title.
+      IF strlen( lv_text ) > 32.
+        lv_text = lv_text(32).
+      ENDIF.
+      result = |{ result } promptTitle="{ zabaputil_cl_util_context=>c_escape_xml( lv_text ) }"|.
+    ENDIF.
+    IF val-prompt IS NOT INITIAL.
+      lv_text = val-prompt.
+      IF strlen( lv_text ) > 255.
+        lv_text = lv_text(255).
+      ENDIF.
+      result = |{ result } prompt="{ zabaputil_cl_util_context=>c_escape_xml( lv_text ) }"|.
+    ENDIF.
+    IF val-error_title IS NOT INITIAL.
+      lv_text = val-error_title.
+      IF strlen( lv_text ) > 32.
+        lv_text = lv_text(32).
+      ENDIF.
+      result = |{ result } errorTitle="{ zabaputil_cl_util_context=>c_escape_xml( lv_text ) }"|.
+    ENDIF.
+    IF val-error IS NOT INITIAL.
+      lv_text = val-error.
+      IF strlen( lv_text ) > 255.
+        lv_text = lv_text(255).
+      ENDIF.
+      result = |{ result } error="{ zabaputil_cl_util_context=>c_escape_xml( lv_text ) }"|.
+    ENDIF.
+    result = |{ result } sqref="{ sqref }">|.
+
+    " a list of values: in quotes, separated by commas - a value can hold
+    " neither, and the whole list 255 characters
+    DATA(lv_formula1) = val-formula1.
+    IF val-type = `list` AND val-t_value IS NOT INITIAL.
+      LOOP AT val-t_value INTO DATA(lv_value).
+        IF lv_value CA `,"`.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |XLSX_VALIDATION - the value { lv_value } of a list holds a comma or a quote|.
+        ENDIF.
+        IF lv_list IS INITIAL.
+          lv_list = lv_value.
+        ELSE.
+          lv_list = |{ lv_list },{ lv_value }|.
+        ENDIF.
+      ENDLOOP.
+      IF strlen( lv_list ) > 255.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = `XLSX_VALIDATION - a list of more than 255 characters: write the values to cells, name them in formula1`.
+      ENDIF.
+      lv_formula1 = |"{ lv_list }"|.
+    ENDIF.
+    IF lv_formula1 IS NOT INITIAL.
+      result = |{ result }<formula1>{ zabaputil_cl_util_context=>c_escape_xml( lv_formula1 ) }</formula1>|.
+    ENDIF.
+    IF val-formula2 IS NOT INITIAL.
+      result = |{ result }<formula2>{ zabaputil_cl_util_context=>c_escape_xml( val-formula2 ) }</formula2>|.
+    ENDIF.
+    result = |{ result }</dataValidation>|.
+
+  ENDMETHOD.
+
+  METHOD name_check.
+
+    DATA(lv_len) = strlen( name ).
+    IF lv_len = 0 OR lv_len > 255.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |XLSX_NAME - { name } is no name Excel takes|.
+    ENDIF.
+    " a letter, an underscore or a backslash in front, then letters,
+    " digits, underscores and periods
+    DATA(lv_upper) = to_upper( name ).
+    DATA(lv_first) = lv_upper(1).
+    DATA(lv_ok) = xsdbool( lv_first CA `ABCDEFGHIJKLMNOPQRSTUVWXYZ_\` ).
+    IF lv_ok = abap_true AND lv_upper NA ` !"#$%&'()*+,-/:;<=>?@[]^{|}~`.
+      " a name that reads as a cell or as R and C of the R1C1 style is none
+      DATA(lv_digits) = digits_only( lv_upper ).
+      DATA(lv_col) = column_to_number( lv_upper ).
+      DATA(lv_cell) = |{ column_to_letters( lv_col ) }{ lv_digits }|.
+      IF lv_cell = lv_upper AND lv_digits IS NOT INITIAL AND lv_col <= cv_max_col.
+        lv_ok = abap_false.
+      ELSEIF lv_upper = `R` OR lv_upper = `C`.
+        lv_ok = abap_false.
+      ENDIF.
+    ELSE.
+      lv_ok = abap_false.
+    ENDIF.
+    IF lv_ok = abap_false.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |XLSX_NAME - { name } is no name Excel takes|.
+    ENDIF.
+
+    " once in its scope, whatever its case
+    LOOP AT mt_name REFERENCE INTO DATA(lr_name) WHERE sheet = sheet.
+      DATA(lv_other) = to_upper( lr_name->name ).
+      IF lv_other = lv_upper.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |XLSX_NAME - the workbook has the name { name } already|.
+      ENDIF.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD props_xml.
+
+    DATA lt_xml TYPE string_table.
+
+    DATA(lv_created) = ms_props-created.
+    IF lv_created IS INITIAL.
+      lv_created = zabaputil_cl_util_context=>time_get_timestamp( ).
+    ENDIF.
+    DATA(lv_time) = iso_by_stamp( lv_created ).
+
+    INSERT |{ cv_xml_head }<cp:coreProperties| INTO TABLE lt_xml.
+    INSERT ` xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"` INTO TABLE lt_xml.
+    INSERT ` xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/"` INTO TABLE lt_xml.
+    INSERT ` xmlns:dcmitype="http://purl.org/dc/dcmitype/"` INTO TABLE lt_xml.
+    INSERT ` xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">` INTO TABLE lt_xml.
+    IF ms_props-title IS NOT INITIAL.
+      INSERT |<dc:title>{ zabaputil_cl_util_context=>c_escape_xml( ms_props-title ) }</dc:title>| INTO TABLE lt_xml.
+    ENDIF.
+    IF ms_props-subject IS NOT INITIAL.
+      INSERT |<dc:subject>{ zabaputil_cl_util_context=>c_escape_xml( ms_props-subject ) }</dc:subject>|
+             INTO TABLE lt_xml.
+    ENDIF.
+    IF ms_props-creator IS NOT INITIAL.
+      INSERT |<dc:creator>{ zabaputil_cl_util_context=>c_escape_xml( ms_props-creator ) }</dc:creator>|
+             INTO TABLE lt_xml.
+    ENDIF.
+    IF ms_props-keywords IS NOT INITIAL.
+      INSERT |<cp:keywords>{ zabaputil_cl_util_context=>c_escape_xml( ms_props-keywords ) }</cp:keywords>|
+             INTO TABLE lt_xml.
+    ENDIF.
+    IF ms_props-description IS NOT INITIAL.
+      INSERT |<dc:description>{ zabaputil_cl_util_context=>c_escape_xml( ms_props-description ) }</dc:description>|
+             INTO TABLE lt_xml.
+    ENDIF.
+    IF ms_props-category IS NOT INITIAL.
+      INSERT |<cp:category>{ zabaputil_cl_util_context=>c_escape_xml( ms_props-category ) }</cp:category>|
+             INTO TABLE lt_xml.
+    ENDIF.
+    INSERT |<dcterms:created xsi:type="dcterms:W3CDTF">{ lv_time }</dcterms:created>| INTO TABLE lt_xml.
+    INSERT |<dcterms:modified xsi:type="dcterms:W3CDTF">{ lv_time }</dcterms:modified>| INTO TABLE lt_xml.
+    INSERT `</cp:coreProperties>` INTO TABLE lt_xml.
+    core = zabaputil_cl_util_context=>conv_get_xstring_by_string( concat_lines_of( lt_xml ) ).
+
+    CLEAR lt_xml.
+    DATA(lv_app) = ms_props-application.
+    IF lv_app IS INITIAL.
+      lv_app = `abap-util`.
+    ENDIF.
+    INSERT |{ cv_xml_head }<Properties| INTO TABLE lt_xml.
+    INSERT ` xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"` INTO TABLE lt_xml.
+    INSERT ` xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">` INTO TABLE lt_xml.
+    INSERT |<Application>{ zabaputil_cl_util_context=>c_escape_xml( lv_app ) }</Application>| INTO TABLE lt_xml.
+    IF ms_props-company IS NOT INITIAL.
+      INSERT |<Company>{ zabaputil_cl_util_context=>c_escape_xml( ms_props-company ) }</Company>| INTO TABLE lt_xml.
+    ENDIF.
+    INSERT `</Properties>` INTO TABLE lt_xml.
+    app = zabaputil_cl_util_context=>conv_get_xstring_by_string( concat_lines_of( lt_xml ) ).
+
+  ENDMETHOD.
+
+  METHOD iso_by_stamp.
+
+    DATA lv_stamp TYPE p LENGTH 8 DECIMALS 0.
+
+    lv_stamp = val.
+    DATA(lv_text) = |{ lv_stamp }|.
+    IF strlen( lv_text ) <> 14 OR lv_text CN cv_digits.
+      lv_text = `19000101000000`.
+    ENDIF.
+    result = |{ lv_text(4) }-{ lv_text+4(2) }-{ lv_text+6(2) }T{ lv_text+8(2) }:{ lv_text+10(2) }:{ lv_text+12(2) }Z|.
 
   ENDMETHOD.
 
@@ -1218,25 +2829,46 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
         ENDIF.
       ENDIF.
 
-      DATA(lv_style) = 0.
+      " the number format by the type, or the one the column names - and
+      " how the cells look
+      DATA(lv_code) = ``.
       CASE ls_col-cat.
-        WHEN cs_cat-number.
-          IF lr_column->format IS NOT INITIAL.
-            lv_style = style_get( code = lr_column->format ).
-          ENDIF.
-        WHEN cs_cat-date.
-          lv_style = style_get( id   = cs_numfmt-date
-                                code = lr_column->format ).
-        WHEN cs_cat-time.
-          lv_style = style_get( id   = cs_numfmt-time
-                                code = lr_column->format ).
-        WHEN cs_cat-timestamp.
-          lv_style = style_get( id   = cs_numfmt-datetime
-                                code = lr_column->format ).
+        WHEN cs_cat-number OR cs_cat-date OR cs_cat-time OR cs_cat-timestamp.
+          lv_code = lr_column->format.
       ENDCASE.
-      IF lv_style > 0.
-        ls_col-style = | s="{ lv_style }"|.
+      ls_col-style = style_attr( id    = numfmt_by_cat( ls_col-cat )
+                                 code  = lv_code
+                                 style = lr_column->style ).
+      ls_col-plain_style = style_attr( style = lr_column->style ).
+
+      " a link from every cell to what the row holds in a component
+      IF lr_column->link IS NOT INITIAL.
+        DATA(lv_link) = zabaputil_cl_util_context=>c_trim_upper( lr_column->link ).
+        DATA(ls_link_field) = field_find( t_field = t_field
+                                          name    = lv_link ).
+        IF ls_link_field IS INITIAL.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |XLSX_COLUMN_UNKNOWN - the row has no elementary component { lv_link } for a link|.
+        ENDIF.
+        ls_col-link = ls_link_field-name.
+        DATA(ls_link_style) = lr_column->style.
+        IF ls_link_style-color IS INITIAL.
+          ls_link_style-color = `0563C1`.
+        ENDIF.
+        ls_link_style-underline = abap_true.
+        ls_col-link_style = style_attr( id    = numfmt_by_cat( ls_col-cat )
+                                        code  = lv_code
+                                        style = ls_link_style ).
       ENDIF.
+
+      ls_col-hidden = lr_column->hidden.
+      ls_col-level = lr_column->outline_level.
+      bounds_check( val  = ls_col-level
+                    low  = 0
+                    high = 7
+                    name = `outline level` ).
+      ls_col-validation = lr_column->validation.
 
       INSERT ls_col INTO TABLE result.
     ENDLOOP.
@@ -1386,14 +3018,24 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
 
   METHOD style_get.
 
-    DATA ls_xf TYPE ty_s_xf.
+    DATA ls_xf     TYPE ty_s_xf.
+    DATA ls_font   TYPE ty_s_font.
+    DATA ls_border TYPE ty_s_border.
 
-    " index 0, the format of every cell that names none
+    " index 0, the format of every cell that names none - and the font,
+    " the fills and the border Excel expects to find first
     IF mt_xf IS INITIAL.
       INSERT ls_xf INTO TABLE mt_xf.
     ENDIF.
+    IF mt_font IS INITIAL.
+      INSERT VALUE #( size = 11
+                      name = `Calibri` ) INTO TABLE mt_font.
+      INSERT VALUE #( bold = abap_true
+                      size = 11
+                      name = `Calibri` ) INTO TABLE mt_font.
+      INSERT VALUE #( ) INTO TABLE mt_border.
+    ENDIF.
 
-    ls_xf-bold = bold.
     ls_xf-numfmt = id.
     IF code IS NOT INITIAL.
       " a format of the caller: a custom one, named from 164 on. Looked
@@ -1413,8 +3055,91 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
       ls_xf-numfmt = cs_numfmt-custom + lv_index - 1.
     ENDIF.
 
+    ls_font-bold = style-bold.
+    ls_font-italic = style-italic.
+    ls_font-underline = style-underline.
+    ls_font-strike = style-strike.
+    ls_font-size = style-size.
+    IF ls_font-size = 0.
+      ls_font-size = 11.
+    ENDIF.
+    bounds_check( val  = ls_font-size
+                  low  = 1
+                  high = 409
+                  name = `font size` ).
+    ls_font-name = style-font.
+    IF ls_font-name IS INITIAL.
+      ls_font-name = `Calibri`.
+    ENDIF.
+    IF style-color IS NOT INITIAL.
+      ls_font-color = color_get( style-color ).
+    ENDIF.
+    ls_xf-font = font_get( ls_font ).
+
+    IF style-fill IS NOT INITIAL.
+      ls_xf-fill = fill_get( color_get( style-fill ) ).
+    ENDIF.
+
+    " a side of its own, or the border of all four
+    ls_border-top = style-border_top.
+    IF ls_border-top IS INITIAL.
+      ls_border-top = style-border.
+    ENDIF.
+    ls_border-bottom = style-border_bottom.
+    IF ls_border-bottom IS INITIAL.
+      ls_border-bottom = style-border.
+    ENDIF.
+    ls_border-left = style-border_left.
+    IF ls_border-left IS INITIAL.
+      ls_border-left = style-border.
+    ENDIF.
+    ls_border-right = style-border_right.
+    IF ls_border-right IS INITIAL.
+      ls_border-right = style-border.
+    ENDIF.
+    ls_border-top = border_style( ls_border-top ).
+    ls_border-bottom = border_style( ls_border-bottom ).
+    ls_border-left = border_style( ls_border-left ).
+    ls_border-right = border_style( ls_border-right ).
+    IF ls_border IS NOT INITIAL AND style-border_color IS NOT INITIAL.
+      ls_border-color = color_get( style-border_color ).
+    ENDIF.
+    IF ls_border IS NOT INITIAL.
+      ls_xf-border = border_get( ls_border ).
+    ENDIF.
+
+    CASE style-halign.
+      WHEN `` OR `left` OR `center` OR `right` OR `fill` OR `justify` OR `centerContinuous`.
+        ls_xf-halign = style-halign.
+      WHEN OTHERS.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |XLSX_STYLE - { style-halign } is no horizontal alignment|.
+    ENDCASE.
+    CASE style-valign.
+      WHEN `` OR `top` OR `center` OR `bottom`.
+        ls_xf-valign = style-valign.
+      WHEN OTHERS.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |XLSX_STYLE - { style-valign } is no vertical alignment|.
+    ENDCASE.
+    ls_xf-wrap = style-wrap.
+    bounds_check( val  = style-indent
+                  low  = 0
+                  high = 250
+                  name = `indent` ).
+    ls_xf-indent = style-indent.
+    IF style-rotation <> 255.
+      bounds_check( val  = style-rotation
+                    low  = 0
+                    high = 180
+                    name = `rotation` ).
+    ENDIF.
+    ls_xf-rotation = style-rotation.
+
     LOOP AT mt_xf REFERENCE INTO DATA(lr_xf).
-      IF lr_xf->numfmt = ls_xf-numfmt AND lr_xf->bold = ls_xf-bold.
+      IF lr_xf->* = ls_xf.
         result = sy-tabix.
         EXIT.
       ENDIF.
@@ -1424,6 +3149,104 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
       result = lines( mt_xf ).
     ENDIF.
     result = result - 1.
+
+  ENDMETHOD.
+
+  METHOD style_attr.
+
+    DATA(lv_index) = style_get( id    = id
+                                code  = code
+                                style = style ).
+    IF lv_index > 0.
+      result = | s="{ lv_index }"|.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD numfmt_by_cat.
+
+    CASE cat.
+      WHEN cs_cat-date.
+        result = cs_numfmt-date.
+      WHEN cs_cat-time.
+        result = cs_numfmt-time.
+      WHEN cs_cat-timestamp.
+        result = cs_numfmt-datetime.
+      WHEN OTHERS.
+        result = cs_numfmt-general.
+    ENDCASE.
+
+  ENDMETHOD.
+
+  METHOD font_get.
+
+    LOOP AT mt_font REFERENCE INTO DATA(lr_font).
+      IF lr_font->* = val.
+        result = sy-tabix - 1.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+    INSERT val INTO TABLE mt_font.
+    result = lines( mt_font ) - 1.
+
+  ENDMETHOD.
+
+  METHOD fill_get.
+
+    " the two fills every workbook starts with come first
+    LOOP AT mt_fill INTO DATA(lv_fill).
+      IF lv_fill = val.
+        result = sy-tabix + 1.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+    INSERT val INTO TABLE mt_fill.
+    result = lines( mt_fill ) + 1.
+
+  ENDMETHOD.
+
+  METHOD border_get.
+
+    LOOP AT mt_border REFERENCE INTO DATA(lr_border).
+      IF lr_border->* = val.
+        result = sy-tabix - 1.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+    INSERT val INTO TABLE mt_border.
+    result = lines( mt_border ) - 1.
+
+  ENDMETHOD.
+
+  METHOD color_get.
+
+    DATA(lv_color) = to_upper( zabaputil_cl_util_context=>c_trim( val ) ).
+    IF strlen( lv_color ) > 0 AND lv_color(1) = `#`.
+      lv_color = substring( val = lv_color
+                            off = 1 ).
+    ENDIF.
+    IF strlen( lv_color ) <> 6 OR lv_color CN cv_hex.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |XLSX_STYLE - { val } is no colour of six hex digits (C00000)|.
+    ENDIF.
+    result = |FF{ lv_color }|.
+
+  ENDMETHOD.
+
+  METHOD border_style.
+
+    CASE val.
+      WHEN ``.
+      WHEN `thin` OR `medium` OR `thick` OR `dashed` OR `dotted` OR `double` OR `hair`.
+        result = val.
+      WHEN `mediumDashed` OR `dashDot` OR `mediumDashDot` OR `dashDotDot` OR `slantDashDot`.
+        result = val.
+      WHEN OTHERS.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |XLSX_STYLE - { val } is no border style (thin, medium, thick, ...)|.
+    ENDCASE.
 
   ENDMETHOD.
 
@@ -1541,7 +3364,19 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
         lv_total = | totalsRowLabel="{ zabaputil_cl_util_context=>c_escape_xml( lr_col->total_label ) }"|.
       ENDIF.
       DATA(lv_column) = zabaputil_cl_util_context=>c_escape_xml( lr_col->header ).
-      INSERT |<tableColumn id="{ sy-tabix }" name="{ lv_column }"{ lv_total }/>| INTO TABLE lt_xml.
+      IF lr_col->formula IS INITIAL.
+        INSERT |<tableColumn id="{ sy-tabix }" name="{ lv_column }"{ lv_total }/>| INTO TABLE lt_xml.
+        CONTINUE.
+      ENDIF.
+      " a formula column: Excel fills a row added to the table with it -
+      " written for the first row of the table
+      DATA(lv_formula) = replace( val  = lr_col->formula
+                                  sub  = `{row}`
+                                  with = |{ first_row }|
+                                  occ  = 0 ).
+      lv_formula = zabaputil_cl_util_context=>c_escape_xml( lv_formula ).
+      INSERT |<tableColumn id="{ sy-tabix }" name="{ lv_column }"{ lv_total }>| INTO TABLE lt_xml.
+      INSERT |<calculatedColumnFormula>{ lv_formula }</calculatedColumnFormula></tableColumn>| INTO TABLE lt_xml.
     ENDLOOP.
     DATA(lv_rows) = `1`.
     IF layout-no_row_stripes = abap_true.
@@ -1559,20 +3394,12 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD rels_xml.
-
-    DATA(lv_xml) = |{ cv_xml_head }<Relationships xmlns="{ cs_ns-pkg_rel }">|.
-    lv_xml = |{ lv_xml }<Relationship Id="rId1" Type="{ cs_ns-rel }/{ kind }" Target="{ target }"/></Relationships>|.
-    result = zabaputil_cl_util_context=>conv_get_xstring_by_string( lv_xml ).
-
-  ENDMETHOD.
-
   METHOD styles_xml.
 
     DATA lt_xml TYPE string_table.
 
     IF mt_xf IS INITIAL.
-      INSERT VALUE #( ) INTO TABLE mt_xf.
+      style_get( ).
     ENDIF.
 
     INSERT |{ cv_xml_head }<styleSheet xmlns="{ cs_ns-main }">| INTO TABLE lt_xml.
@@ -1585,33 +3412,113 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
       ENDLOOP.
       INSERT `</numFmts>` INTO TABLE lt_xml.
     ENDIF.
-    " font 0 the default, font 1 the bold one of a header row; the two fills
-    " and the one border are what Excel expects to find
-    INSERT `<fonts count="2"><font><sz val="11"/><name val="Calibri"/><family val="2"/></font>`
+
+    " font 0 the default, font 1 the bold one of a header row
+    INSERT |<fonts count="{ lines( mt_font ) }">| INTO TABLE lt_xml.
+    LOOP AT mt_font REFERENCE INTO DATA(lr_font).
+      DATA(lv_font) = `<font>`.
+      IF lr_font->bold = abap_true.
+        lv_font = lv_font && `<b/>`.
+      ENDIF.
+      IF lr_font->italic = abap_true.
+        lv_font = lv_font && `<i/>`.
+      ENDIF.
+      IF lr_font->strike = abap_true.
+        lv_font = lv_font && `<strike/>`.
+      ENDIF.
+      IF lr_font->underline = abap_true.
+        lv_font = lv_font && `<u/>`.
+      ENDIF.
+      lv_font = |{ lv_font }<sz val="{ lr_font->size }"/>|.
+      IF lr_font->color IS NOT INITIAL.
+        lv_font = |{ lv_font }<color rgb="{ lr_font->color }"/>|.
+      ENDIF.
+      DATA(lv_name) = zabaputil_cl_util_context=>c_escape_xml( lr_font->name ).
+      INSERT |{ lv_font }<name val="{ lv_name }"/><family val="2"/></font>| INTO TABLE lt_xml.
+    ENDLOOP.
+    INSERT `</fonts>` INTO TABLE lt_xml.
+
+    " the two fills Excel expects to find, then the colours of the cells
+    INSERT |<fills count="{ lines( mt_fill ) + 2 }"><fill><patternFill patternType="none"/></fill>|
            INTO TABLE lt_xml.
-    INSERT `<font><b/><sz val="11"/><name val="Calibri"/><family val="2"/></font></fonts>`
-           INTO TABLE lt_xml.
-    INSERT `<fills count="2"><fill><patternFill patternType="none"/></fill>`
-           INTO TABLE lt_xml.
-    INSERT `<fill><patternFill patternType="gray125"/></fill></fills>`
-           INTO TABLE lt_xml.
-    INSERT `<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>`
-           INTO TABLE lt_xml.
+    INSERT `<fill><patternFill patternType="gray125"/></fill>` INTO TABLE lt_xml.
+    LOOP AT mt_fill INTO DATA(lv_fill).
+      INSERT |<fill><patternFill patternType="solid"><fgColor rgb="{ lv_fill }"/>| INTO TABLE lt_xml.
+      INSERT `<bgColor indexed="64"/></patternFill></fill>` INTO TABLE lt_xml.
+    ENDLOOP.
+    INSERT `</fills>` INTO TABLE lt_xml.
+
+    INSERT |<borders count="{ lines( mt_border ) }">| INTO TABLE lt_xml.
+    LOOP AT mt_border REFERENCE INTO DATA(lr_border).
+      DATA(lv_color) = ``.
+      IF lr_border->color IS NOT INITIAL.
+        lv_color = |<color rgb="{ lr_border->color }"/>|.
+      ENDIF.
+      DATA(lv_border) = `<border>`.
+      IF lr_border->left IS INITIAL.
+        lv_border = |{ lv_border }<left/>|.
+      ELSE.
+        lv_border = |{ lv_border }<left style="{ lr_border->left }">{ lv_color }</left>|.
+      ENDIF.
+      IF lr_border->right IS INITIAL.
+        lv_border = |{ lv_border }<right/>|.
+      ELSE.
+        lv_border = |{ lv_border }<right style="{ lr_border->right }">{ lv_color }</right>|.
+      ENDIF.
+      IF lr_border->top IS INITIAL.
+        lv_border = |{ lv_border }<top/>|.
+      ELSE.
+        lv_border = |{ lv_border }<top style="{ lr_border->top }">{ lv_color }</top>|.
+      ENDIF.
+      IF lr_border->bottom IS INITIAL.
+        lv_border = |{ lv_border }<bottom/>|.
+      ELSE.
+        lv_border = |{ lv_border }<bottom style="{ lr_border->bottom }">{ lv_color }</bottom>|.
+      ENDIF.
+      INSERT |{ lv_border }<diagonal/></border>| INTO TABLE lt_xml.
+    ENDLOOP.
+    INSERT `</borders>` INTO TABLE lt_xml.
+
     INSERT `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>`
            INTO TABLE lt_xml.
     INSERT |<cellXfs count="{ lines( mt_xf ) }">| INTO TABLE lt_xml.
     LOOP AT mt_xf REFERENCE INTO DATA(lr_xf).
-      DATA(lv_font) = 0.
       DATA(lv_apply) = ``.
-      IF lr_xf->bold = abap_true.
-        lv_font = 1.
+      IF lr_xf->font <> 0.
         lv_apply = ` applyFont="1"`.
       ENDIF.
       IF lr_xf->numfmt <> cs_numfmt-general.
         lv_apply = lv_apply && ` applyNumberFormat="1"`.
       ENDIF.
-      INSERT |<xf numFmtId="{ lr_xf->numfmt }" fontId="{ lv_font }" fillId="0" borderId="0" xfId="0"{ lv_apply }/>|
-             INTO TABLE lt_xml.
+      IF lr_xf->fill <> 0.
+        lv_apply = lv_apply && ` applyFill="1"`.
+      ENDIF.
+      IF lr_xf->border <> 0.
+        lv_apply = lv_apply && ` applyBorder="1"`.
+      ENDIF.
+      DATA(lv_align) = ``.
+      IF lr_xf->halign IS NOT INITIAL.
+        lv_align = | horizontal="{ lr_xf->halign }"|.
+      ENDIF.
+      IF lr_xf->valign IS NOT INITIAL.
+        lv_align = |{ lv_align } vertical="{ lr_xf->valign }"|.
+      ENDIF.
+      IF lr_xf->wrap = abap_true.
+        lv_align = |{ lv_align } wrapText="1"|.
+      ENDIF.
+      IF lr_xf->indent > 0.
+        lv_align = |{ lv_align } indent="{ lr_xf->indent }"|.
+      ENDIF.
+      IF lr_xf->rotation > 0.
+        lv_align = |{ lv_align } textRotation="{ lr_xf->rotation }"|.
+      ENDIF.
+      DATA(lv_xf) = |<xf numFmtId="{ lr_xf->numfmt }" fontId="{ lr_xf->font }" fillId="{ lr_xf->fill }"|.
+      lv_xf = |{ lv_xf } borderId="{ lr_xf->border }" xfId="0"{ lv_apply }|.
+      IF lv_align IS INITIAL.
+        INSERT |{ lv_xf }/>| INTO TABLE lt_xml.
+      ELSE.
+        INSERT |{ lv_xf } applyAlignment="1"><alignment{ lv_align }/></xf>| INTO TABLE lt_xml.
+      ENDIF.
     ENDLOOP.
     INSERT `</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>`
            INTO TABLE lt_xml.
@@ -1626,19 +3533,33 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     DATA lt_types TYPE string_table.
     DATA lt_book  TYPE string_table.
     DATA lt_rels  TYPE string_table.
-    DATA lv_table TYPE i.
+    DATA lt_root  TYPE string_table.
+    DATA lv_core  TYPE xstring.
+    DATA lv_app   TYPE xstring.
 
     IF mv_loaded = abap_true.
       RAISE EXCEPTION TYPE zabaputil_cx_util_error
         EXPORTING
           val = `XLSX_READ_ONLY - a workbook that was read is not written again`.
     ENDIF.
+    sheet_close( ).
     " a workbook without a sheet is none Excel opens
     IF mt_out_sheet IS INITIAL.
       INSERT VALUE #( name = `Sheet1`
                       xml  = zabaputil_cl_util_context=>conv_get_xstring_by_string(
                                  |{ cv_xml_head }<worksheet xmlns="{ cs_ns-main }"><sheetData/></worksheet>| ) )
              INTO TABLE mt_out_sheet.
+    ENDIF.
+    " nor one that hides every sheet - the first one Excel shows
+    DATA(lv_active) = -1.
+    LOOP AT mt_out_sheet REFERENCE INTO DATA(lr_sheet) WHERE hidden = abap_false.
+      lv_active = sy-tabix - 1.
+      EXIT.
+    ENDLOOP.
+    IF lv_active < 0.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = `XLSX_ALL_HIDDEN - a workbook shows one sheet at least, every sheet is hidden`.
     ENDIF.
 
     INSERT |{ cv_xml_head }<Types xmlns="{ cs_ns-types }">| INTO TABLE lt_types.
@@ -1650,34 +3571,53 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     INSERT |<Override PartName="/xl/styles.xml" ContentType="{ cs_ns-ct }.styles+xml"/>|
            INTO TABLE lt_types.
     INSERT |{ cv_xml_head }<workbook xmlns="{ cs_ns-main }" xmlns:r="{ cs_ns-rel }">| INTO TABLE lt_book.
-    INSERT `<bookViews><workbookView/></bookViews><sheets>` INTO TABLE lt_book.
+    IF lv_active = 0.
+      INSERT `<bookViews><workbookView/></bookViews><sheets>` INTO TABLE lt_book.
+    ELSE.
+      INSERT |<bookViews><workbookView activeTab="{ lv_active }"/></bookViews><sheets>| INTO TABLE lt_book.
+    ENDIF.
     INSERT |{ cv_xml_head }<Relationships xmlns="{ cs_ns-pkg_rel }">| INTO TABLE lt_rels.
 
-    LOOP AT mt_out_sheet REFERENCE INTO DATA(lr_sheet).
+    LOOP AT mt_out_sheet REFERENCE INTO lr_sheet.
       DATA(lv_index) = sy-tabix.
       INSERT |<Override PartName="/xl/worksheets/sheet{ lv_index }.xml" ContentType="{ cs_ns-ct }.worksheet+xml"/>|
              INTO TABLE lt_types.
       DATA(lv_name) = zabaputil_cl_util_context=>c_escape_xml( lr_sheet->name ).
-      INSERT |<sheet name="{ lv_name }" sheetId="{ lv_index }" r:id="rId{ lv_index }"/>| INTO TABLE lt_book.
+      DATA(lv_state) = ``.
+      IF lr_sheet->hidden = abap_true.
+        lv_state = ` state="hidden"`.
+      ENDIF.
+      INSERT |<sheet name="{ lv_name }" sheetId="{ lv_index }"{ lv_state } r:id="rId{ lv_index }"/>| INTO TABLE lt_book.
       INSERT |<Relationship Id="rId{ lv_index }" Type="{ cs_ns-rel }/worksheet"| INTO TABLE lt_rels.
       INSERT | Target="worksheets/sheet{ lv_index }.xml"/>| INTO TABLE lt_rels.
       INSERT VALUE #( name    = |xl/worksheets/sheet{ lv_index }.xml|
                       content = lr_sheet->xml ) INTO TABLE lt_file.
 
-      IF lr_sheet->table_xml IS NOT INITIAL.
-        lv_table = lv_table + 1.
-        INSERT |<Override PartName="/xl/tables/table{ lv_table }.xml" ContentType="{ cs_ns-ct }.table+xml"/>|
+      LOOP AT lr_sheet->t_table REFERENCE INTO DATA(lr_table).
+        INSERT |<Override PartName="/xl/tables/table{ lr_table->id }.xml" ContentType="{ cs_ns-ct }.table+xml"/>|
                INTO TABLE lt_types.
-        INSERT VALUE #( name    = |xl/tables/table{ lv_table }.xml|
-                        content = lr_sheet->table_xml ) INTO TABLE lt_file.
+        INSERT VALUE #( name    = |xl/tables/table{ lr_table->id }.xml|
+                        content = lr_table->xml ) INTO TABLE lt_file.
+      ENDLOOP.
+      IF lr_sheet->rels IS NOT INITIAL.
         INSERT VALUE #( name    = |xl/worksheets/_rels/sheet{ lv_index }.xml.rels|
-                        content = rels_xml( kind   = `table`
-                                            target = |../tables/table{ lv_table }.xml| ) ) INTO TABLE lt_file.
+                        content = lr_sheet->rels ) INTO TABLE lt_file.
       ENDIF.
     ENDLOOP.
 
-    INSERT `</Types>` INTO TABLE lt_types.
     INSERT `</sheets>` INTO TABLE lt_book.
+    IF mt_name IS NOT INITIAL.
+      INSERT `<definedNames>` INTO TABLE lt_book.
+      LOOP AT mt_name REFERENCE INTO DATA(lr_name).
+        DATA(lv_local) = ``.
+        IF lr_name->sheet > 0.
+          lv_local = | localSheetId="{ lr_name->sheet - 1 }"|.
+        ENDIF.
+        DATA(lv_ref) = zabaputil_cl_util_context=>c_escape_xml( lr_name->ref ).
+        INSERT |<definedName name="{ lr_name->name }"{ lv_local }>{ lv_ref }</definedName>| INTO TABLE lt_book.
+      ENDLOOP.
+      INSERT `</definedNames>` INTO TABLE lt_book.
+    ENDIF.
     IF mv_formulas = abap_true.
       " the formulas carry no value, or one worked out here: Excel works
       " them out when it opens the file
@@ -1688,12 +3628,35 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
            INTO TABLE lt_rels.
     INSERT `</Relationships>` INTO TABLE lt_rels.
 
+    " the relationships of the package: the workbook, and the document
+    " properties where they are set
+    INSERT |{ cv_xml_head }<Relationships xmlns="{ cs_ns-pkg_rel }">| INTO TABLE lt_root.
+    INSERT |<Relationship Id="rId1" Type="{ cs_ns-rel }/officeDocument" Target="xl/workbook.xml"/>| INTO TABLE lt_root.
+    IF mv_props = abap_true.
+      props_xml( IMPORTING core = lv_core
+                           app  = lv_app ).
+      INSERT `<Relationship Id="rId2" Target="docProps/core.xml"` INTO TABLE lt_root.
+      INSERT | Type="{ cs_ns-pkg_rel }/metadata/core-properties"/>| INTO TABLE lt_root.
+      INSERT |<Relationship Id="rId3" Type="{ cs_ns-rel }/extended-properties" Target="docProps/app.xml"/>|
+             INTO TABLE lt_root.
+      INSERT `<Override PartName="/docProps/core.xml"` INTO TABLE lt_types.
+      INSERT ` ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>` INTO TABLE lt_types.
+      INSERT `<Override PartName="/docProps/app.xml"` INTO TABLE lt_types.
+      INSERT | ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>|
+             INTO TABLE lt_types.
+      INSERT VALUE #( name    = `docProps/core.xml`
+                      content = lv_core ) INTO TABLE lt_file.
+      INSERT VALUE #( name    = `docProps/app.xml`
+                      content = lv_app ) INTO TABLE lt_file.
+    ENDIF.
+    INSERT `</Relationships>` INTO TABLE lt_root.
+    INSERT `</Types>` INTO TABLE lt_types.
+
     INSERT VALUE #( name    = `[Content_Types].xml`
                     content = zabaputil_cl_util_context=>conv_get_xstring_by_string( concat_lines_of( lt_types ) ) )
            INTO lt_file INDEX 1.
     INSERT VALUE #( name    = `_rels/.rels`
-                    content = rels_xml( kind   = `officeDocument`
-                                        target = `xl/workbook.xml` ) )
+                    content = zabaputil_cl_util_context=>conv_get_xstring_by_string( concat_lines_of( lt_root ) ) )
            INTO lt_file INDEX 2.
     INSERT VALUE #( name    = `xl/workbook.xml`
                     content = zabaputil_cl_util_context=>conv_get_xstring_by_string( concat_lines_of( lt_book ) ) )
@@ -2103,6 +4066,10 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
       LOOP AT mt_out_sheet REFERENCE INTO DATA(lr_out).
         INSERT lr_out->name INTO TABLE result.
       ENDLOOP.
+      " the sheet that is written now
+      IF mv_open = abap_true.
+        INSERT ms_cur-name INTO TABLE result.
+      ENDIF.
     ENDIF.
 
   ENDMETHOD.
