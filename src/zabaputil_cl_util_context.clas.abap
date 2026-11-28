@@ -2988,6 +2988,51 @@ CLASS zabaputil_cl_util_context DEFINITION
       RETURNING
         VALUE(result) TYPE ty_t_zip_file.
 
+    " ========== XML pull reader ==========
+
+    TYPES:
+      BEGIN OF ty_s_xml_attribute,
+        name  TYPE string,
+        value TYPE string,
+      END OF ty_s_xml_attribute.
+    TYPES ty_t_xml_attribute TYPE STANDARD TABLE OF ty_s_xml_attribute WITH EMPTY KEY.
+
+    "! the kinds of node xml_reader_next( ) hands out - `end` (initial) when
+    "! the document is read to its end
+    CONSTANTS:
+      BEGIN OF cs_xml_node,
+        open  TYPE string VALUE `O` ##NO_TEXT,
+        close TYPE string VALUE `C` ##NO_TEXT,
+        value TYPE string VALUE `V` ##NO_TEXT,
+        end   TYPE string VALUE `` ##NO_TEXT,
+      END OF cs_xml_node.
+
+    "! A reader over an XML document, node by node and without building a
+    "! tree - what a large document (the sheet of a workbook) needs. The
+    "! handle goes to xml_reader_next( ); it is the sXML reader, which is
+    "! there on every release down to 7.02 and released on ABAP Cloud, and
+    "! this class is the only one that names it. A text of blanks only
+    "! arrives where it is all an element holds (`<t>  </t>`); the
+    "! indentation between two elements is not reported
+    CLASS-METHODS xml_reader_create
+      IMPORTING
+        val           TYPE xstring
+      RETURNING
+        VALUE(result) TYPE REF TO object.
+
+    "! The next node of the document: an element opening (name, and its
+    "! attributes when t_attribute is asked for), its text (value) or its
+    "! end (name). Names come without their namespace prefix. kind is
+    "! initial (cs_xml_node-end) behind the last node
+    CLASS-METHODS xml_reader_next
+      IMPORTING
+        reader      TYPE REF TO object
+      EXPORTING
+        kind        TYPE string
+        name        TYPE string
+        value       TYPE string
+        t_attribute TYPE ty_t_xml_attribute.
+
     TYPES:
       BEGIN OF ty_s_http_response,
         code   TYPE i,
@@ -14956,6 +15001,72 @@ CLASS zabaputil_cl_util_context IMPLEMENTATION.
 
       CATCH cx_root INTO DATA(x).
         RAISE EXCEPTION TYPE zabaputil_cx_util_error EXPORTING val = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD xml_reader_create.
+
+    TRY.
+        " no option set: as it comes, the reader reports a text of blanks
+        " only where it is the whole content of an element and leaves out
+        " the indentation between two elements - what a caller wants
+        result = cl_sxml_string_reader=>create( val ).
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val      = `XML_READER_ERROR - the document cannot be read`
+            previous = x.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD xml_reader_next.
+
+    DATA lo_reader TYPE REF TO if_sxml_reader.
+
+    CLEAR kind.
+    CLEAR name.
+    CLEAR value.
+    CLEAR t_attribute.
+
+    TRY.
+        lo_reader ?= reader.
+        lo_reader->next_node( ).
+
+        CASE lo_reader->node_type.
+          WHEN if_sxml_node=>co_nt_element_open.
+            kind = cs_xml_node-open.
+            name = lo_reader->name.
+            IF t_attribute IS SUPPLIED.
+              " next_attribute( ) walks the attributes of the element the
+              " reader stands on and leaves the attribute kind behind the
+              " last one - the way that is there since 7.02
+              DO.
+                lo_reader->next_attribute( ).
+                IF lo_reader->node_type <> if_sxml_node=>co_nt_attribute.
+                  EXIT.
+                ENDIF.
+                INSERT VALUE #( name  = lo_reader->name
+                                value = lo_reader->value ) INTO TABLE t_attribute.
+              ENDDO.
+            ENDIF.
+          WHEN if_sxml_node=>co_nt_element_close.
+            kind = cs_xml_node-close.
+            name = lo_reader->name.
+          WHEN if_sxml_node=>co_nt_value.
+            kind = cs_xml_node-value.
+            value = lo_reader->value.
+          WHEN OTHERS.
+            " co_nt_final, and whatever a later release may add
+            kind = cs_xml_node-end.
+        ENDCASE.
+
+      CATCH cx_root INTO DATA(x).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val      = `XML_READER_ERROR - the document is not well-formed XML`
+            previous = x.
     ENDTRY.
 
   ENDMETHOD.
