@@ -92,10 +92,11 @@ src/
 ├── zabaputil_cl_util_msg.clas.abap       # Message handling
 ├── zabaputil_cl_util_range.clas.abap     # Select-option range builders
 ├── zabaputil_cl_util_xml.clas.abap       # Fluent XML builder
+├── zabaputil_cl_util_xlsx.clas.abap      # XLSX workbooks: internal tables to sheets and back
 ├── zabaputil_cx_util_error.clas.abap     # THE exception (no-check): text chain, full diagnostic report
 ├── 00/
-│   ├── 01/                               # ajson mirror — DO NOT MODIFY (synced from upstream)
-│   └── 02/                               # S-RTTI mirror — DO NOT MODIFY (synced from upstream)
+│   ├── 01/                               # ajson — DO NOT MODIFY (copied from abap-util/mirror-ajson)
+│   └── 02/                               # S-RTTI — DO NOT MODIFY (copied from abap-util/mirror-srtti)
 └── pdf/                                  # PDF files in plain ABAP (see "The PDF classes")
 ```
 
@@ -128,6 +129,18 @@ CI runs on every pull request and on every push to `main`: the lints for Standar
 
 Every action in `.github/workflows/` is pinned to a commit sha with the tag as a comment; `bump-deps.yaml` moves the pins and the npm dependencies once a month, in one pull request.
 
+## XLSX: one class, the system behind the context class
+
+`zabaputil_cl_util_xlsx` writes and reads `.xlsx` workbooks and names no SAP class itself: ZIP (`zip_pack`, `zip_unpack`), UTF-8 (`conv_get_xstring_by_string`), the XML reader (`xml_reader_create`, `xml_reader_next` - the sXML reader, token by token, no tree), escaping (`c_escape_xml`), RTTI (`rtti_get_t_attri_by_any`, `rtti_get_type_kind`, the `cv_typedescr_typekind_*` constants, `rtti_create_tab_by_names`) and the data element texts all come from `zabaputil_cl_util_context`. Keep it that way - it is what makes the class run unchanged on 7.02, Standard ABAP, ABAP Cloud and the transpiled runtime, and what a consumer copies along when it vendors the class.
+
+- **No regex, no XSLT, no DDIC object.** Format codes, cell addresses and numbers are read character by character.
+- **A sheet is rendered in `add_sheet( )`**, not kept as a reference to the caller's table - the table may be gone by `get_xlsx( )`.
+- **A formula is written without a value, or with one worked out here** (the totals row adds up while the rows are written): `get_xlsx( )` then asks Excel to recalculate on load (`calcPr fullCalcOnLoad`). A totals formula is `SUBTOTAL( )` - over the column of the Excel table by name, over the cells where the sheet has no table.
+- **Reading goes row by row** (`sheet_read_row`) and never builds the whole sheet in memory for `get_table( )`.
+- **`xml_reader_create` sets no option on the sXML reader**: as it comes it reports a text of blanks only where it is all an element holds and leaves out the indentation between elements, and the transpiled runtime implements no `set_option`.
+- **The reading tests are slow in the transpiled runtime by its XML parser** (it searches the document from the start for every token) - keep the workbooks of the tests small; a system parses in the kernel.
+- `zabaputil_cl_util_context=>conv_get_xlsx_by_itab` stays as the one-sheet writer of a trimmed context copy; `conv_get_itab_by_xlsx` stays a stub that raises, because the context class cannot call the class that calls it.
+
 ## One class per purpose
 
 There is exactly one HTTP class (`zabaputil_cl_util_http`) and one exception class (`zabaputil_cx_util_error`). Until 2026-11 each had a twin (`zabaputil_cl_http`, a subset; `zabaputil_cx_error`, the superset with the chain rendering and the full report) and the consumers copied different ones. They were merged under the `util_` names with the superset's code. Do not add a second class for a purpose that has one - widen the one that is there.
@@ -155,7 +168,7 @@ A consumer that vendors a class of this catalog without a manifest is compared b
 
 ## Rules for AI Assistants
 
-1. **Do not modify `src/00/01/` (ajson) and `src/00/02/` (S-RTTI)** — mirrored from external projects.
+1. **Do not modify `src/00/01/` (ajson) and `src/00/02/` (S-RTTI)** — copied by `vendor-mirror.yaml` from this organization's mirror repositories ([mirror-ajson](https://github.com/abap-util/mirror-ajson), [mirror-srtti](https://github.com/abap-util/mirror-srtti)), which rename the upstream projects to `zabaputil_` and apply their local patches. A change belongs there (upstream, or the mirror's `.github/scripts/patch.mjs`); abap2UI5 vendors from the same two mirrors and renames on its side.
 2. **Never break the master-catalog contract** (see above): this repository must remain the superset of all utility methods across all consumers — for *every* vendored class, not only the context class. Methods added downstream are merged back here by the periodic AI sync, and unit tests live here.
 3. **Always run `npx abaplint`** before considering changes complete.
 4. **Multi-environment compatibility** — code must work on NW 7.02, Standard ABAP, and ABAP Cloud. No direct use of on-premise-only or cloud-only APIs without a dynamic-call branch.
