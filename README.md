@@ -624,6 +624,9 @@ lo_page->restore( ).
 zabaputil_cl_pdf_barcode=>draw( page = lo_page type = `QR` val = lv_url x = 150 y = 230 w = 30 h = 30 ).
 zabaputil_cl_pdf_barcode=>draw( page = lo_page type = `CODE128` val = `4711-0815` x = 20 y = 230 w = 60 h = 15 ).
 DATA(lt_rows) = zabaputil_cl_pdf_barcode=>qr( val = lv_url ecc = `H` ). " the modules, `1` dark
+" Bookmarks (the outline beside the pages) and links to a page of the document
+lo_pdf->add_bookmark( title = `Delivery note` )->add_bookmark( title = `Items` level = 2 y = 80 ).
+lo_page->link_page( x = 20 y = 30 w = 80 h = 6 page = 2 ).
 DATA(lv_file) = lo_pdf->render( ). " => xstring
 
 " Flow text and tables over pages

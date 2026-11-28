@@ -140,6 +140,9 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         opacity    TYPE ty_length,
         "! the radius of the corners of a rectangle
         radius     TYPE ty_length,
+        "! a text is an entry of the outline of the document at this level
+        "! (1 the top level) - a heading; 0 for none
+        bookmark   TYPE i,
         "! of a barcode: CODE128, EAN13, QR or DATAMATRIX
         "! (zabaputil_cl_pdf_barcode=>cs_type); its text is the content
         symbology  TYPE string,
@@ -1978,6 +1981,14 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
                                                element = element )
                           size = element_size( element ) ).
         layout->set_color( element_color( element ) ).
+        IF element-bookmark > 0 AND lv_text IS NOT INITIAL.
+          " where its first line will be
+          layout->ensure_space( element_size( element ) * 5 / 4 / pdf->scale( ) ).
+          pdf->add_bookmark( title = lv_text
+                             page  = pdf->page_count( )
+                             y     = layout->y( )
+                             level = element-bookmark ).
+        ENDIF.
         IF element-markup = abap_true.
           layout->rich_text( val   = lv_text
                              align = element-align ).
@@ -2143,6 +2154,16 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
         IF with_data = abap_true.
           lv_text = resolve( val  = lv_text
                              data = data ).
+        ENDIF.
+        IF element-bookmark > 0 AND lv_text IS NOT INITIAL.
+          DATA(lv_number) = 1.
+          WHILE lv_number < pdf->page_count( ) AND pdf->page( lv_number ) <> page.
+            lv_number = lv_number + 1.
+          ENDWHILE.
+          pdf->add_bookmark( title = lv_text
+                             page  = lv_number
+                             y     = element-y
+                             level = element-bookmark ).
         ENDIF.
         fixed_text( pdf     = pdf
                     layout  = layout

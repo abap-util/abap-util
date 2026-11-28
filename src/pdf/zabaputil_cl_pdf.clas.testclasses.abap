@@ -22,6 +22,8 @@ CLASS ltcl_pdf DEFINITION FINAL
     METHODS render_link             FOR TESTING.
     METHODS render_all_resources    FOR TESTING.
     METHODS render_deflated         FOR TESTING.
+    METHODS bookmarks_outline       FOR TESTING.
+    METHODS link_to_page            FOR TESTING.
 
     " a font and an image made for the tests of their classes
     METHODS font_format_4
@@ -428,6 +430,58 @@ CLASS ltcl_pdf IMPLEMENTATION.
                                            text = `/Filter /FlateDecode` ) ).
     cl_abap_unit_assert=>assert_true( xsdbool( xstrlen( lv_file ) < xstrlen(
         zabaputil_cl_util_context=>conv_get_xstring_by_string( lo_page->content( ) ) ) ) ).
+  ENDMETHOD.
+
+  METHOD bookmarks_outline.
+    " in hex: the file starts with bytes that are no UTF-8
+    DATA lv_hex TYPE string.
+    DATA(lo_pdf) = zabaputil_cl_pdf=>create( compress = abap_false ).
+    lo_pdf->add_page( ).
+    lo_pdf->add_page( ).
+    lo_pdf->add_bookmark( `One` ).
+    lo_pdf->add_bookmark( title = `Deeper`
+                          level = 3
+                          y     = 100 ).
+    lo_pdf->add_bookmark( title = `Two`
+                          page  = 1 ).
+    lv_hex = lo_pdf->render( ).
+    " 1 the resources, 2 the page tree, 3 and 4 the pages reserved before
+    " their contents 5 and 6; then the outline 7 and its entries 8 to 10
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex(
+        `<< /Type /Outlines /First 8 0 R /Last 10 0 R /Count 3 >>` ) ) ).
+    " One: the last page so far, Deeper one level below (not two), Two after it
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex(
+        |/Parent 7 0 R /Next 10 0 R /First 9 0 R /Last 9 0 R /Count 1 /Dest [4 0 R /XYZ 0 841.89 null]| ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex(
+        |/Parent 8 0 R /Dest [4 0 R /XYZ 0 741.89 null]| ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex(
+        |/Parent 7 0 R /Prev 8 0 R /Dest [3 0 R /XYZ 0 841.89 null]| ) ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex(
+        `/Outlines 7 0 R /PageMode /UseOutlines >>` ) ) ).
+  ENDMETHOD.
+
+  METHOD link_to_page.
+    DATA lv_hex TYPE string.
+    DATA(lo_pdf) = zabaputil_cl_pdf=>create( compress = abap_false ).
+    lo_pdf->add_page( )->link_page( x        = 10
+                                    y        = 10
+                                    w        = 100
+                                    h        = 20
+                                    page     = 2
+                                    target_y = 41 ).
+    lo_pdf->add_page( ).
+    lv_hex = lo_pdf->render( ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex(
+        `<< /Type /Annot /Subtype /Link /Rect [10 811.89 110 831.89] /Border [0 0 0] /Dest [4 0 R /XYZ 0 800.89 null] >>` ) ) ).
+    " a page the document does not have: no link
+    lo_pdf = zabaputil_cl_pdf=>create( compress = abap_false ).
+    lo_pdf->add_page( )->link_page( x    = 10
+                                    y    = 10
+                                    w    = 100
+                                    h    = 20
+                                    page = 5 ).
+    lv_hex = lo_pdf->render( ).
+    cl_abap_unit_assert=>assert_false( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( `/Dest` ) ) ).
   ENDMETHOD.
 
 ENDCLASS.

@@ -114,6 +114,22 @@ CLASS zabaputil_cl_pdf DEFINITION
         VALUE(result) TYPE REF TO zabaputil_cl_pdf_image.
 
     "! The document properties a viewer shows
+    "! An entry of the outline of the document, the bookmarks a viewer
+    "! shows beside the pages: in the order they are added, one level
+    "! below the entry before when level is one more
+    "! @parameter title | the text of the entry
+    "! @parameter page  | the page it leads to; 0 for the last page so far
+    "! @parameter y     | the place on that page, from its top
+    "! @parameter level | 1 for the top level
+    METHODS add_bookmark
+      IMPORTING
+        title         TYPE clike
+        page          TYPE i DEFAULT 0
+        y             TYPE numeric DEFAULT 0
+        level         TYPE i DEFAULT 1
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf.
+
     METHODS set_info
       IMPORTING
         title         TYPE clike OPTIONAL
@@ -158,6 +174,14 @@ CLASS zabaputil_cl_pdf DEFINITION
     DATA mo_fallback TYPE REF TO zabaputil_if_pdf_font.
     DATA mt_image    TYPE STANDARD TABLE OF REF TO zabaputil_cl_pdf_image WITH EMPTY KEY.
     DATA mt_info     TYPE STANDARD TABLE OF ty_s_info WITH EMPTY KEY.
+    TYPES:
+      BEGIN OF ty_s_bookmark,
+        title TYPE string,
+        page  TYPE i,
+        y     TYPE f,
+        level TYPE i,
+      END OF ty_s_bookmark.
+    DATA mt_bookmark TYPE STANDARD TABLE OF ty_s_bookmark WITH EMPTY KEY.
 
     "! The size of a page format in points
     CLASS-METHODS format_size
@@ -167,6 +191,23 @@ CLASS zabaputil_cl_pdf DEFINITION
       EXPORTING
         width       TYPE f
         height      TYPE f.
+
+    "! A destination: the page object and the place on the page
+    METHODS destination
+      IMPORTING
+        page          TYPE i
+        y             TYPE f
+        t_page_id     TYPE string_table
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! The objects of the outline; its number, 0 without bookmarks
+    METHODS write_outline
+      IMPORTING
+        writer        TYPE REF TO zabaputil_cl_pdf_writer
+        t_page_id     TYPE string_table
+      RETURNING
+        VALUE(result) TYPE i.
 
     METHODS info_put
       IMPORTING
@@ -389,6 +430,145 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD add_bookmark.
+
+    DATA ls_bookmark TYPE ty_s_bookmark.
+
+    ls_bookmark-title = title.
+    ls_bookmark-page = page.
+    IF ls_bookmark-page <= 0.
+      ls_bookmark-page = nmax( val1 = 1
+                               val2 = lines( mt_page ) ).
+    ENDIF.
+    ls_bookmark-y = y.
+    ls_bookmark-level = nmax( val1 = 1
+                              val2 = level ).
+    " a level deeper than one below the entry before is one below it
+    IF mt_bookmark IS INITIAL.
+      ls_bookmark-level = 1.
+    ELSE.
+      ls_bookmark-level = nmin( val1 = ls_bookmark-level
+                                val2 = mt_bookmark[ lines( mt_bookmark ) ]-level + 1 ).
+    ENDIF.
+    INSERT ls_bookmark INTO TABLE mt_bookmark.
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD destination.
+
+    DATA lv_top TYPE f.
+
+    " the top of the page in points, the place below it
+    DATA(lo_page) = mt_page[ page ].
+    lv_top = lo_page->height_pt( ) - y * mv_scale.
+    result = |[{ t_page_id[ page ] } 0 R /XYZ 0 { zabaputil_cl_pdf_writer=>num( lv_top ) } null]|.
+
+  ENDMETHOD.
+
+  METHOD write_outline.
+
+    DATA lt_id     TYPE STANDARD TABLE OF i WITH EMPTY KEY.
+    DATA lt_parent TYPE STANDARD TABLE OF i WITH EMPTY KEY.
+    DATA lv_index  TYPE i.
+    DATA lv_other  TYPE i.
+    DATA lv_dict   TYPE string.
+
+    IF mt_bookmark IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    " the outline and every entry an object; the parent of an entry is
+    " the last entry before it one level higher
+    result = writer->reserve( ).
+    LOOP AT mt_bookmark ASSIGNING FIELD-SYMBOL(<bookmark>).
+      lv_index = sy-tabix.
+      INSERT writer->reserve( ) INTO TABLE lt_id.
+      DATA(lv_parent) = 0.
+      lv_other = lv_index - 1.
+      WHILE lv_other >= 1.
+        IF mt_bookmark[ lv_other ]-level < <bookmark>-level.
+          lv_parent = lv_other.
+          EXIT.
+        ENDIF.
+        lv_other = lv_other - 1.
+      ENDWHILE.
+      INSERT lv_parent INTO TABLE lt_parent.
+    ENDLOOP.
+
+    LOOP AT mt_bookmark ASSIGNING <bookmark>.
+      lv_index = sy-tabix.
+      DATA(lv_parent_index) = lt_parent[ lv_index ].
+      lv_dict = |<< /Title <{ zabaputil_cl_pdf_writer=>hex_utf16( <bookmark>-title ) }> | &&
+                |/Parent { COND i( WHEN lv_parent_index = 0 THEN result ELSE lt_id[ lv_parent_index ] ) } 0 R|.
+
+      " the siblings: the entries of the same parent
+      DATA(lv_prev) = 0.
+      DATA(lv_next) = 0.
+      DATA(lv_first) = 0.
+      DATA(lv_last) = 0.
+      DATA(lv_count) = 0.
+      LOOP AT lt_parent INTO DATA(lv_of) .
+        lv_other = sy-tabix.
+        IF lv_of = lv_parent_index AND lv_other < lv_index.
+          lv_prev = lv_other.
+        ELSEIF lv_of = lv_parent_index AND lv_other > lv_index AND lv_next = 0.
+          lv_next = lv_other.
+        ENDIF.
+        IF lv_of = lv_index.
+          IF lv_first = 0.
+            lv_first = lv_other.
+          ENDIF.
+          lv_last = lv_other.
+        ENDIF.
+      ENDLOOP.
+      " every entry open: its count is all the entries below it
+      " a DO with EXIT: the downport reads a table expression of a WHILE
+      " condition once, in front of the loop
+      lv_other = lv_index + 1.
+      DO.
+        IF lv_other > lines( mt_bookmark ).
+          EXIT.
+        ENDIF.
+        IF mt_bookmark[ lv_other ]-level <= <bookmark>-level.
+          EXIT.
+        ENDIF.
+        lv_count = lv_count + 1.
+        lv_other = lv_other + 1.
+      ENDDO.
+
+      IF lv_prev > 0.
+        lv_dict = |{ lv_dict } /Prev { lt_id[ lv_prev ] } 0 R|.
+      ENDIF.
+      IF lv_next > 0.
+        lv_dict = |{ lv_dict } /Next { lt_id[ lv_next ] } 0 R|.
+      ENDIF.
+      IF lv_first > 0.
+        lv_dict = |{ lv_dict } /First { lt_id[ lv_first ] } 0 R /Last { lt_id[ lv_last ] } 0 R /Count { lv_count }|.
+      ENDIF.
+      lv_dict = |{ lv_dict } /Dest { destination( page      = <bookmark>-page
+                                                  y         = <bookmark>-y
+                                                  t_page_id = t_page_id ) } >>|.
+      writer->set_object( id  = lt_id[ lv_index ]
+                          val = lv_dict ).
+    ENDLOOP.
+
+    " the outline: its first and last entry of the top level
+    lv_first = 0.
+    LOOP AT lt_parent INTO lv_of.
+      IF lv_of = 0.
+        IF lv_first = 0.
+          lv_first = sy-tabix.
+        ENDIF.
+        lv_last = sy-tabix.
+      ENDIF.
+    ENDLOOP.
+    writer->set_object( id  = result
+                        val = |<< /Type /Outlines /First { lt_id[ lv_first ] } 0 R /Last { lt_id[ lv_last ] } 0 R | &&
+                              |/Count { lines( mt_bookmark ) } >>| ).
+
+  ENDMETHOD.
+
   METHOD set_info.
 
     info_put( key = `Title`
@@ -473,7 +653,24 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
         |<< /ProcSet [/PDF /Text /ImageB /ImageC /ImageI] /Font <<{ lv_fonts } >> /XObject <<{ lv_images } >>{ lv_states } >>| ).
 
     DATA(lv_pages) = lo_writer->reserve( ).
+
+    " links into the document and bookmarks need the numbers of the page
+    " objects before the pages are written
+    DATA lt_page_id TYPE string_table.
+    DATA(lv_reserve) = xsdbool( mt_bookmark IS NOT INITIAL ).
+    LOOP AT mt_page INTO DATA(lo_goto_page).
+      IF lo_goto_page->gotos( ) IS NOT INITIAL.
+        lv_reserve = abap_true.
+      ENDIF.
+    ENDLOOP.
+    IF lv_reserve = abap_true.
+      LOOP AT mt_page INTO lo_goto_page.
+        INSERT |{ lo_writer->reserve( ) }| INTO TABLE lt_page_id.
+      ENDLOOP.
+    ENDIF.
+
     LOOP AT mt_page INTO DATA(lo_page).
+      DATA(lv_page_index) = sy-tabix.
 
       DATA(lv_content) = lo_writer->add_stream(
           zabaputil_cl_util_context=>conv_get_xstring_by_string( lo_page->content( ) ) ).
@@ -483,22 +680,44 @@ CLASS zabaputil_cl_pdf IMPLEMENTATION.
         lv_id = lo_writer->add_object( lv_annotation ).
         lv_annots = lv_annots && | { lv_id } 0 R|.
       ENDLOOP.
+      LOOP AT lo_page->gotos( ) INTO DATA(ls_goto).
+        IF ls_goto-page < 1 OR ls_goto-page > lines( mt_page ).
+          CONTINUE.
+        ENDIF.
+        lv_id = lo_writer->add_object( |<< /Type /Annot /Subtype /Link /Rect [{ ls_goto-rect }] /Border [0 0 0] | &&
+                                       |/Dest { destination( page      = ls_goto-page
+                                                             y         = ls_goto-y
+                                                             t_page_id = lt_page_id ) } >>| ).
+        lv_annots = lv_annots && | { lv_id } 0 R|.
+      ENDLOOP.
       IF lv_annots IS NOT INITIAL.
         lv_annots = | /Annots [{ lv_annots } ]|.
       ENDIF.
 
-      lv_id = lo_writer->add_object(
-          |<< /Type /Page /Parent { lv_pages } 0 R | &&
+      DATA(lv_page_object) = |<< /Type /Page /Parent { lv_pages } 0 R | &&
           |/MediaBox [0 0 { zabaputil_cl_pdf_writer=>num( lo_page->width_pt( ) ) } | &&
           |{ zabaputil_cl_pdf_writer=>num( lo_page->height_pt( ) ) }] | &&
-          |/Resources { lv_resources } 0 R /Contents { lv_content } 0 R{ lv_annots } >>| ).
+          |/Resources { lv_resources } 0 R /Contents { lv_content } 0 R{ lv_annots } >>|.
+      IF lv_reserve = abap_true.
+        lv_id = lt_page_id[ lv_page_index ].
+        lo_writer->set_object( id  = lv_id
+                               val = lv_page_object ).
+      ELSE.
+        lv_id = lo_writer->add_object( lv_page_object ).
+      ENDIF.
       lv_kids = lv_kids && | { lv_id } 0 R|.
 
     ENDLOOP.
     lo_writer->set_object( id  = lv_pages
                            val = |<< /Type /Pages /Kids [{ lv_kids } ] /Count { lines( mt_page ) } >>| ).
 
-    DATA(lv_catalog) = lo_writer->add_object( |<< /Type /Catalog /Pages { lv_pages } 0 R >>| ).
+    DATA(lv_catalog_extra) = ``.
+    DATA(lv_outline) = write_outline( writer    = lo_writer
+                                      t_page_id = lt_page_id ).
+    IF lv_outline > 0.
+      lv_catalog_extra = | /Outlines { lv_outline } 0 R /PageMode /UseOutlines|.
+    ENDIF.
+    DATA(lv_catalog) = lo_writer->add_object( |<< /Type /Catalog /Pages { lv_pages } 0 R{ lv_catalog_extra } >>| ).
 
     " text strings in UTF-16: a title is not limited to one code page
     LOOP AT mt_info ASSIGNING FIELD-SYMBOL(<info>).

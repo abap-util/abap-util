@@ -989,7 +989,8 @@ CLASS zabaputil_cl_pdf_barcode IMPLEMENTATION.
       lv_i = lv_i + 1.
     ENDWHILE.
     lv_i = 1.
-    WHILE lv_i <= lines( lt_ecc[ 1 ] ).
+    DATA(lv_ecc_count) = lines( lt_ecc[ 1 ] ).
+    WHILE lv_i <= lv_ecc_count.
       LOOP AT lt_ecc INTO lt_one.
         INSERT lt_one[ lv_i ] INTO TABLE lt_final.
       ENDLOOP.

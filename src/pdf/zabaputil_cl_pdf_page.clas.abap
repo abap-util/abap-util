@@ -180,6 +180,37 @@ CLASS zabaputil_cl_pdf_page DEFINITION
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
 
+    "! a link to a place in the document: its area and where it leads
+    TYPES:
+      BEGIN OF ty_s_goto,
+        "! the area, in points: left bottom right top
+        rect TYPE string,
+        page TYPE i,
+        "! from the top of the target page, in the unit of the document
+        y    TYPE f,
+      END OF ty_s_goto.
+    TYPES ty_t_goto TYPE STANDARD TABLE OF ty_s_goto WITH EMPTY KEY.
+
+    "! An area that leads to a page of the document when it is clicked -
+    "! a table of contents. It draws nothing
+    "! @parameter page     | the number of the page, from 1
+    "! @parameter target_y | the place on that page, from its top
+    METHODS link_page
+      IMPORTING
+        x             TYPE numeric
+        y             TYPE numeric
+        w             TYPE numeric
+        h             TYPE numeric
+        page          TYPE i
+        target_y      TYPE numeric DEFAULT 0
+      RETURNING
+        VALUE(result) TYPE REF TO zabaputil_cl_pdf_page.
+
+    "! The links to pages of the document
+    METHODS gotos
+      RETURNING
+        VALUE(result) TYPE ty_t_goto.
+
     "! Operators of the PDF content stream, added as they are - for what
     "! this class has no method for
     METHODS raw
@@ -339,6 +370,7 @@ CLASS zabaputil_cl_pdf_page DEFINITION
     DATA mv_content    TYPE string.
     DATA mt_annotation TYPE string_table.
     DATA mt_alpha      TYPE string_table.
+    DATA mt_goto       TYPE ty_t_goto.
     DATA mo_font       TYPE REF TO zabaputil_if_pdf_font.
     DATA mv_font_size  TYPE f.
     " the colours as operands, `0 0 0`: text and fill share one operator in
@@ -638,6 +670,30 @@ CLASS zabaputil_cl_pdf_page IMPLEMENTATION.
     ELSE.
       emit( |q { mv_text_color } rg { lv_show } Q| ).
     ENDIF.
+
+  ENDMETHOD.
+
+  METHOD link_page.
+
+    DATA lv_x TYPE f.
+    DATA lv_y TYPE f.
+    DATA lv_w TYPE f.
+    DATA lv_h TYPE f.
+
+    lv_x = x.
+    lv_y = y.
+    lv_w = w.
+    lv_h = h.
+    INSERT VALUE #( rect = |{ px( lv_x ) } { py( lv_y + lv_h ) } { px( lv_x + lv_w ) } { py( lv_y ) }|
+                    page = page
+                    y    = target_y ) INTO TABLE mt_goto.
+    result = me.
+
+  ENDMETHOD.
+
+  METHOD gotos.
+
+    result = mt_goto.
 
   ENDMETHOD.
 

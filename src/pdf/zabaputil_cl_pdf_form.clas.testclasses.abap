@@ -122,6 +122,7 @@ CLASS ltcl_form DEFINITION FINAL
     METHODS paragraph_options       FOR TESTING.
     METHODS watermark_and_corners   FOR TESTING.
     METHODS barcode_elements        FOR TESTING.
+    METHODS bookmark_headings       FOR TESTING.
 
     "! the table of the test data with as many rows as asked for
     METHODS items
@@ -1306,6 +1307,26 @@ CLASS ltcl_form IMPLEMENTATION.
                                                      data = ms_data ).
     cl_abap_unit_assert=>assert_equals( exp = `NONE`
                                         act = lt_unknown[ 1 ]-name ).
+  ENDMETHOD.
+
+  METHOD bookmark_headings.
+    " headings in the flow and at a fixed position are entries of the outline
+    DATA lv_hex TYPE string.
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `Chapter {NAME}` bookmark = 1 )
+        ( type = zabaputil_cl_pdf_form=>cs_type-page_break )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `Section` bookmark = 2 )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text text = `plain` ) ).
+    lv_hex = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                           data = ms_data )->render( ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( val  = ms_form
+                                                 data = ms_data ).
+    lv_hex = lo_pdf->render( ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( `/PageMode /UseOutlines` ) ) ).
+    cl_abap_unit_assert=>assert_true(
+        xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( |/Title <{ zabaputil_cl_pdf_writer=>hex_utf16( `Chapter Ada` ) }>| ) ) ).
+    cl_abap_unit_assert=>assert_false(
+        xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( |/Title <{ zabaputil_cl_pdf_writer=>hex_utf16( `plain` ) }>| ) ) ).
   ENDMETHOD.
 
   METHOD absolute_pushed_over.
