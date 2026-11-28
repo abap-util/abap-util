@@ -109,6 +109,7 @@ CLASS ltcl_form DEFINITION FINAL
     METHODS absolute_table_pages    FOR TESTING.
     METHODS absolute_pushed_over    FOR TESTING.
     METHODS absolute_every_page     FOR TESTING.
+    METHODS text_keeps_blanks       FOR TESTING.
     METHODS to_absolute_places      FOR TESTING.
     METHODS to_absolute_with_data   FOR TESTING.
     METHODS to_absolute_unchanged   FOR TESTING.
@@ -861,6 +862,18 @@ CLASS ltcl_form IMPLEMENTATION.
                                                        page = sy-index
                                                        text = `Letterhead` ) ).
     ENDDO.
+  ENDMETHOD.
+
+  METHOD text_keeps_blanks.
+    " blanks in a row, at the start and at the end of a text are the text's
+    " own; what stands around the form is not
+    ms_form-t_element = VALUE #( ( type = zabaputil_cl_pdf_form=>cs_type-text
+                                   text = `  Aisle {AISLE}    Level {LEVEL}  ` ) ).
+    DATA(lv_text) = zabaputil_cl_pdf_form=>stringify( ms_form ).
+    cl_abap_unit_assert=>assert_equals( exp = ms_form
+                                        act = zabaputil_cl_pdf_form=>parse( lv_text ) ).
+    cl_abap_unit_assert=>assert_equals( exp = ms_form
+                                        act = zabaputil_cl_pdf_form=>parse( |\n  { lv_text }\n| ) ).
   ENDMETHOD.
 
   METHOD to_absolute_places.
