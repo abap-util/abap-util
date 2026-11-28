@@ -23,7 +23,8 @@ CLASS zabaputil_cl_pdf_form DEFINITION
     " stands where its x, y, w and h say, which is what a designer with a
     " canvas draws. A table is as high as its rows make it and goes on on
     " the next page; what stands below it on the canvas follows where it
-    " ends, at the same distance.
+    " ends, at the same distance. So does what stands below a text whose
+    " lines need more than its height h.
     "
     " A text may name components of the data in braces: `Dear {NAME}`,
     " `{HEADER-CITY}` for a component of a component. A name the data does
@@ -437,6 +438,50 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         page      TYPE REF TO zabaputil_cl_pdf_page
         element   TYPE ty_s_element
         text      TYPE string.
+
+    "! The lines of a fixed text: its paragraphs, wrapped at its width
+    CLASS-METHODS text_lines
+      IMPORTING
+        pdf           TYPE REF TO zabaputil_cl_pdf
+        layout        TYPE REF TO zabaputil_cl_pdf_layout
+        element       TYPE ty_s_element
+        text          TYPE string
+      RETURNING
+        VALUE(result) TYPE string_table.
+
+    "! The distance of two lines of a text, in mm
+    CLASS-METHODS line_height
+      IMPORTING
+        pdf           TYPE REF TO zabaputil_cl_pdf
+        element       TYPE ty_s_element
+      RETURNING
+        VALUE(result) TYPE f.
+
+    "! Lines of a text, the first one with its top at y
+    CLASS-METHODS text_draw
+      IMPORTING
+        pdf     TYPE REF TO zabaputil_cl_pdf
+        page    TYPE REF TO zabaputil_cl_pdf_page
+        element TYPE ty_s_element
+        lines   TYPE string_table
+        y       TYPE f.
+
+    "! A text of an absolute form that is higher than it is drawn: its
+    "! lines go on on the next page at the top margin
+    "! @parameter page     | the page the text starts on
+    "! @parameter end_page | the page it ends on
+    "! @parameter end_y    | where its last line ends
+    CLASS-METHODS absolute_text
+      IMPORTING
+        pdf      TYPE REF TO zabaputil_cl_pdf
+        layout   TYPE REF TO zabaputil_cl_pdf_layout
+        form     TYPE ty_s_form
+        element  TYPE ty_s_element
+        lines    TYPE string_table
+        page     TYPE i
+      EXPORTING
+        end_page TYPE i
+        end_y    TYPE f.
 
 ENDCLASS.
 
@@ -1200,6 +1245,11 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     DATA lv_height  TYPE f.
     DATA lv_left    TYPE f.
     DATA lv_right   TYPE f.
+    DATA lv_extent  TYPE f.
+    DATA lv_needed  TYPE f.
+    DATA lv_lines   TYPE i.
+    DATA lv_text    TYPE string.
+    DATA lt_line    TYPE string_table.
 
     DATA(lo_first) = layout->page( ).
     lv_width = lo_first->width( ).
@@ -1264,9 +1314,34 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
         CONTINUE.
       ENDIF.
 
+      " a text with a height is as high as its lines make it, when they
+      " need more than it is drawn: what stands below it moves, as below a
+      " table
+      lv_extent = ls_element-h.
+      CLEAR lt_line.
+      IF ls_element-type = cs_type-text AND ls_element-h > 0.
+        lv_text = ls_element-text.
+        IF with_data = abap_true.
+          lv_text = resolve( val  = lv_text
+                             data = data ).
+        ENDIF.
+        lt_line = text_lines( pdf     = pdf
+                              layout  = layout
+                              element = ls_element
+                              text    = lv_text ).
+        lv_lines = lines( lt_line ).
+        lv_needed = lv_lines * line_height( pdf     = pdf
+                                            element = ls_element ).
+        IF lv_needed > lv_extent.
+          lv_extent = lv_needed.
+        ENDIF.
+      ENDIF.
+
       " an element a table pushed over the bottom margin starts the next
-      " page, and what stood below it on the canvas follows it there
-      IF lv_shift > 0 AND ls_element-y + ls_element-h > lv_height - form-margin_bottom.
+      " page, and what stood below it on the canvas follows it there - a
+      " text higher than a page goes on on the next one instead
+      IF lv_shift > 0 AND ls_element-y + lv_extent > lv_height - form-margin_bottom
+          AND lv_extent <= lv_height - form-margin_top - form-margin_bottom.
         IF lv_page >= pdf->page_count( ).
           layout->page_break( ).
         ENDIF.
@@ -1277,6 +1352,20 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
         ls_anchor-page = lv_page.
         ls_anchor-y = form-margin_top.
         INSERT ls_anchor INTO TABLE lt_anchor.
+      ENDIF.
+
+      IF lv_extent > ls_element-h AND lt_line IS NOT INITIAL.
+        absolute_text( EXPORTING pdf      = pdf
+                                 layout   = layout
+                                 form     = form
+                                 element  = ls_element
+                                 lines    = lt_line
+                                 page     = lv_page
+                       IMPORTING end_page = ls_anchor-page
+                                 end_y    = ls_anchor-y ).
+        ls_anchor-bottom = lv_top + ls_element-h.
+        INSERT ls_anchor INTO TABLE lt_anchor.
+        CONTINUE.
       ENDIF.
 
       fixed_element( pdf       = pdf
@@ -1480,19 +1569,23 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
 
   METHOD fixed_text.
 
-    DATA lt_line   TYPE string_table.
-    DATA lv_x      TYPE f.
-    DATA lv_y      TYPE f.
-    DATA lv_height TYPE f.
+    text_draw( pdf     = pdf
+               page    = page
+               element = element
+               lines   = text_lines( pdf     = pdf
+                                     layout  = layout
+                                     element = element
+                                     text    = text )
+               y       = element-y ).
 
-    DATA(lo_font) = element_font( pdf     = pdf
-                                  element = element ).
-    DATA(lv_size) = element_size( element ).
-    DATA(lv_align) = to_upper( element-align ).
+  ENDMETHOD.
+
+  METHOD text_lines.
 
     " the layout measures: a text with a width wraps in it
-    layout->set_font( font = lo_font
-                      size = lv_size ).
+    layout->set_font( font = element_font( pdf     = pdf
+                                           element = element )
+                      size = element_size( element ) ).
     DATA(lv_line_feed) = |\n|.
     DATA(lv_text) = replace( val  = text
                              sub  = |\r\n|
@@ -1504,14 +1597,32 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
         DATA(lt_wrapped) = layout->wrap( val   = lv_paragraph
                                          width = element-w ).
         IF lt_wrapped IS INITIAL.
-          INSERT `` INTO TABLE lt_line.
+          INSERT `` INTO TABLE result.
         ELSE.
-          INSERT LINES OF lt_wrapped INTO TABLE lt_line.
+          INSERT LINES OF lt_wrapped INTO TABLE result.
         ENDIF.
       ELSE.
-        INSERT lv_paragraph INTO TABLE lt_line.
+        INSERT lv_paragraph INTO TABLE result.
       ENDIF.
     ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD line_height.
+
+    result = element_size( element ) * 5 / 4 / pdf->scale( ).
+
+  ENDMETHOD.
+
+  METHOD text_draw.
+
+    DATA lv_x TYPE f.
+    DATA lv_y TYPE f.
+
+    DATA(lo_font) = element_font( pdf     = pdf
+                                  element = element ).
+    DATA(lv_size) = element_size( element ).
+    DATA(lv_align) = to_upper( element-align ).
 
     " x is where the text starts, ends or is centred; with a width it is
     " the left edge of the box the text is aligned in
@@ -1526,19 +1637,63 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
     ENDIF.
 
     " y is the top of the first line
-    lv_height = lv_size * 5 / 4 / pdf->scale( ).
-    lv_y = element-y + lo_font->ascent( lv_size ) / pdf->scale( ).
+    lv_y = y + lo_font->ascent( lv_size ) / pdf->scale( ).
 
     page->set_font( font = lo_font
                     size = lv_size ).
     page->set_text_color( element_color( element ) ).
-    LOOP AT lt_line INTO DATA(lv_line).
+    LOOP AT lines INTO DATA(lv_line).
       page->text( x     = lv_x
                   y     = lv_y
                   val   = lv_line
                   align = lv_align ).
-      lv_y = lv_y + lv_height.
+      lv_y = lv_y + line_height( pdf     = pdf
+                                 element = element ).
     ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD absolute_text.
+
+    DATA lt_chunk  TYPE string_table.
+    DATA lv_y      TYPE f.
+    DATA lv_top    TYPE f.
+    DATA lv_bottom TYPE f.
+
+    DATA(lv_line_height) = line_height( pdf     = pdf
+                                        element = element ).
+    lv_bottom = layout->page( )->height( ) - form-margin_bottom.
+    end_page = page.
+    lv_top = element-y.
+    lv_y = lv_top.
+
+    LOOP AT lines INTO DATA(lv_line).
+      " a line that does not fit above the bottom margin starts the next
+      " page - unless it is the first one of the page
+      IF lv_y + lv_line_height > lv_bottom AND lt_chunk IS NOT INITIAL.
+        text_draw( pdf     = pdf
+                   page    = pdf->page( end_page )
+                   element = element
+                   lines   = lt_chunk
+                   y       = lv_top ).
+        CLEAR lt_chunk.
+        IF end_page >= pdf->page_count( ).
+          layout->page_break( ).
+        ENDIF.
+        end_page = end_page + 1.
+        lv_top = form-margin_top.
+        lv_y = lv_top.
+      ENDIF.
+      INSERT lv_line INTO TABLE lt_chunk.
+      lv_y = lv_y + lv_line_height.
+    ENDLOOP.
+
+    text_draw( pdf     = pdf
+               page    = pdf->page( end_page )
+               element = element
+               lines   = lt_chunk
+               y       = lv_top ).
+    end_y = lv_y.
 
   ENDMETHOD.
 

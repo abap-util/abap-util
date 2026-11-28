@@ -106,6 +106,8 @@ CLASS ltcl_form DEFINITION FINAL
     METHODS absolute_table_pages    FOR TESTING.
     METHODS absolute_pushed_over    FOR TESTING.
     METHODS absolute_every_page     FOR TESTING.
+    METHODS absolute_text_grows     FOR TESTING.
+    METHODS absolute_text_next_page FOR TESTING.
 
     "! the table of the test data with as many rows as asked for
     METHODS items
@@ -921,6 +923,68 @@ CLASS ltcl_form IMPLEMENTATION.
                                         act = shown( pdf = lo_pdf page = 1 text = `Below` ) ).
     cl_abap_unit_assert=>assert_equals( exp = 1
                                         act = shown( pdf = lo_pdf page = lv_last text = `Below` ) ).
+  ENDMETHOD.
+
+  METHOD absolute_text_grows.
+    " 14.4 points: a line is 6.35 mm high, four lines 25.4 mm. The text is
+    " drawn 5 mm high: what stands below it keeps its distance to where
+    " its lines end, what stands beside it stays where it is
+    ms_form-absolute = abap_true.
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text x = 20 y = 60 text = `Below` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text x = 150 y = 52 text = `Beside` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text x = 20 y = 50 h = 5 size = `14.4`
+          text = |A\nB\nC\nD| ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( ms_form ).
+
+    DATA(ls_fixed) = zabaputil_cl_pdf_form=>new_form( ).
+    ls_fixed-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text fixed = abap_true x = 20 y = 50 size = `14.4`
+          text = |A\nB\nC\nD| )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text fixed = abap_true x = 150 y = 52 text = `Beside` )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text fixed = abap_true x = 20 y = `80.4` text = `Below` ) ).
+    DATA(lo_fixed) = zabaputil_cl_pdf_form=>build( ls_fixed ).
+    cl_abap_unit_assert=>assert_equals( exp = lo_fixed->page( 1 )->content( )
+                                        act = lo_pdf->page( 1 )->content( ) ).
+
+    " drawn high enough, nothing moves
+    ms_form-t_element[ 3 ]-h = 30.
+    ms_form-t_element[ 1 ]-y = 85.
+    lo_pdf = zabaputil_cl_pdf_form=>build( ms_form ).
+    ls_fixed-t_element[ 3 ]-y = 85.
+    lo_fixed = zabaputil_cl_pdf_form=>build( ls_fixed ).
+    cl_abap_unit_assert=>assert_equals( exp = lo_fixed->page( 1 )->content( )
+                                        act = lo_pdf->page( 1 )->content( ) ).
+  ENDMETHOD.
+
+  METHOD absolute_text_next_page.
+    " from 250 mm on, four lines of 6.35 mm fit above the bottom margin at
+    " 277 mm; the other four go on at the top margin of the next page, and
+    " what stood 5 mm below the text follows them at that distance
+    ms_form-absolute = abap_true.
+    ms_form-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text x = 20 y = 250 h = 5 size = `14.4`
+          text = |A\nB\nC\nD\nE\nF\nG\nH| )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text x = 20 y = 260 text = `Below` ) ).
+    DATA(lo_pdf) = zabaputil_cl_pdf_form=>build( ms_form ).
+    cl_abap_unit_assert=>assert_equals( exp = 2
+                                        act = lo_pdf->page_count( ) ).
+
+    DATA(ls_fixed) = zabaputil_cl_pdf_form=>new_form( ).
+    ls_fixed-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text fixed = abap_true x = 20 y = 250 size = `14.4`
+          text = |A\nB\nC\nD| ) ).
+    DATA(lo_fixed) = zabaputil_cl_pdf_form=>build( ls_fixed ).
+    cl_abap_unit_assert=>assert_equals( exp = lo_fixed->page( 1 )->content( )
+                                        act = lo_pdf->page( 1 )->content( ) ).
+
+    ls_fixed-t_element = VALUE #(
+        ( type = zabaputil_cl_pdf_form=>cs_type-text fixed = abap_true x = 20 y = 20 size = `14.4`
+          text = |E\nF\nG\nH| )
+        ( type = zabaputil_cl_pdf_form=>cs_type-text fixed = abap_true x = 20 y = `50.4` text = `Below` ) ).
+    lo_fixed = zabaputil_cl_pdf_form=>build( ls_fixed ).
+    cl_abap_unit_assert=>assert_equals( exp = lo_fixed->page( 1 )->content( )
+                                        act = lo_pdf->page( 2 )->content( ) ).
   ENDMETHOD.
 
   METHOD absolute_pushed_over.
