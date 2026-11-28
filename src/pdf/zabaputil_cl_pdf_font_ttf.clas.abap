@@ -10,8 +10,11 @@ CLASS zabaputil_cl_pdf_font_ttf DEFINITION
     " numbers (a composite font, Identity-H), and a ToUnicode map lets a
     " viewer copy and search it.
     "
-    " The file is embedded whole - no subsetting yet, so the PDF grows by
-    " the size of the font (deflated). Not supported: OpenType fonts with
+    " Only the glyphs the text uses are embedded, and the parts of the
+    " composite ones among them (subset = abap_false embeds the whole
+    " file). The glyph numbers stay what they are: the glyphs that are not
+    " used are empty, and tables a PDF viewer does not read (GSUB, GPOS,
+    " kern, ...) are left out. Not supported: OpenType fonts with
     " PostScript outlines (CFF, the usual .otf), font collections (.ttc),
     " and everything a shaping engine does - ligatures, kerning, Arabic
     " joining, right-to-left.
@@ -20,10 +23,18 @@ CLASS zabaputil_cl_pdf_font_ttf DEFINITION
 
     "! @parameter content  | the bytes of the .ttf file
     "! @parameter resource | the name in the resource dictionary, `F1`
+    "! @parameter subset   | embed the glyphs in use only
     METHODS constructor
       IMPORTING
         content  TYPE xstring
-        resource TYPE clike.
+        resource TYPE clike
+        subset   TYPE abap_bool DEFAULT abap_true.
+
+    "! The font file as it is embedded: the glyphs used so far, or the
+    "! whole file without subsetting
+    METHODS file
+      RETURNING
+        VALUE(result) TYPE xstring.
 
     "! The glyph number of a Unicode code point, 0 (the missing glyph)
     "! for a character the font does not have
@@ -56,6 +67,7 @@ CLASS zabaputil_cl_pdf_font_ttf DEFINITION
       END OF ty_s_glyph.
 
     DATA mv_content       TYPE xstring.
+    DATA mv_subset        TYPE abap_bool.
     DATA mv_resource      TYPE string.
     DATA mv_name          TYPE string.
     DATA mt_table         TYPE HASHED TABLE OF ty_s_table WITH UNIQUE KEY tag.
@@ -138,6 +150,40 @@ CLASS zabaputil_cl_pdf_font_ttf DEFINITION
       RETURNING
         VALUE(result) TYPE ty_s_glyph.
 
+    "! The file with the glyphs in use only
+    METHODS subset
+      RETURNING
+        VALUE(result) TYPE xstring.
+
+    "! Where a glyph is in the glyf table, and how long it is
+    METHODS glyph_range
+      IMPORTING
+        glyph  TYPE i
+      EXPORTING
+        offset TYPE i
+        length TYPE i.
+
+    "! An unsigned 32 bit number as 8 hex digits
+    CLASS-METHODS hex32
+      IMPORTING
+        val           TYPE numeric
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! The checksum of a table: its 32 bit words added up, modulo 2^32
+    CLASS-METHODS checksum
+      IMPORTING
+        val           TYPE xstring
+      RETURNING
+        VALUE(result) TYPE decfloat34.
+
+    "! The bytes of a table, as a string of hex digits
+    METHODS table_hex
+      IMPORTING
+        tag           TYPE string
+      RETURNING
+        VALUE(result) TYPE string.
+
     "! The map from glyph numbers back to Unicode, for copy and search
     METHODS to_unicode
       RETURNING
@@ -152,6 +198,7 @@ CLASS zabaputil_cl_pdf_font_ttf IMPLEMENTATION.
 
     mv_content = content.
     mv_resource = resource.
+    mv_subset = subset.
 
     read_directory( ).
     read_metrics( ).
@@ -612,16 +659,34 @@ CLASS zabaputil_cl_pdf_font_ttf IMPLEMENTATION.
       lv_flags = lv_flags + 64.
     ENDIF.
 
-    DATA(lv_file) = writer->add_stream( dict    = |/Length1 { xstrlen( mv_content ) }|
-                                        content = mv_content ).
+    " a subset is named after its glyphs: six capitals and a plus sign
+    DATA(lv_name) = mv_name.
+    IF mv_subset = abap_true.
+      DATA lv_hash TYPE i.
+      DATA lv_tag TYPE string.
+      LOOP AT lt_sorted ASSIGNING <glyph>.
+        lv_hash = ( lv_hash * 31 + <glyph>-glyph ) MOD 308915776.
+      ENDLOOP.
+      DO 6 TIMES.
+        lv_tag = lv_tag && substring( val = sy-abcde
+                                      off = lv_hash MOD 26
+                                      len = 1 ).
+        lv_hash = lv_hash DIV 26.
+      ENDDO.
+      lv_name = |{ lv_tag }+{ mv_name }|.
+    ENDIF.
+
+    DATA(lv_content) = file( ).
+    DATA(lv_file) = writer->add_stream( dict    = |/Length1 { xstrlen( lv_content ) }|
+                                        content = lv_content ).
 
     DATA(lv_descriptor) = writer->add_object(
-        |<< /Type /FontDescriptor /FontName /{ mv_name } /Flags { lv_flags } /FontBBox [{ mv_bbox }] | &&
+        |<< /Type /FontDescriptor /FontName /{ lv_name } /Flags { lv_flags } /FontBBox [{ mv_bbox }] | &&
         |/ItalicAngle { mv_italic_angle } /Ascent { mv_ascent } /Descent { mv_descent * -1 } | &&
         |/CapHeight { mv_cap_height } /StemV 80 /FontFile2 { lv_file } 0 R >>| ).
 
     DATA(lv_cid_font) = writer->add_object(
-        |<< /Type /Font /Subtype /CIDFontType2 /BaseFont /{ mv_name } | &&
+        |<< /Type /Font /Subtype /CIDFontType2 /BaseFont /{ lv_name } | &&
         |/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> | &&
         |/FontDescriptor { lv_descriptor } 0 R /DW 1000 /W [{ lv_widths } ] /CIDToGIDMap /Identity >>| ).
 
@@ -629,8 +694,303 @@ CLASS zabaputil_cl_pdf_font_ttf IMPLEMENTATION.
         zabaputil_cl_util_context=>conv_get_xstring_by_string( to_unicode( ) ) ).
 
     result = writer->add_object(
-        |<< /Type /Font /Subtype /Type0 /BaseFont /{ mv_name } /Encoding /Identity-H | &&
+        |<< /Type /Font /Subtype /Type0 /BaseFont /{ lv_name } /Encoding /Identity-H | &&
         |/DescendantFonts [{ lv_cid_font } 0 R] /ToUnicode { lv_to_unicode } 0 R >>| ).
+
+  ENDMETHOD.
+
+  METHOD file.
+
+    IF mv_subset = abap_true.
+      result = subset( ).
+    ELSE.
+      result = mv_content.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD glyph_range.
+
+    DATA lv_next TYPE i.
+
+    DATA(lv_loca) = table_offset( `loca` ).
+    " indexToLocFormat: 0 for offsets / 2 in 16 bits, 1 for 32 bits
+    IF s16( table_offset( `head` ) + 50 ) = 0.
+      offset = u16( lv_loca + glyph * 2 ) * 2.
+      lv_next = u16( lv_loca + glyph * 2 + 2 ) * 2.
+    ELSE.
+      offset = u32( lv_loca + glyph * 4 ).
+      lv_next = u32( lv_loca + glyph * 4 + 4 ).
+    ENDIF.
+    length = lv_next - offset.
+    IF length < 0.
+      length = 0.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD hex32.
+
+    DATA lv_value TYPE decfloat34.
+    DATA lv_x     TYPE x LENGTH 2.
+    DATA lv_high  TYPE i.
+    DATA lv_low   TYPE i.
+
+    lv_value = val.
+    lv_high = trunc( lv_value / 65536 ).
+    lv_low = lv_value - lv_high * 65536.
+    lv_x = lv_high.
+    result = lv_x.
+    lv_x = lv_low.
+    result = result && lv_x.
+
+  ENDMETHOD.
+
+  METHOD checksum.
+
+    DATA lv_word TYPE x LENGTH 2.
+    DATA lv_off  TYPE i.
+    DATA lv_high TYPE i.
+    DATA lv_low  TYPE i.
+    DATA lv_hi   TYPE decfloat34.
+    DATA lv_lo   TYPE decfloat34.
+
+    " the high and the low 16 bits of every word, added up apart; a
+    " table that does not end on a word counts as padded with zeros
+    DATA(lv_length) = xstrlen( val ).
+    WHILE lv_off < lv_length.
+      lv_high = 0.
+      lv_low = 0.
+      IF lv_off + 2 <= lv_length.
+        lv_word = val+lv_off(2).
+        lv_high = lv_word.
+      ELSE.
+        lv_word = val+lv_off(1).
+        lv_high = lv_word.
+        lv_high = lv_high * 256.
+      ENDIF.
+      lv_off = lv_off + 2.
+      IF lv_off + 2 <= lv_length.
+        lv_word = val+lv_off(2).
+        lv_low = lv_word.
+      ELSEIF lv_off < lv_length.
+        lv_word = val+lv_off(1).
+        lv_low = lv_word.
+        lv_low = lv_low * 256.
+      ENDIF.
+      lv_off = lv_off + 2.
+      lv_hi = lv_hi + lv_high.
+      lv_lo = lv_lo + lv_low.
+    ENDWHILE.
+    result = ( lv_hi * 65536 + lv_lo ) MOD 4294967296.
+
+  ENDMETHOD.
+
+  METHOD table_hex.
+
+    ASSIGN mt_table[ tag = tag ] TO FIELD-SYMBOL(<table>).
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    IF <table>-offset + <table>-length > xstrlen( mv_content ).
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |PDF: the font file is damaged (table { tag } reaches behind its end)|.
+    ENDIF.
+    DATA(lv_bytes) = mv_content+<table>-offset(<table>-length).
+    result = lv_bytes.
+
+  ENDMETHOD.
+
+  METHOD subset.
+
+    TYPES:
+      BEGIN OF ty_s_out,
+        tag TYPE string,
+        hex TYPE string,
+      END OF ty_s_out.
+
+    DATA lt_used   TYPE HASHED TABLE OF i WITH UNIQUE KEY table_line.
+    DATA lt_queue  TYPE STANDARD TABLE OF i WITH EMPTY KEY.
+    DATA lv_glyph  TYPE i.
+    DATA lv_offset TYPE i.
+    DATA lv_length TYPE i.
+    DATA lv_off    TYPE i.
+    DATA lv_flags  TYPE i.
+    DATA lt_glyf   TYPE string_table.
+    DATA lt_loca   TYPE string_table.
+    DATA lv_pos    TYPE i.
+    DATA lv_hex    TYPE string.
+    DATA lt_out    TYPE STANDARD TABLE OF ty_s_out WITH EMPTY KEY.
+    DATA ls_out    TYPE ty_s_out.
+    DATA lv_bytes  TYPE xstring.
+    DATA lt_file   TYPE string_table.
+    DATA lv_sum    TYPE decfloat34.
+    DATA lv_power  TYPE i VALUE 1.
+    DATA lv_log    TYPE i.
+    DATA lv_x2     TYPE x LENGTH 2.
+    DATA lv_head   TYPE i.
+
+    " the flags of a component of a composite glyph
+    CONSTANTS lc_words    TYPE i VALUE 1.
+    CONSTANTS lc_scale    TYPE i VALUE 8.
+    CONSTANTS lc_more     TYPE i VALUE 32.
+    CONSTANTS lc_xy_scale TYPE i VALUE 64.
+    CONSTANTS lc_two      TYPE i VALUE 128.
+
+    DATA(lv_glyf) = table_offset( `glyf` ).
+
+    " the missing glyph, the glyphs in use and the parts of the composite ones
+    INSERT 0 INTO TABLE lt_queue.
+    LOOP AT mt_glyph ASSIGNING FIELD-SYMBOL(<glyph>).
+      INSERT <glyph>-glyph INTO TABLE lt_queue.
+    ENDLOOP.
+    WHILE lt_queue IS NOT INITIAL.
+      lv_glyph = lt_queue[ 1 ].
+      DELETE lt_queue INDEX 1.
+      IF lv_glyph >= mv_num_glyphs OR line_exists( lt_used[ table_line = lv_glyph ] ).
+        CONTINUE.
+      ENDIF.
+      INSERT lv_glyph INTO TABLE lt_used.
+      glyph_range( EXPORTING glyph  = lv_glyph
+                   IMPORTING offset = lv_offset
+                             length = lv_length ).
+      " fewer than zero contours: a composite glyph
+      IF lv_length < 10.
+        CONTINUE.
+      ENDIF.
+      IF s16( lv_glyf + lv_offset ) >= 0.
+        CONTINUE.
+      ENDIF.
+      lv_off = lv_glyf + lv_offset + 10.
+      DO.
+        lv_flags = u16( lv_off ).
+        INSERT u16( lv_off + 2 ) INTO TABLE lt_queue.
+        lv_off = lv_off + 4.
+        IF lv_flags MOD ( lc_words * 2 ) >= lc_words.
+          lv_off = lv_off + 4.
+        ELSE.
+          lv_off = lv_off + 2.
+        ENDIF.
+        IF lv_flags MOD ( lc_scale * 2 ) >= lc_scale.
+          lv_off = lv_off + 2.
+        ELSEIF lv_flags MOD ( lc_xy_scale * 2 ) >= lc_xy_scale.
+          lv_off = lv_off + 4.
+        ELSEIF lv_flags MOD ( lc_two * 2 ) >= lc_two.
+          lv_off = lv_off + 8.
+        ENDIF.
+        IF lv_flags MOD ( lc_more * 2 ) < lc_more.
+          EXIT.
+        ENDIF.
+      ENDDO.
+    ENDWHILE.
+
+    " glyf: the glyphs in use, each on a four byte boundary; the others
+    " are empty. loca: the long offsets into it
+    lv_glyph = 0.
+    WHILE lv_glyph < mv_num_glyphs.
+      INSERT hex32( lv_pos ) INTO TABLE lt_loca.
+      IF line_exists( lt_used[ table_line = lv_glyph ] ).
+        glyph_range( EXPORTING glyph  = lv_glyph
+                     IMPORTING offset = lv_offset
+                               length = lv_length ).
+        IF lv_length > 0.
+          lv_off = lv_glyf + lv_offset.
+          lv_bytes = mv_content+lv_off(lv_length).
+          lv_hex = lv_bytes.
+          WHILE lv_length MOD 4 <> 0.
+            lv_hex = lv_hex && `00`.
+            lv_length = lv_length + 1.
+          ENDWHILE.
+          INSERT lv_hex INTO TABLE lt_glyf.
+          lv_pos = lv_pos + lv_length.
+        ENDIF.
+      ENDIF.
+      lv_glyph = lv_glyph + 1.
+    ENDWHILE.
+    INSERT hex32( lv_pos ) INTO TABLE lt_loca.
+
+    " the tables a viewer reads
+    LOOP AT mt_table ASSIGNING FIELD-SYMBOL(<table>).
+      CLEAR ls_out.
+      ls_out-tag = <table>-tag.
+      CASE <table>-tag.
+        WHEN `head`.
+          " checkSumAdjustment 0 for now, indexToLocFormat long
+          lv_hex = table_hex( <table>-tag ).
+          ls_out-hex = substring( val = lv_hex
+                                  len = 16 ) && `00000000` &&
+                       substring( val = lv_hex
+                                  off = 24
+                                  len = 76 ) && `0001` &&
+                       substring( val = lv_hex
+                                  off = 104 ).
+        WHEN `glyf`.
+          ls_out-hex = concat_lines_of( lt_glyf ).
+        WHEN `loca`.
+          ls_out-hex = concat_lines_of( lt_loca ).
+        WHEN `hhea` OR `maxp` OR `hmtx` OR `cvt ` OR `fpgm` OR `prep` OR `OS/2` OR `name` OR `post` OR `cmap`.
+          ls_out-hex = table_hex( <table>-tag ).
+        WHEN OTHERS.
+          CONTINUE.
+      ENDCASE.
+      INSERT ls_out INTO TABLE lt_out.
+    ENDLOOP.
+    " in the order of the bytes of their tags: capitals first
+    SORT lt_out BY tag.
+
+    " the offset table: version, number of tables and the search values
+    DATA(lv_count) = lines( lt_out ).
+    WHILE lv_power * 2 <= lv_count.
+      lv_power = lv_power * 2.
+      lv_log = lv_log + 1.
+    ENDWHILE.
+    lv_hex = `00010000`.
+    lv_x2 = lv_count.
+    lv_hex = lv_hex && lv_x2.
+    lv_x2 = lv_power * 16.
+    lv_hex = lv_hex && lv_x2.
+    lv_x2 = lv_log.
+    lv_hex = lv_hex && lv_x2.
+    lv_x2 = lv_count * 16 - lv_power * 16.
+    lv_hex = lv_hex && lv_x2.
+    INSERT lv_hex INTO TABLE lt_file.
+
+    " the directory, then the tables on four byte boundaries
+    lv_pos = 12 + lv_count * 16.
+    LOOP AT lt_out INTO ls_out.
+      lv_length = strlen( ls_out-hex ) / 2.
+      lv_bytes = ls_out-hex.
+      IF ls_out-tag = `head`.
+        lv_head = lv_pos.
+      ENDIF.
+      lv_hex = zabaputil_cl_util_context=>conv_get_xstring_by_string( ls_out-tag ).
+      INSERT lv_hex && hex32( checksum( lv_bytes ) ) && hex32( lv_pos ) && hex32( lv_length ) INTO TABLE lt_file.
+      WHILE lv_length MOD 4 <> 0.
+        lv_length = lv_length + 1.
+      ENDWHILE.
+      lv_pos = lv_pos + lv_length.
+    ENDLOOP.
+    LOOP AT lt_out INTO ls_out.
+      lv_hex = ls_out-hex.
+      WHILE strlen( lv_hex ) MOD 8 <> 0.
+        lv_hex = lv_hex && `00`.
+      ENDWHILE.
+      INSERT lv_hex INTO TABLE lt_file.
+    ENDLOOP.
+    lv_hex = concat_lines_of( lt_file ).
+    lv_bytes = lv_hex.
+
+    " checkSumAdjustment of head: B1B0AFBA minus the checksum of the file
+    lv_sum = ( 2981146554 - checksum( lv_bytes ) ) MOD 4294967296.
+    IF lv_sum < 0.
+      lv_sum = lv_sum + 4294967296.
+    ENDIF.
+    lv_off = ( lv_head + 8 ) * 2.
+    lv_hex = substring( val = lv_hex
+                        len = lv_off ) && hex32( lv_sum ) && substring( val = lv_hex
+                                                                        off = lv_off + 8 ).
+    result = lv_hex.
 
   ENDMETHOD.
 

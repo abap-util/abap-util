@@ -13,6 +13,8 @@ CLASS ltcl_font_ttf DEFINITION FINAL
     METHODS write_objects           FOR TESTING.
     METHODS write_used_glyphs_only  FOR TESTING.
     METHODS write_astral            FOR TESTING.
+    METHODS subset_used_glyphs      FOR TESTING.
+    METHODS subset_name_and_file    FOR TESTING.
     METHODS not_a_font              FOR TESTING.
     METHODS postscript_outlines     FOR TESTING.
     METHODS collection              FOR TESTING.
@@ -31,6 +33,7 @@ CLASS ltcl_font_ttf DEFINITION FINAL
     METHODS font
       IMPORTING
         content       TYPE xstring
+        subset        TYPE abap_bool DEFAULT abap_false
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_if_pdf_font.
 
@@ -98,7 +101,8 @@ CLASS ltcl_font_ttf IMPLEMENTATION.
 
   METHOD font.
     result = NEW zabaputil_cl_pdf_font_ttf( content  = content
-                                            resource = `F1` ).
+                                            resource = `F1`
+                                            subset   = subset ).
   ENDMETHOD.
 
   METHOD rendered.
@@ -219,6 +223,50 @@ CLASS ltcl_font_ttf IMPLEMENTATION.
     cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
     lv_expect = zabaputil_cl_pdf_writer=>hex( `/W [ 3 [800] ]` ).
     cl_abap_unit_assert=>assert_true( xsdbool( lv_hex CS lv_expect ) ).
+  ENDMETHOD.
+
+  METHOD subset_used_glyphs.
+    " A only: the missing glyph and A are kept, B is empty - and the file
+    " is a font that reads as the original did
+    DATA lo_ttf TYPE REF TO zabaputil_cl_pdf_font_ttf.
+    lo_ttf ?= font( content = font_format_4( )
+                    subset  = abap_true ).
+    lo_ttf->zabaputil_if_pdf_font~encode( `A` ).
+    DATA(lv_file) = lo_ttf->file( ).
+    cl_abap_unit_assert=>assert_true( xsdbool( xstrlen( lv_file ) < xstrlen( font_format_4( ) ) ) ).
+
+    DATA(lo_again) = NEW zabaputil_cl_pdf_font_ttf( content  = lv_file
+                                                    resource = `F2` ).
+    cl_abap_unit_assert=>assert_equals( exp = `TestFont` act = lo_again->name( ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lo_again->glyph( 65 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lo_again->glyph( 66 ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `6`
+                                        act = num( lo_again->zabaputil_if_pdf_font~width( val  = `A`
+                                                                                          size = 10 ) ) ).
+    " B has its glyph number still, but nothing to draw: its subset is
+    " the one of A without B
+    lo_ttf ?= font( content = font_format_4( )
+                    subset  = abap_true ).
+    lo_ttf->zabaputil_if_pdf_font~encode( `AB` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( xstrlen( lo_ttf->file( ) ) > xstrlen( lv_file ) ) ).
+    " the 4-byte aligned tables: the file is a multiple of four
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = xstrlen( lv_file ) MOD 4 ).
+  ENDMETHOD.
+
+  METHOD subset_name_and_file.
+    " a subset has a name of its own: six capitals, a plus, the name
+    DATA(lo_font) = font( content = font_format_4( )
+                          subset  = abap_true ).
+    lo_font->encode( `A` ).
+    DATA(lv_hex) = rendered( lo_font ).
+    cl_abap_unit_assert=>assert_true(
+        xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( `+TestFont /Encoding /Identity-H` ) ) ).
+    cl_abap_unit_assert=>assert_false(
+        xsdbool( lv_hex CS zabaputil_cl_pdf_writer=>hex( `/BaseFont /TestFont` ) ) ).
+    " without subsetting the file is embedded as it is
+    DATA lo_ttf TYPE REF TO zabaputil_cl_pdf_font_ttf.
+    lo_ttf ?= font( font_format_4( ) ).
+    cl_abap_unit_assert=>assert_equals( exp = font_format_4( ) act = lo_ttf->file( ) ).
   ENDMETHOD.
 
   METHOD not_a_font.

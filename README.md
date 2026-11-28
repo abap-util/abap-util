@@ -686,7 +686,7 @@ DATA(lv_sample) = zabaputil_cl_pdf_form=>render(
 | `zabaputil_cl_pdf_page` | one page: text, lines, rectangles, ellipses, images, links at fixed positions |
 | `zabaputil_cl_pdf_layout` | flowing content: wrapped paragraphs, tables over several pages (sums, subtotals, carry-over, zebra stripes, line styles; a row higher than a page is cut between its lines), header and footer |
 | `zabaputil_cl_pdf_font_std` | the standard fonts (Helvetica, Times, Courier) with their metrics - Western European text, nothing embedded |
-| `zabaputil_cl_pdf_font_ttf` | an embedded TrueType font (`lo_pdf->font_ttf( lv_ttf )`) - any script the font has glyphs for |
+| `zabaputil_cl_pdf_font_ttf` | an embedded TrueType font (`lo_pdf->font_ttf( lv_ttf )`) - any script the font has glyphs for; only the glyphs in use are embedded (`subset = abap_false` for the whole file) |
 | `zabaputil_cl_pdf_image` | JPEG and PNG images, PNG with transparency |
 | `zabaputil_cl_pdf_form` | a form as data - elements in the flow or at fixed positions, `{NAME}` placeholders for the components of the data - and its printout; an absolute form (`ty_s_form-absolute`) places every element at its x, y, w, h, as a designer with a canvas draws it, and moves what stands below a table - or below a text whose lines need more than its h - to where it ends |
 | `zabaputil_if_pdf_data`, `zabaputil_cl_pdf_data_demo` | the data class of a form - its public attributes are the form's interface - and one by example |
