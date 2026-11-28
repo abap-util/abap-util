@@ -14,6 +14,9 @@ CLASS zabaputil_cl_pdf_barcode DEFINITION
     " written as GS1-128: FNC1 behind the start character, the parentheses
     " left out, and FNC1 behind every value of a variable length that is not
     " the last. The scanner hands over ]C1 0204012345000009 3724 <GS> 10LOT42.
+    " Which identifiers there are and which have a fixed length is what
+    " zabaputil_cl_util_context=>barcode_gs1_build( ) knows - the same that
+    " barcode_gs1_parse( ) reads a scan with.
     "
     " The modules are drawn as bars, nothing else: the quiet zone of ten
     " modules left and right of the symbol is the caller's to leave free.
@@ -81,14 +84,6 @@ CLASS zabaputil_cl_pdf_barcode DEFINITION
         val           TYPE string
       RETURNING
         VALUE(result) TYPE string_table.
-
-    "! Whether the value of an application identifier has a fixed length
-    "! (the GS1 table of predefined lengths, by the first two digits)
-    CLASS-METHODS gs1_fixed
-      IMPORTING
-        ai            TYPE string
-      RETURNING
-        VALUE(result) TYPE abap_bool.
 
     "! How many digits follow from a position on
     CLASS-METHODS digits
@@ -275,16 +270,13 @@ CLASS zabaputil_cl_pdf_barcode IMPLEMENTATION.
 
   METHOD gs1_symbols.
 
+    DATA lt_gs1   TYPE zabaputil_cl_util_context=>ty_t_gs1.
+    DATA ls_gs1   TYPE zabaputil_cl_util_context=>ty_s_gs1.
     DATA lv_rest  TYPE string.
-    DATA lv_ai    TYPE string.
-    DATA lv_value TYPE string.
     DATA lv_close TYPE i.
     DATA lv_next  TYPE i.
-    DATA lt_char  TYPE string_table.
 
-    " (ai)value(ai)value ...: FNC1 first, then each pair - and FNC1 behind
-    " a value that is not of a fixed length and not the last
-    INSERT c_fnc1 INTO TABLE result.
+    " (ai)value(ai)value ... as the pairs of the GS1 element string
     lv_rest = val.
     WHILE lv_rest IS NOT INITIAL.
       lv_close = find( val = lv_rest
@@ -294,48 +286,40 @@ CLASS zabaputil_cl_pdf_barcode IMPLEMENTATION.
           EXPORTING
             val = |Barcode: { val } is no GS1 data - (AI)value(AI)value|.
       ENDIF.
-      lv_ai = substring( val = lv_rest
-                         off = 1
-                         len = lv_close - 1 ).
+      CLEAR ls_gs1.
+      ls_gs1-ai = substring( val = lv_rest
+                             off = 1
+                             len = lv_close - 1 ).
       lv_rest = substring( val = lv_rest
                            off = lv_close + 1 ).
       lv_next = find( val = lv_rest
                       sub = `(` ).
       IF lv_next < 0.
-        lv_value = lv_rest.
+        ls_gs1-value = lv_rest.
         CLEAR lv_rest.
       ELSE.
-        lv_value = substring( val = lv_rest
-                              len = lv_next ).
+        ls_gs1-value = substring( val = lv_rest
+                                  len = lv_next ).
         lv_rest = substring( val = lv_rest
                              off = lv_next ).
       ENDIF.
-      IF lv_ai CN `0123456789`.
-        RAISE EXCEPTION TYPE zabaputil_cx_util_error
-          EXPORTING
-            val = |Barcode: the application identifier { lv_ai } is not a number|.
-      ENDIF.
-
-      lt_char = symbols( |{ lv_ai }{ lv_value }| ).
-      INSERT LINES OF lt_char INTO TABLE result.
-      IF lv_rest IS NOT INITIAL AND gs1_fixed( lv_ai ) = abap_false.
-        INSERT c_fnc1 INTO TABLE result.
-      ENDIF.
+      INSERT ls_gs1 INTO TABLE lt_gs1.
     ENDWHILE.
 
-  ENDMETHOD.
+    " the element string as the utilities of GS1 write it: a group separator
+    " behind every value of a variable length that is followed by another -
+    " where GS1-128 has FNC1. An identifier GS1 does not know raises there
+    DATA(lv_separator) = zabaputil_cl_util_context=>conv_get_string_by_xstring( CONV xstring( `1D` ) ).
+    DATA(lv_data) = zabaputil_cl_util_context=>barcode_gs1_build( lt_gs1 ).
 
-  METHOD gs1_fixed.
-
-    IF strlen( ai ) < 2.
-      RETURN.
-    ENDIF.
-    CASE ai(2).
-      WHEN `00` OR `01` OR `02` OR `03` OR `04` OR `11` OR `12` OR `13` OR `14` OR `15`
-          OR `16` OR `17` OR `18` OR `19` OR `20` OR `31` OR `32` OR `33` OR `34` OR `35`
-          OR `36` OR `41`.
-        result = abap_true.
-    ENDCASE.
+    INSERT c_fnc1 INTO TABLE result.
+    SPLIT lv_data AT lv_separator INTO TABLE DATA(lt_field).
+    LOOP AT lt_field INTO DATA(lv_field).
+      IF sy-tabix > 1.
+        INSERT c_fnc1 INTO TABLE result.
+      ENDIF.
+      INSERT LINES OF symbols( lv_field ) INTO TABLE result.
+    ENDLOOP.
 
   ENDMETHOD.
 

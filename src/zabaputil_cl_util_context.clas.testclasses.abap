@@ -3282,6 +3282,8 @@ CLASS ltcl_rtti_ext DEFINITION FINAL
     METHODS tab_by_comps                   FOR TESTING.
     METHODS table_buffer_reset_no_raise    FOR TESTING.
     METHODS type_exists                    FOR TESTING.
+    METHODS type_nodes_by_name             FOR TESTING.
+    METHODS data_by_nodes                  FOR TESTING.
     METHODS dfies_by_rollname_unknown      FOR TESTING.
     METHODS data_element_text_types        FOR TESTING.
 
@@ -3354,6 +3356,77 @@ CLASS ltcl_rtti_ext IMPLEMENTATION.
     cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>rtti_check_type_exists( `ZABAPUTIL_CL_UTIL_CONTEXT` ) ).
     cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_type_exists( `ZZ_NO_SUCH_TYPE_AT_ALL` ) ).
     cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_type_exists( `` ) ).
+  ENDMETHOD.
+
+  METHOD type_nodes_by_name.
+    " a table of the dictionary: a structure of fields of characters
+    DATA(lt_node) = zabaputil_cl_util_context=>rtti_get_t_type_node_by_name( `zabaputil_t_91` ).
+    cl_abap_unit_assert=>assert_not_initial( lt_node ).
+    cl_abap_unit_assert=>assert_equals( exp = `S` act = lt_node[ 1 ]-kind ).
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = lt_node[ 1 ]-parent ).
+    cl_abap_unit_assert=>assert_true( xsdbool( line_exists( lt_node[ name = `ID` ] ) ) ).
+    DATA(ls_id) = lt_node[ name = `ID` ].
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = ls_id-parent ).
+    cl_abap_unit_assert=>assert_equals( exp = `E` act = ls_id-kind ).
+    cl_abap_unit_assert=>assert_equals( exp = `C` act = ls_id-type ).
+    cl_abap_unit_assert=>assert_equals( exp = 32 act = ls_id-length ).
+    " an elementary type of the language
+    lt_node = zabaputil_cl_util_context=>rtti_get_t_type_node_by_name( `STRING` ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_node ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `STRING` act = lt_node[ 1 ]-type ).
+    " no data type, and no type at all
+    cl_abap_unit_assert=>assert_initial(
+        zabaputil_cl_util_context=>rtti_get_t_type_node_by_name( `ZABAPUTIL_CL_UTIL_CONTEXT` ) ).
+    cl_abap_unit_assert=>assert_initial(
+        zabaputil_cl_util_context=>rtti_get_t_type_node_by_name( `ZZ_NO_SUCH_TYPE_AT_ALL` ) ).
+    cl_abap_unit_assert=>assert_initial( zabaputil_cl_util_context=>rtti_get_t_type_node_by_name( `` ) ).
+  ENDMETHOD.
+
+  METHOD data_by_nodes.
+    FIELD-SYMBOLS <data>  TYPE any.
+    FIELD-SYMBOLS <rows>  TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <field> TYPE any.
+
+    " a structure: a number text, an amount, a table of rows of two
+    " components, a structure without components
+    DATA(lr_data) = zabaputil_cl_util_context=>rtti_create_data_by_nodes( VALUE #(
+        ( id = 1 parent = 0 kind = `S` )
+        ( id = 2 parent = 1 kind = `E` name = `VBELN` type = `N` length = 10 )
+        ( id = 3 parent = 1 kind = `E` name = `AMOUNT` type = `P` length = 8 decimals = 2 )
+        ( id = 4 parent = 1 kind = `T` name = `T_ITEMS` )
+        ( id = 5 parent = 4 kind = `S` )
+        ( id = 6 parent = 5 kind = `E` name = `POS` type = `I` )
+        ( id = 7 parent = 5 kind = `E` name = `TEXT` type = `STRING` )
+        ( id = 8 parent = 1 kind = `S` name = `EMPTY` )
+        ( id = 9 parent = 1 kind = `D` name = `NOWHERE` type = `ZZ_NO_SUCH_TYPE_AT_ALL` ) ) ).
+    cl_abap_unit_assert=>assert_bound( lr_data ).
+    ASSIGN lr_data->* TO <data>.
+
+    ASSIGN COMPONENT `VBELN` OF STRUCTURE <data> TO <field>.
+    cl_abap_unit_assert=>assert_subrc( ).
+    <field> = 42.
+    cl_abap_unit_assert=>assert_equals( exp = `0000000042` act = |{ <field> }| ).
+
+    ASSIGN COMPONENT `AMOUNT` OF STRUCTURE <data> TO <field>.
+    <field> = '12.345'.
+    cl_abap_unit_assert=>assert_equals( exp = `12.35` act = |{ <field> }| ).
+
+    ASSIGN COMPONENT `T_ITEMS` OF STRUCTURE <data> TO <rows>.
+    cl_abap_unit_assert=>assert_subrc( ).
+    INSERT INITIAL LINE INTO TABLE <rows> ASSIGNING FIELD-SYMBOL(<row>).
+    ASSIGN COMPONENT `TEXT` OF STRUCTURE <row> TO <field>.
+    cl_abap_unit_assert=>assert_subrc( ).
+
+    " what cannot be made is a text
+    ASSIGN COMPONENT `EMPTY` OF STRUCTURE <data> TO <field>.
+    <field> = `a text`.
+    cl_abap_unit_assert=>assert_equals( exp = `a text` act = <field> ).
+    ASSIGN COMPONENT `NOWHERE` OF STRUCTURE <data> TO <field>.
+    <field> = `a text`.
+    cl_abap_unit_assert=>assert_equals( exp = `a text` act = <field> ).
+
+    " no type, no data
+    cl_abap_unit_assert=>assert_not_bound( zabaputil_cl_util_context=>rtti_create_data_by_nodes( VALUE #( ) ) ).
   ENDMETHOD.
 
   METHOD dfies_by_rollname_basic.

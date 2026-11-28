@@ -14,6 +14,7 @@ CLASS ltcl_barcode DEFINITION FINAL
     METHODS no_such_character     FOR TESTING.
     METHODS nothing_to_encode     FOR TESTING.
     METHODS no_gs1_data           FOR TESTING.
+    METHODS unknown_identifier    FOR TESTING.
     METHODS bars_drawn            FOR TESTING.
 
 ENDCLASS.
@@ -79,6 +80,18 @@ CLASS ltcl_barcode IMPLEMENTATION.
         zabaputil_cl_pdf_barcode=>code128( `(AB)12` ).
         cl_abap_unit_assert=>fail( `an identifier is a number` ).
       CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD unknown_identifier.
+    " which identifiers there are is what the GS1 utilities of the context
+    " know - 23 is none
+    TRY.
+        zabaputil_cl_pdf_barcode=>code128( `(23)12345` ).
+        cl_abap_unit_assert=>fail( `23 is no application identifier` ).
+      CATCH zabaputil_cx_util_error INTO DATA(lx_error).
+        cl_abap_unit_assert=>assert_char_cp( exp = `*(23)*`
+                                             act = lx_error->get_text( ) ).
     ENDTRY.
   ENDMETHOD.
 
