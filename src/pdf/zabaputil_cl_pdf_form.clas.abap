@@ -34,6 +34,12 @@ CLASS zabaputil_cl_pdf_form DEFINITION
     " what the form prints. A form names the class of such an object as its
     " data class (zabaputil_if_pdf_data), which is how an editor knows the
     " fields it can offer and what to show in a preview.
+    "
+    " A data class carries its form itself, as the text its get( ) returns
+    " (stringify( ) writes it, parse( ) reads it). Then one object is the
+    " whole form, and print( ) is all a caller needs:
+    "
+    "   DATA(lv_pdf) = zabaputil_cl_pdf_form=>print( lo_delivery_note ).
 
     CONSTANTS:
       BEGIN OF cs_type,
@@ -188,15 +194,61 @@ CLASS zabaputil_cl_pdf_form DEFINITION
       RETURNING
         VALUE(result) TYPE ty_t_field.
 
-    "! An instance of a data class with the values for a preview. Raises
-    "! when the name is no class that implements zabaputil_if_pdf_data, or
-    "! one that cannot be created without parameters
+    "! A form as text: what get( ) of a data class returns. XML, written the
+    "! same on every release and runtime, without what is initial:
+    "! <form version="1"><FORMAT>A4</FORMAT>...<T_ELEMENT><item>...</item></T_ELEMENT></form>
+    "! @parameter val | the form
+    CLASS-METHODS stringify
+      IMPORTING
+        val           TYPE ty_s_form
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! The form of a text stringify( ) wrote. An empty text is an empty form
+    "! (new_form( )); a component the text has and the form does not is read
+    "! past, one it does not have is initial. Raises when the text is no form
+    "! @parameter val | the text
+    CLASS-METHODS parse
+      IMPORTING
+        val           TYPE clike
+      RETURNING
+        VALUE(result) TYPE ty_s_form.
+
+    "! The form of a data class: what its get( ) returns, with the class as
+    "! the form's data class
+    "! @parameter data | an instance of the data class
+    CLASS-METHODS form_of
+      IMPORTING
+        data          TYPE REF TO zabaputil_if_pdf_data
+      RETURNING
+        VALUE(result) TYPE ty_s_form.
+
+    "! The PDF file of a data class: its form, printed with its attributes
+    "! @parameter data | an instance of the data class, its attributes filled
+    CLASS-METHODS print
+      IMPORTING
+        data          TYPE REF TO zabaputil_if_pdf_data
+      RETURNING
+        VALUE(result) TYPE xstring.
+
+    "! An instance of a data class with values for a preview: what the class
+    "! leaves initial gets a sample value - a text its name, a number a
+    "! number, a table three rows. Raises when the name is no class that
+    "! implements zabaputil_if_pdf_data, or one that cannot be created
+    "! without parameters
     "! @parameter val | the name of the class, as a form carries it
     CLASS-METHODS data_sample
       IMPORTING
         val           TYPE clike
       RETURNING
         VALUE(result) TYPE REF TO zabaputil_if_pdf_data.
+
+    "! Sample values into what is initial of a structure, or of the public
+    "! attributes of an object - what data_sample( ) does for a data class
+    "! @parameter data | the structure or the object reference
+    CLASS-METHODS sample
+      CHANGING
+        data TYPE any.
 
     "! A text with its placeholders replaced by the components of the data
     "! @parameter val  | the text, `Dear {NAME}`
@@ -213,6 +265,8 @@ CLASS zabaputil_cl_pdf_form DEFINITION
 
   PRIVATE SECTION.
 
+    "! the element the text of a form is
+    CONSTANTS c_root  TYPE string VALUE `form`.
     CONSTANTS c_font  TYPE string VALUE `Helvetica`.
     CONSTANTS c_color TYPE string VALUE `000000`.
     CONSTANTS c_size  TYPE f VALUE 10.
@@ -254,6 +308,59 @@ CLASS zabaputil_cl_pdf_form DEFINITION
         depth  TYPE i
       CHANGING
         result TYPE ty_t_field.
+
+    "! Sample values into the components of a structure, or the public
+    "! attributes of an object, that are initial
+    "! @parameter row  | the row of a table the node is, 0 for none
+    "! @parameter node | the structure or the object reference
+    CLASS-METHODS sample_fill
+      IMPORTING
+        row   TYPE i
+        depth TYPE i
+      CHANGING
+        node  TYPE any.
+
+    "! The content of an element of the text of a form: the components of a
+    "! structure that are not initial, the rows of a table, a value
+    CLASS-METHODS xml_of
+      IMPORTING
+        node          TYPE any
+      RETURNING
+        VALUE(result) TYPE string.
+
+    "! The element that opens at or behind a position. No functional method:
+    "! one with a CHANGING parameter does not compile before release 7.40
+    "! @parameter name  | the name of the element
+    "! @parameter empty | the element is written as <NAME/>
+    "! @parameter pos   | where to look; behind the tag afterwards
+    CLASS-METHODS xml_open
+      IMPORTING
+        xml   TYPE string
+      EXPORTING
+        name  TYPE string
+        empty TYPE abap_bool
+      CHANGING
+        pos   TYPE i.
+
+    "! What an element holds, into a structure, a table or a field
+    "! @parameter pos  | behind the opening tag; behind the closing tag afterwards
+    "! @parameter node | what the element is read into
+    CLASS-METHODS xml_read
+      IMPORTING
+        xml  TYPE string
+      CHANGING
+        pos  TYPE i
+        node TYPE any.
+
+    "! A sample value for a single field, by its type
+    "! @parameter name | what the field is called
+    "! @parameter row  | the row of a table the field is in, 0 for none
+    CLASS-METHODS sample_value
+      IMPORTING
+        name  TYPE string
+        row   TYPE i
+      CHANGING
+        value TYPE any.
 
     "! The font of an element
     CLASS-METHODS element_font
@@ -726,7 +833,447 @@ CLASS zabaputil_cl_pdf_form IMPLEMENTATION.
             val      = |PDF: { lv_class } cannot be created - a data class needs a constructor without parameters|
             previous = lx_create.
     ENDTRY.
-    result->fill_sample( ).
+    sample_fill( EXPORTING row   = 0
+                           depth = 0
+                 CHANGING  node  = result ).
+
+  ENDMETHOD.
+
+  METHOD sample.
+
+    sample_fill( EXPORTING row   = 0
+                           depth = 0
+                 CHANGING  node  = data ).
+
+  ENDMETHOD.
+
+  METHOD sample_fill.
+
+    DATA lr_row    TYPE REF TO data.
+    DATA lv_number TYPE i.
+
+    FIELD-SYMBOLS <component> TYPE any.
+    FIELD-SYMBOLS <rows>      TYPE ANY TABLE.
+    FIELD-SYMBOLS <row>       TYPE any.
+
+    " a structure in a structure in a table: deep enough for a form
+    IF depth > 3.
+      RETURN.
+    ENDIF.
+
+    LOOP AT component_names( node ) INTO DATA(lv_name).
+      DATA(lr_component) = component_of( node = node
+                                         name = lv_name ).
+      IF lr_component IS NOT BOUND.
+        CONTINUE.
+      ENDIF.
+      ASSIGN lr_component->* TO <component>.
+      " what the class set itself is what the preview shows
+      IF <component> IS NOT INITIAL.
+        CONTINUE.
+      ENDIF.
+
+      CASE zabaputil_cl_util_context=>rtti_get_type_kind( <component> ).
+
+        WHEN `u` OR `v`.
+          sample_fill( EXPORTING row   = row
+                                 depth = depth + 1
+                       CHANGING  node  = <component> ).
+
+        WHEN `h`.
+          " three rows, numbered - enough to see a table as a table
+          ASSIGN <component> TO <rows>.
+          CREATE DATA lr_row LIKE LINE OF <rows>.
+          ASSIGN lr_row->* TO <row>.
+          DO 3 TIMES.
+            lv_number = sy-index.
+            CLEAR <row>.
+            DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( <row> ).
+            IF lv_kind = `u` OR lv_kind = `v`.
+              sample_fill( EXPORTING row   = lv_number
+                                     depth = depth + 1
+                           CHANGING  node  = <row> ).
+            ELSE.
+              sample_value( EXPORTING name  = lv_name
+                                      row   = lv_number
+                            CHANGING  value = <row> ).
+            ENDIF.
+            " a row a unique key refuses is one row less to look at
+            INSERT <row> INTO TABLE <rows>.
+            IF sy-subrc <> 0.
+              CONTINUE.
+            ENDIF.
+          ENDDO.
+
+        WHEN OTHERS.
+          sample_value( EXPORTING name  = lv_name
+                                  row   = row
+                        CHANGING  value = <component> ).
+
+      ENDCASE.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD sample_value.
+
+    DATA lv_count  TYPE i.
+    DATA lv_amount TYPE p LENGTH 8 DECIMALS 2.
+
+    lv_count = row.
+    IF lv_count < 1.
+      lv_count = 1.
+    ENDIF.
+
+    " a value that does not fit its field - a number in one digit - leaves
+    " the field as it is
+    TRY.
+        CASE zabaputil_cl_util_context=>rtti_get_type_kind( value ).
+
+          WHEN `g` OR `C`.
+            " the name of the field: a preview shows what is printed where
+            IF row > 0.
+              value = |{ name } { row }|.
+            ELSE.
+              value = name.
+            ENDIF.
+
+          WHEN `N`.
+            value = lv_count.
+
+          WHEN `D`.
+            value = `20260131`.
+
+          WHEN `T`.
+            value = `120000`.
+
+          WHEN `I` OR `b` OR `s` OR `8`.
+            value = lv_count * 10.
+
+          WHEN `P` OR `F` OR `a` OR `e`.
+            lv_amount = lv_count * 25.
+            value = lv_amount / 2.
+
+        ENDCASE.
+      CATCH cx_sy_conversion_error cx_sy_arithmetic_error.
+        CLEAR value.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD stringify.
+
+    " XML, but neither written nor read by the identity transformation:
+    " what that writes and accepts differs between a system and the
+    " transpiled runtime (an initial component as <FILL/>, as <FILL> </FILL>
+    " or not at all; bytes as base64 or as hex), and a form is designed on
+    " one and pasted into the other. xml_of( ) and xml_read( ) are plain
+    " string handling, the same everywhere. What is initial is not written:
+    " that is more than half of a form, and it is initial again when the
+    " text is read.
+    result = |<{ c_root } version="1">{ xml_of( val ) }</{ c_root }>|.
+
+  ENDMETHOD.
+
+  METHOD xml_of.
+
+    DATA lv_text TYPE string.
+
+    FIELD-SYMBOLS <component> TYPE any.
+    FIELD-SYMBOLS <rows>      TYPE ANY TABLE.
+    FIELD-SYMBOLS <row>       TYPE any.
+
+    DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( node ).
+    CASE lv_kind.
+
+      WHEN `u` OR `v`.
+        LOOP AT component_names( node ) INTO DATA(lv_name).
+          ASSIGN COMPONENT lv_name OF STRUCTURE node TO <component>.
+          IF sy-subrc <> 0 OR <component> IS INITIAL.
+            CONTINUE.
+          ENDIF.
+          result = |{ result }<{ lv_name }>{ xml_of( <component> ) }</{ lv_name }>|.
+        ENDLOOP.
+
+      WHEN `h`.
+        ASSIGN node TO <rows>.
+        LOOP AT <rows> ASSIGNING <row>.
+          result = |{ result }<item>{ xml_of( <row> ) }</item>|.
+        ENDLOOP.
+
+      WHEN `X` OR `y`.
+        " bytes - an image - as base64
+        result = zabaputil_cl_util_context=>conv_encode_x_base64( node ).
+
+      WHEN `r` OR `l`.
+        " a reference is nothing a text can hold
+        RETURN.
+
+      WHEN OTHERS.
+        lv_text = node.
+        " a number moved to a text has its sign behind it: a blank, or a minus
+        IF lv_kind CA `IPbs8Fae`.
+          lv_text = condense( lv_text ).
+          IF strlen( lv_text ) > 1 AND substring( val = lv_text
+                                                  off = strlen( lv_text ) - 1 ) = `-`.
+            lv_text = `-` && substring( val = lv_text
+                                        len = strlen( lv_text ) - 1 ).
+          ENDIF.
+        ENDIF.
+        lv_text = replace( val  = lv_text
+                           sub  = `&`
+                           with = `&amp;`
+                           occ  = 0 ).
+        lv_text = replace( val  = lv_text
+                           sub  = `<`
+                           with = `&lt;`
+                           occ  = 0 ).
+        lv_text = replace( val  = lv_text
+                           sub  = `>`
+                           with = `&gt;`
+                           occ  = 0 ).
+        " a line break as a character reference: the text is kept in ABAP
+        " literals, which end at the end of a line
+        lv_text = replace( val  = lv_text
+                           sub  = |\r|
+                           with = `&#13;`
+                           occ  = 0 ).
+        lv_text = replace( val  = lv_text
+                           sub  = |\n|
+                           with = `&#10;`
+                           occ  = 0 ).
+        result = replace( val  = lv_text
+                          sub  = |\t|
+                          with = `&#9;`
+                          occ  = 0 ).
+
+    ENDCASE.
+
+  ENDMETHOD.
+
+  METHOD parse.
+
+    DATA lv_pos  TYPE i.
+    DATA lv_name TYPE string.
+
+    " a class that has no form yet returns nothing: an empty page to start on
+    DATA(lv_text) = condense( val ).
+    IF lv_text IS INITIAL.
+      result = new_form( ).
+      RETURN.
+    ENDIF.
+
+    xml_open( EXPORTING xml  = lv_text
+              IMPORTING name = lv_name
+              CHANGING  pos  = lv_pos ).
+    IF lv_name <> c_root.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |PDF: the text is no form - it starts with <{ lv_name }>, not with <{ c_root }>|.
+    ENDIF.
+    xml_read( EXPORTING xml  = lv_text
+              CHANGING  pos  = lv_pos
+                        node = result ).
+
+  ENDMETHOD.
+
+  METHOD xml_open.
+
+    " at an opening tag: its name, and `pos` behind its `>`
+    DATA(lv_start) = find( val = xml
+                           sub = `<`
+                           off = pos ).
+    DATA(lv_end) = -1.
+    IF lv_start >= 0.
+      lv_end = find( val = xml
+                     sub = `>`
+                     off = lv_start ).
+    ENDIF.
+    IF lv_start < 0 OR lv_end < 0.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = |PDF: the text is no form - no element at position { pos }|.
+    ENDIF.
+
+    name = substring( val = xml
+                      off = lv_start + 1
+                      len = lv_end - lv_start - 1 ).
+    pos = lv_end + 1.
+    " <NAME/> is an element without content: nothing to read, nothing to close
+    empty = xsdbool( strlen( name ) > 0 AND substring( val = name
+                                                         off = strlen( name ) - 1 ) = `/` ).
+    IF empty = abap_true.
+      name = substring( val = name
+                        len = strlen( name ) - 1 ).
+    ENDIF.
+    " attributes - the version of the form - are not part of the name
+    DATA(lv_blank) = find( val = name
+                           sub = ` ` ).
+    IF lv_blank >= 0.
+      name = substring( val = name
+                        len = lv_blank ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD xml_read.
+
+    DATA lr_row   TYPE REF TO data.
+    DATA lv_empty TYPE abap_bool.
+    DATA lv_text  TYPE string.
+    DATA lv_skip  TYPE string.
+    DATA lv_name  TYPE string.
+
+    FIELD-SYMBOLS <component> TYPE any.
+    FIELD-SYMBOLS <rows>      TYPE ANY TABLE.
+    FIELD-SYMBOLS <row>       TYPE any.
+
+    " `pos` is behind an opening tag: read what the element holds into the
+    " node, and leave `pos` behind the closing tag
+    DATA(lv_kind) = zabaputil_cl_util_context=>rtti_get_type_kind( node ).
+    IF lv_kind = `h`.
+      ASSIGN node TO <rows>.
+    ENDIF.
+
+    DO.
+      DATA(lv_next) = find( val = xml
+                            sub = `<`
+                            off = pos ).
+      IF lv_next < 0.
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val = |PDF: the text is no form - it ends inside an element (position { pos })|.
+      ENDIF.
+
+      " the text up to the next tag is the value of a field
+      IF lv_kind <> `u` AND lv_kind <> `v` AND lv_kind <> `h` AND lv_next > pos.
+        lv_text = lv_text && substring( val = xml
+                                        off = pos
+                                        len = lv_next - pos ).
+      ENDIF.
+      pos = lv_next.
+
+      IF strlen( xml ) > pos + 1 AND substring( val = xml
+                                               off = pos + 1
+                                               len = 1 ) = `/`.
+        " the closing tag of this element
+        DATA(lv_close) = find( val = xml
+                               sub = `>`
+                               off = pos ).
+        IF lv_close < 0.
+          RAISE EXCEPTION TYPE zabaputil_cx_util_error
+            EXPORTING
+              val = |PDF: the text is no form - a tag is not closed (position { pos })|.
+        ENDIF.
+        pos = lv_close + 1.
+        EXIT.
+      ENDIF.
+
+      " an element inside this one
+      xml_open( EXPORTING xml   = xml
+                IMPORTING name  = lv_name
+                          empty = lv_empty
+                CHANGING  pos   = pos ).
+      CASE lv_kind.
+
+        WHEN `u` OR `v`.
+          " a component - one the structure does not have (a form written
+          " by a newer release) is read past
+          ASSIGN COMPONENT lv_name OF STRUCTURE node TO <component>.
+          IF sy-subrc <> 0.
+            ASSIGN lv_skip TO <component>.
+          ENDIF.
+          IF lv_empty = abap_false.
+            xml_read( EXPORTING xml  = xml
+                      CHANGING  pos  = pos
+                                node = <component> ).
+          ENDIF.
+
+        WHEN `h`.
+          " a row
+          CREATE DATA lr_row LIKE LINE OF <rows>.
+          ASSIGN lr_row->* TO <row>.
+          IF lv_empty = abap_false.
+            xml_read( EXPORTING xml  = xml
+                      CHANGING  pos  = pos
+                                node = <row> ).
+          ENDIF.
+          INSERT <row> INTO TABLE <rows>.
+          IF sy-subrc <> 0.
+            CONTINUE.
+          ENDIF.
+
+        WHEN OTHERS.
+          " an element where a value is expected: read past it
+          IF lv_empty = abap_false.
+            xml_read( EXPORTING xml  = xml
+                      CHANGING  pos  = pos
+                                node = lv_skip ).
+          ENDIF.
+
+      ENDCASE.
+    ENDDO.
+
+    CASE lv_kind.
+      WHEN `u` OR `v` OR `h` OR `r` OR `l`.
+        RETURN.
+    ENDCASE.
+
+    lv_text = replace( val  = lv_text
+                       sub  = `&lt;`
+                       with = `<`
+                       occ  = 0 ).
+    lv_text = replace( val  = lv_text
+                       sub  = `&gt;`
+                       with = `>`
+                       occ  = 0 ).
+    lv_text = replace( val  = lv_text
+                       sub  = `&#13;`
+                       with = |\r|
+                       occ  = 0 ).
+    lv_text = replace( val  = lv_text
+                       sub  = `&#10;`
+                       with = |\n|
+                       occ  = 0 ).
+    lv_text = replace( val  = lv_text
+                       sub  = `&#9;`
+                       with = |\t|
+                       occ  = 0 ).
+    lv_text = replace( val  = lv_text
+                       sub  = `&amp;`
+                       with = `&`
+                       occ  = 0 ).
+    TRY.
+        IF lv_kind = `X` OR lv_kind = `y`.
+          node = zabaputil_cl_util_context=>conv_decode_x_base64( lv_text ).
+        ELSE.
+          node = lv_text.
+        ENDIF.
+      CATCH cx_root INTO DATA(lx_value).
+        RAISE EXCEPTION TYPE zabaputil_cx_util_error
+          EXPORTING
+            val      = |PDF: the text is no form - "{ lv_text }" is no value of its field|
+            previous = lx_value.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD form_of.
+
+    IF data IS NOT BOUND.
+      RAISE EXCEPTION TYPE zabaputil_cx_util_error
+        EXPORTING
+          val = `PDF: no data class to take the form from`.
+    ENDIF.
+    result = parse( data->get( ) ).
+    result-data_class = zabaputil_cl_util_context=>rtti_get_classname_by_ref( data ).
+
+  ENDMETHOD.
+
+  METHOD print.
+
+    result = render( val  = form_of( data )
+                     data = data ).
 
   ENDMETHOD.
 
