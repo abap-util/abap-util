@@ -2983,10 +2983,29 @@ CLASS ltcl_zip_ops DEFINITION FINAL
     METHODS pack_basic                     FOR TESTING.
     METHODS pack_empty                     FOR TESTING.
     METHODS roundtrip                      FOR TESTING.
+    METHODS unpack_no_archive              FOR TESTING.
 
 ENDCLASS.
 
 CLASS ltcl_zip_ops IMPLEMENTATION.
+
+  METHOD unpack_no_archive.
+    DATA lo_probe TYPE REF TO object.
+    TRY.
+        CREATE OBJECT lo_probe TYPE ('CL_ABAP_ZIP').
+      CATCH cx_root.
+        RETURN.
+    ENDTRY.
+
+    " bytes that are no archive raise the one exception of this
+    " repository - the ZIP class reports them with a classic exception,
+    " which nobody took: a dump
+    TRY.
+        zabaputil_cl_util_context=>zip_unpack( CONV xstring( `48656C6C6F2C20776F726C6421` ) ).
+        cl_abap_unit_assert=>fail( `data that is no archive has to raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+  ENDMETHOD.
 
   METHOD pack_basic.
     DATA lo_probe TYPE REF TO object.
@@ -3386,6 +3405,164 @@ CLASS ltcl_transport_ops IMPLEMENTATION.
 
 ENDCLASS.
 
+
+"! ================================================================
+"! TABLE OF STRINGS BY NAMES, TYPE KINDS
+"! ================================================================
+CLASS ltcl_tab_by_names DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+
+    METHODS string_columns                 FOR TESTING.
+    METHODS type_kinds                     FOR TESTING.
+
+ENDCLASS.
+
+CLASS ltcl_tab_by_names IMPLEMENTATION.
+
+  METHOD string_columns.
+    FIELD-SYMBOLS <tab> TYPE STANDARD TABLE.
+
+    DATA(lr_tab) = zabaputil_cl_util_context=>rtti_create_tab_by_names(
+                       VALUE #( ( `ORDER_ID` ) ( `TEXT` ) ) ).
+    ASSIGN lr_tab->* TO <tab>.
+    cl_abap_unit_assert=>assert_initial( <tab> ).
+
+    INSERT INITIAL LINE INTO TABLE <tab> ASSIGNING FIELD-SYMBOL(<row>).
+    ASSIGN COMPONENT `TEXT` OF STRUCTURE <row> TO FIELD-SYMBOL(<text>).
+    cl_abap_unit_assert=>assert_subrc( ).
+    " a string: nothing of a long value is cut off
+    <text> = repeat( val = `x`
+                     occ = 500 ).
+    cl_abap_unit_assert=>assert_equals( exp = 500
+                                        act = strlen( <text> ) ).
+    " two names, two components
+    ASSIGN COMPONENT 3 OF STRUCTURE <row> TO <text>.
+    cl_abap_unit_assert=>assert_subrc( exp = 4 ).
+  ENDMETHOD.
+
+  METHOD type_kinds.
+    DATA lv_char   TYPE c LENGTH 3.
+    DATA lv_numc   TYPE n LENGTH 3.
+    DATA lv_string TYPE string.
+    DATA lv_hex    TYPE x LENGTH 2.
+    DATA lv_bytes  TYPE xstring.
+    DATA lv_packed TYPE p LENGTH 8 DECIMALS 2.
+
+    cl_abap_unit_assert=>assert_equals( exp = zabaputil_cl_util_context=>cv_typedescr_typekind_char
+                                        act = zabaputil_cl_util_context=>rtti_get_type_kind( lv_char ) ).
+    cl_abap_unit_assert=>assert_equals( exp = zabaputil_cl_util_context=>cv_typedescr_typekind_num
+                                        act = zabaputil_cl_util_context=>rtti_get_type_kind( lv_numc ) ).
+    cl_abap_unit_assert=>assert_equals( exp = zabaputil_cl_util_context=>cv_typedescr_typekind_string
+                                        act = zabaputil_cl_util_context=>rtti_get_type_kind( lv_string ) ).
+    cl_abap_unit_assert=>assert_equals( exp = zabaputil_cl_util_context=>cv_typedescr_typekind_hex
+                                        act = zabaputil_cl_util_context=>rtti_get_type_kind( lv_hex ) ).
+    cl_abap_unit_assert=>assert_equals( exp = zabaputil_cl_util_context=>cv_typedescr_typekind_xstring
+                                        act = zabaputil_cl_util_context=>rtti_get_type_kind( lv_bytes ) ).
+
+    " a number by its type kind - a NUMC and a text are none
+    cl_abap_unit_assert=>assert_true( zabaputil_cl_util_context=>rtti_check_typekind_number(
+                                          zabaputil_cl_util_context=>rtti_get_type_kind( lv_packed ) ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_typekind_number(
+                                           zabaputil_cl_util_context=>rtti_get_type_kind( lv_numc ) ) ).
+    cl_abap_unit_assert=>assert_false( zabaputil_cl_util_context=>rtti_check_typekind_number(
+                                           zabaputil_cl_util_context=>rtti_get_type_kind( lv_string ) ) ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+"! ================================================================
+"! XML PULL READER
+"! ================================================================
+CLASS ltcl_xml_reader DEFINITION FINAL
+  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+  PRIVATE SECTION.
+
+    METHODS read
+      IMPORTING
+        xml           TYPE string
+      RETURNING
+        VALUE(result) TYPE string.
+
+    METHODS nodes_in_order                 FOR TESTING.
+    METHODS attributes                     FOR TESTING.
+    METHODS entities_and_blanks            FOR TESTING.
+    METHODS namespace_prefix               FOR TESTING.
+    METHODS broken_document                FOR TESTING.
+
+ENDCLASS.
+
+CLASS ltcl_xml_reader IMPLEMENTATION.
+
+  METHOD read.
+    " every node as one token: +name[attr=value] for an opening, =value for
+    " a text, -name for an end
+    DATA lv_kind  TYPE string.
+    DATA lv_name  TYPE string.
+    DATA lv_value TYPE string.
+    DATA lt_attr  TYPE zabaputil_cl_util_context=>ty_t_xml_attribute.
+
+    DATA(lo_reader) = zabaputil_cl_util_context=>xml_reader_create(
+                          zabaputil_cl_util_context=>conv_get_xstring_by_string( xml ) ).
+    DO.
+      zabaputil_cl_util_context=>xml_reader_next( EXPORTING reader      = lo_reader
+                                                  IMPORTING kind        = lv_kind
+                                                            name        = lv_name
+                                                            value       = lv_value
+                                                            t_attribute = lt_attr ).
+      CASE lv_kind.
+        WHEN zabaputil_cl_util_context=>cs_xml_node-open.
+          result = |{ result }+{ lv_name }|.
+          LOOP AT lt_attr INTO DATA(ls_attr).
+            result = |{ result }[{ ls_attr-name }={ ls_attr-value }]|.
+          ENDLOOP.
+        WHEN zabaputil_cl_util_context=>cs_xml_node-value.
+          result = |{ result }={ lv_value }|.
+        WHEN zabaputil_cl_util_context=>cs_xml_node-close.
+          result = |{ result }-{ lv_name }|.
+        WHEN OTHERS.
+          EXIT.
+      ENDCASE.
+    ENDDO.
+  ENDMETHOD.
+
+  METHOD nodes_in_order.
+    cl_abap_unit_assert=>assert_equals( exp = `+a+b=1-b+c-c-a`
+                                        act = read( `<a><b>1</b><c/></a>` ) ).
+  ENDMETHOD.
+
+  METHOD attributes.
+    cl_abap_unit_assert=>assert_equals(
+        exp = `+row[r=2][spans=1:3]+c[r=A2][t=s]-c-row`
+        act = read( `<?xml version="1.0" encoding="UTF-8"?><row r="2" spans="1:3"><c r="A2" t="s"/></row>` ) ).
+  ENDMETHOD.
+
+  METHOD entities_and_blanks.
+    " an entity arrives decoded, and a text of blanks only is kept
+    cl_abap_unit_assert=>assert_equals( exp = `+a+t=a&b<c-t+t=  -t-a`
+                                        act = read( `<a><t>a&amp;b&lt;c</t><t>  </t></a>` ) ).
+  ENDMETHOD.
+
+  METHOD namespace_prefix.
+    " the name without its prefix, on an element and on an attribute
+    DATA(lv_act) = read( `<x:a xmlns:x="urn:x" xmlns:r="urn:r"><x:b r:id="rId1"/></x:a>` ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_act CS `+b[id=rId1]-b-a` ) ).
+    cl_abap_unit_assert=>assert_equals( exp = `+a`
+                                        act = substring( val = lv_act
+                                                         len = 2 ) ).
+  ENDMETHOD.
+
+  METHOD broken_document.
+    TRY.
+        read( `<a><b></a>` ).
+        cl_abap_unit_assert=>fail( `a document that is not well-formed has to raise` ).
+      CATCH zabaputil_cx_util_error ##NO_HANDLER.
+    ENDTRY.
+  ENDMETHOD.
+
+ENDCLASS.
 
 "! ================================================================
 "! XLSX CONVERSION
