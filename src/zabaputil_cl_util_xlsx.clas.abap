@@ -453,6 +453,14 @@ CLASS zabaputil_cl_util_xlsx DEFINITION
       RETURNING
         VALUE(result) TYPE string.
 
+    "! a relationships part with its one relationship, as the bytes of the file
+    CLASS-METHODS rels_xml
+      IMPORTING
+        kind          TYPE string
+        target        TYPE string
+      RETURNING
+        VALUE(result) TYPE xstring.
+
     METHODS table_xml
       IMPORTING
         id            TYPE i
@@ -1515,8 +1523,12 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     IF totals = abap_true.
       lv_totals = ` totalsRowCount="1"`.
     ENDIF.
+    " one piece per INSERT, here and wherever a part is put together: the
+    " 7.02 downport writes the operands of a `&&` in an INSERT on one line,
+    " and a line of more than 255 characters is cut on import
     INSERT |{ cv_xml_head }<table xmlns="{ cs_ns-main }" id="{ id }" name="{ name }" displayName="{ name }"|
-        && | ref="{ range }"{ lv_totals }>| INTO TABLE lt_xml.
+           INTO TABLE lt_xml.
+    INSERT | ref="{ range }"{ lv_totals }>| INTO TABLE lt_xml.
     IF filter IS NOT INITIAL.
       INSERT |<autoFilter ref="{ filter }"/>| INTO TABLE lt_xml.
     ENDIF.
@@ -1528,8 +1540,8 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
       ELSEIF lr_col->total_label IS NOT INITIAL.
         lv_total = | totalsRowLabel="{ zabaputil_cl_util_context=>c_escape_xml( lr_col->total_label ) }"|.
       ENDIF.
-      INSERT |<tableColumn id="{ sy-tabix }" name="{ zabaputil_cl_util_context=>c_escape_xml( lr_col->header ) }"|
-          && |{ lv_total }/>| INTO TABLE lt_xml.
+      DATA(lv_column) = zabaputil_cl_util_context=>c_escape_xml( lr_col->header ).
+      INSERT |<tableColumn id="{ sy-tabix }" name="{ lv_column }"{ lv_total }/>| INTO TABLE lt_xml.
     ENDLOOP.
     DATA(lv_rows) = `1`.
     IF layout-no_row_stripes = abap_true.
@@ -1539,10 +1551,19 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     IF layout-column_stripes = abap_true.
       lv_columns = `1`.
     ENDIF.
-    INSERT |</tableColumns><tableStyleInfo name="{ zabaputil_cl_util_context=>c_escape_xml( layout-table_style ) }"|
-        && | showFirstColumn="0" showLastColumn="0" showRowStripes="{ lv_rows }"|
-        && | showColumnStripes="{ lv_columns }"/></table>| INTO TABLE lt_xml.
+    DATA(lv_style) = zabaputil_cl_util_context=>c_escape_xml( layout-table_style ).
+    INSERT |</tableColumns><tableStyleInfo name="{ lv_style }" showFirstColumn="0" showLastColumn="0"|
+           INTO TABLE lt_xml.
+    INSERT | showRowStripes="{ lv_rows }" showColumnStripes="{ lv_columns }"/></table>| INTO TABLE lt_xml.
     result = concat_lines_of( lt_xml ).
+
+  ENDMETHOD.
+
+  METHOD rels_xml.
+
+    DATA(lv_xml) = |{ cv_xml_head }<Relationships xmlns="{ cs_ns-pkg_rel }">|.
+    lv_xml = |{ lv_xml }<Relationship Id="rId1" Type="{ cs_ns-rel }/{ kind }" Target="{ target }"/></Relationships>|.
+    result = zabaputil_cl_util_context=>conv_get_xstring_by_string( lv_xml ).
 
   ENDMETHOD.
 
@@ -1567,11 +1588,16 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     " font 0 the default, font 1 the bold one of a header row; the two fills
     " and the one border are what Excel expects to find
     INSERT `<fonts count="2"><font><sz val="11"/><name val="Calibri"/><family val="2"/></font>`
-        && `<font><b/><sz val="11"/><name val="Calibri"/><family val="2"/></font></fonts>`
-        && `<fills count="2"><fill><patternFill patternType="none"/></fill>`
-        && `<fill><patternFill patternType="gray125"/></fill></fills>`
-        && `<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>`
-        && `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>`
+           INTO TABLE lt_xml.
+    INSERT `<font><b/><sz val="11"/><name val="Calibri"/><family val="2"/></font></fonts>`
+           INTO TABLE lt_xml.
+    INSERT `<fills count="2"><fill><patternFill patternType="none"/></fill>`
+           INTO TABLE lt_xml.
+    INSERT `<fill><patternFill patternType="gray125"/></fill></fills>`
+           INTO TABLE lt_xml.
+    INSERT `<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>`
+           INTO TABLE lt_xml.
+    INSERT `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>`
            INTO TABLE lt_xml.
     INSERT |<cellXfs count="{ lines( mt_xf ) }">| INTO TABLE lt_xml.
     LOOP AT mt_xf REFERENCE INTO DATA(lr_xf).
@@ -1588,7 +1614,8 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
              INTO TABLE lt_xml.
     ENDLOOP.
     INSERT `</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>`
-        && `</styleSheet>` INTO TABLE lt_xml.
+           INTO TABLE lt_xml.
+    INSERT `</styleSheet>` INTO TABLE lt_xml.
     result = concat_lines_of( lt_xml ).
 
   ENDMETHOD.
@@ -1614,23 +1641,26 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
              INTO TABLE mt_out_sheet.
     ENDIF.
 
-    INSERT |{ cv_xml_head }<Types xmlns="{ cs_ns-types }">|
-        && `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>`
-        && `<Default Extension="xml" ContentType="application/xml"/>`
-        && |<Override PartName="/xl/workbook.xml" ContentType="{ cs_ns-ct }.sheet.main+xml"/>|
-        && |<Override PartName="/xl/styles.xml" ContentType="{ cs_ns-ct }.styles+xml"/>| INTO TABLE lt_types.
-    INSERT |{ cv_xml_head }<workbook xmlns="{ cs_ns-main }" xmlns:r="{ cs_ns-rel }">|
-        && `<bookViews><workbookView/></bookViews><sheets>` INTO TABLE lt_book.
+    INSERT |{ cv_xml_head }<Types xmlns="{ cs_ns-types }">| INTO TABLE lt_types.
+    INSERT `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>`
+           INTO TABLE lt_types.
+    INSERT `<Default Extension="xml" ContentType="application/xml"/>` INTO TABLE lt_types.
+    INSERT |<Override PartName="/xl/workbook.xml" ContentType="{ cs_ns-ct }.sheet.main+xml"/>|
+           INTO TABLE lt_types.
+    INSERT |<Override PartName="/xl/styles.xml" ContentType="{ cs_ns-ct }.styles+xml"/>|
+           INTO TABLE lt_types.
+    INSERT |{ cv_xml_head }<workbook xmlns="{ cs_ns-main }" xmlns:r="{ cs_ns-rel }">| INTO TABLE lt_book.
+    INSERT `<bookViews><workbookView/></bookViews><sheets>` INTO TABLE lt_book.
     INSERT |{ cv_xml_head }<Relationships xmlns="{ cs_ns-pkg_rel }">| INTO TABLE lt_rels.
 
     LOOP AT mt_out_sheet REFERENCE INTO DATA(lr_sheet).
       DATA(lv_index) = sy-tabix.
       INSERT |<Override PartName="/xl/worksheets/sheet{ lv_index }.xml" ContentType="{ cs_ns-ct }.worksheet+xml"/>|
              INTO TABLE lt_types.
-      INSERT |<sheet name="{ zabaputil_cl_util_context=>c_escape_xml( lr_sheet->name ) }"|
-          && | sheetId="{ lv_index }" r:id="rId{ lv_index }"/>| INTO TABLE lt_book.
-      INSERT |<Relationship Id="rId{ lv_index }" Type="{ cs_ns-rel }/worksheet"|
-          && | Target="worksheets/sheet{ lv_index }.xml"/>| INTO TABLE lt_rels.
+      DATA(lv_name) = zabaputil_cl_util_context=>c_escape_xml( lr_sheet->name ).
+      INSERT |<sheet name="{ lv_name }" sheetId="{ lv_index }" r:id="rId{ lv_index }"/>| INTO TABLE lt_book.
+      INSERT |<Relationship Id="rId{ lv_index }" Type="{ cs_ns-rel }/worksheet"| INTO TABLE lt_rels.
+      INSERT | Target="worksheets/sheet{ lv_index }.xml"/>| INTO TABLE lt_rels.
       INSERT VALUE #( name    = |xl/worksheets/sheet{ lv_index }.xml|
                       content = lr_sheet->xml ) INTO TABLE lt_file.
 
@@ -1640,12 +1670,9 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
                INTO TABLE lt_types.
         INSERT VALUE #( name    = |xl/tables/table{ lv_table }.xml|
                         content = lr_sheet->table_xml ) INTO TABLE lt_file.
-        INSERT VALUE #(
-            name    = |xl/worksheets/_rels/sheet{ lv_index }.xml.rels|
-            content = zabaputil_cl_util_context=>conv_get_xstring_by_string(
-                          |{ cv_xml_head }<Relationships xmlns="{ cs_ns-pkg_rel }">|
-                       && |<Relationship Id="rId1" Type="{ cs_ns-rel }/table"|
-                       && | Target="../tables/table{ lv_table }.xml"/></Relationships>| ) ) INTO TABLE lt_file.
+        INSERT VALUE #( name    = |xl/worksheets/_rels/sheet{ lv_index }.xml.rels|
+                        content = rels_xml( kind   = `table`
+                                            target = |../tables/table{ lv_table }.xml| ) ) INTO TABLE lt_file.
       ENDIF.
     ENDLOOP.
 
@@ -1658,16 +1685,15 @@ CLASS zabaputil_cl_util_xlsx IMPLEMENTATION.
     ENDIF.
     INSERT `</workbook>` INTO TABLE lt_book.
     INSERT |<Relationship Id="rId{ lines( mt_out_sheet ) + 1 }" Type="{ cs_ns-rel }/styles" Target="styles.xml"/>|
-        && `</Relationships>` INTO TABLE lt_rels.
+           INTO TABLE lt_rels.
+    INSERT `</Relationships>` INTO TABLE lt_rels.
 
     INSERT VALUE #( name    = `[Content_Types].xml`
                     content = zabaputil_cl_util_context=>conv_get_xstring_by_string( concat_lines_of( lt_types ) ) )
            INTO lt_file INDEX 1.
     INSERT VALUE #( name    = `_rels/.rels`
-                    content = zabaputil_cl_util_context=>conv_get_xstring_by_string(
-                                  |{ cv_xml_head }<Relationships xmlns="{ cs_ns-pkg_rel }">|
-                               && |<Relationship Id="rId1" Type="{ cs_ns-rel }/officeDocument"|
-                               && | Target="xl/workbook.xml"/></Relationships>| ) )
+                    content = rels_xml( kind   = `officeDocument`
+                                        target = `xl/workbook.xml` ) )
            INTO lt_file INDEX 2.
     INSERT VALUE #( name    = `xl/workbook.xml`
                     content = zabaputil_cl_util_context=>conv_get_xstring_by_string( concat_lines_of( lt_book ) ) )
