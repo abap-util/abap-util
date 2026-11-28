@@ -163,6 +163,7 @@ The consumers with a manifest - each sync run goes through all of them:
 | --- | --- |
 | business-api | yes (`test.yaml`, job `sync`) |
 | abap2UI5, popups, range-filter, table-content-loader | no - run it here at sync time |
+| abap-cloud-gui (the XLSX copy only - its context class is its own, see its AGENTS.md) | no - run it here at sync time (manifest added 2026-11) |
 | layout-management, lock-manager, se16n, sql-console, table-maintenance | no - run it here at sync time (manifests added 2026-11) |
 
 A consumer that vendors a class of this catalog without a manifest is compared by hand until it gets one; add it to the table when it does.
